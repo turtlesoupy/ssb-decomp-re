@@ -214,3 +214,65 @@ void port_fighter_seed_vanilla(void)
 }
 
 #endif /* PORT */
+
+#ifdef PORT
+/* ========================================================================= */
+/*  OpenSmash pipeline: skeleton dump (SSB64_DUMP_SKELETON=<fkind>)          */
+/*                                                                           */
+/*  Emits one SKELDUMP line per joint: index, parent joint index, rest       */
+/*  world position, local translate, and DL pointer. The offline mesh        */
+/*  converter segments a generated T-pose mesh against this skeleton.       */
+/* ========================================================================= */
+
+extern void gmCollisionGetFighterPartsWorldPosition(DObj *main_dobj, Vec3f *vec);
+extern void port_log(const char *fmt, ...);
+
+void port_dump_skeleton(GObj *fighter_gobj)
+{
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    s32 i, p;
+
+    if (fp == NULL)
+    {
+        port_log("SKELDUMP: no FTStruct\n");
+        return;
+    }
+
+    port_log("SKELDUMP: begin fkind=%d costume=%d\n", (int)fp->fkind, (int)fp->costume);
+
+    for (i = 0; i < FTPARTS_JOINT_NUM_MAX; i++)
+    {
+        DObj *j = fp->joints[i];
+        s32 parent_idx = -1;
+        Vec3f world;
+
+        if (j == NULL)
+        {
+            continue;
+        }
+
+        if (j->parent != NULL)
+        {
+            for (p = 0; p < FTPARTS_JOINT_NUM_MAX; p++)
+            {
+                if (fp->joints[p] == j->parent)
+                {
+                    parent_idx = p;
+                    break;
+                }
+            }
+        }
+
+        world.x = world.y = world.z = 0.0f;
+        gmCollisionGetFighterPartsWorldPosition(j, &world);
+
+        port_log("SKELDUMP: joint=%d parent=%d world=(%.3f,%.3f,%.3f) local=(%.3f,%.3f,%.3f) dl=%p flags=0x%02x\n",
+                 (int)i, (int)parent_idx,
+                 world.x, world.y, world.z,
+                 j->translate.vec.f.x, j->translate.vec.f.y, j->translate.vec.f.z,
+                 (void *)j->dv, (unsigned)j->flags);
+    }
+
+    port_log("SKELDUMP: end fkind=%d\n", (int)fp->fkind);
+}
+#endif /* PORT */

@@ -265,6 +265,24 @@ void scVSBattleStartBattle(void)
 	gSCManagerSceneData.is_reset = FALSE;
 	gSCManagerSceneData.is_suddendeath = FALSE;
 
+#ifdef PORT
+	/* Handoff diagnostic for the "battle starts with no fighters" bug:
+	 * dump every slot's registration as received from the CSS/menu path. */
+	{
+		extern void port_log(const char *fmt, ...);
+		s32 dbg;
+		port_log("SSB64: VSBattle handoff gkind=%d type=%d pl=%d cp=%d\n",
+		         (int)gSCManagerBattleState->gkind, (int)gSCManagerBattleState->game_type,
+		         (int)gSCManagerBattleState->pl_count, (int)gSCManagerBattleState->cp_count);
+		for (dbg = 0; dbg < GMCOMMON_PLAYERS_MAX; dbg++)
+		{
+			SCPlayerData *pd = &gSCManagerBattleState->players[dbg];
+			port_log("SSB64: VSBattle slot=%d pkind=%d fkind=%d costume=%d stock=%d\n",
+			         (int)dbg, (int)pd->pkind, (int)pd->fkind, (int)pd->costume, (int)pd->stock_count);
+		}
+	}
+#endif
+
 	scVSBattleSetupFiles();
 
 #ifndef PORT

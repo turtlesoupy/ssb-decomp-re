@@ -7,6 +7,10 @@
 #include <string.h>
 #include <sys/debug.h>
 extern void port_log(const char *fmt, ...);
+/* Host libc (the decomp's own stdlib.h shadows the system header and has
+ * no getenv/atoi — declare the two we need for the skeleton-dump gate). */
+extern char *getenv(const char *);
+extern int atoi(const char *);
 #endif
 #ifdef PORT
 extern void portFixupFTAttributes(void *attr);
@@ -1096,6 +1100,18 @@ GObj* ftManagerMakeFighter(FTDesc *desc) // Create fighter
     }
 #ifdef PORT
     port_log("SSB64: ftManagerMakeFighter - return fkind=%d\n", fp->fkind);
+    /* OpenSmash pipeline: env-gated skeleton dump — logs each joint's rest
+     * world position, hierarchy and DL pointer so the offline mesh
+     * converter can segment a generated mesh against this skeleton.
+     * SSB64_DUMP_SKELETON=<fkind> selects the fighter kind to dump. */
+    {
+        extern void port_dump_skeleton(GObj *fighter_gobj);
+        const char *want = getenv("SSB64_DUMP_SKELETON");
+        if (want != NULL && atoi(want) == (int)fp->fkind)
+        {
+            port_dump_skeleton(fighter_gobj);
+        }
+    }
 #endif
     return fighter_gobj;
 }

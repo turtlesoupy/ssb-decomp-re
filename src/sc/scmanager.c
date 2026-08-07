@@ -969,6 +969,56 @@ void scManagerRunLoop(sb32 arg)
 		gSCManagerSceneData.scene_curr = nSCKindPlayersVS;
 		gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
 	}
+
+	/* OpenSmash pipeline: SSB64_BOOT_BATTLE="p1fkind,p2fkind,gkind" boots
+	 * straight into a VS match (P1 human, P2 CPU lv1, 5 stock, no timer)
+	 * — the mesh-iteration shortcut: no intro, no menus. */
+	{
+		extern char *getenv(const char *);
+		extern int sscanf(const char *, const char *, ...);
+		const char *bb = getenv("SSB64_BOOT_BATTLE");
+		if (bb != NULL)
+		{
+			int p1 = 0, p2 = 8, gk = 4; /* defaults: Mario vs Kirby, Dream Land */
+			int i;
+			sscanf(bb, "%d,%d,%d", &p1, &p2, &gk);
+
+			gSCManagerTransferBattleState.game_type = nSCBattleGameTypeRoyal;
+			gSCManagerTransferBattleState.gkind = (u8)gk;
+			gSCManagerTransferBattleState.is_team_battle = FALSE;
+			gSCManagerTransferBattleState.game_rules = 0x2;   /* stock */
+			gSCManagerTransferBattleState.pl_count = 1;
+			gSCManagerTransferBattleState.cp_count = 1;
+			gSCManagerTransferBattleState.time_limit = 99;
+			gSCManagerTransferBattleState.stocks = 4;         /* 0-based: 5 stocks */
+			gSCManagerTransferBattleState.handicap = 0;
+			gSCManagerTransferBattleState.is_team_attack = FALSE;
+			gSCManagerTransferBattleState.damage_ratio = 2;   /* 100% */
+			gSCManagerTransferBattleState.item_toggles = 0;
+			gSCManagerTransferBattleState.item_appearance_rate = 0;
+
+			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+			{
+				SCPlayerData *pd = &gSCManagerTransferBattleState.players[i];
+				pd->level = 1;
+				pd->handicap = 9;
+				pd->pkind = (i <= 1) ? (u8)i : 2;      /* 0=HMN,1=CPU,2=none */
+				pd->fkind = (i == 0) ? (u8)p1 : (u8)p2;
+				pd->team = (u8)i;
+				pd->player = (u8)i;
+				pd->costume = 0;
+				pd->shade = 0;
+				pd->color = (u8)i;
+				pd->tag = (u8)i;
+				pd->stock_count = (i <= 1) ? 4 : -1;
+			}
+
+			gSCManagerSceneData.gkind = (u8)gk;
+			gSCManagerSceneData.scene_curr = nSCKindVSBattle;
+			gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
+			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d\n", p1, p2, gk);
+		}
+	}
 	port_log("SSB64: scManagerRunLoop — controllers=%d scene=%d\n",
 	         (int)gSYControllerConnectedNum, (int)gSCManagerSceneData.scene_curr);
 #endif
@@ -1000,7 +1050,7 @@ void scManagerRunLoop(sb32 arg)
 		 * gate on, e.g. controller.c:208). */
 		for (s32 _p = 0; _p < GMCOMMON_PLAYERS_MAX; _p++) {
 			gSCManager1PGameBattleState.players[_p].fighter_gobj = NULL;
-			gSCManagerVSBattleState.players[_p].fighter_gobj = NULL;
+			gSCManagerTransferBattleState.players[_p].fighter_gobj = NULL;
 			gSCManagerTransferBattleState.players[_p].fighter_gobj = NULL;
 		}
 
@@ -1239,10 +1289,10 @@ void scManagerRunLoop(sb32 arg)
 							gSCManagerTransferBattleState.is_team_attack = TRUE;
 						}
 
-						gSCManagerVSBattleState.game_rules = 0x2;
-						gSCManagerVSBattleState.time_limit = 0;
-						gSCManagerVSBattleState.stocks = 3;
-						gSCManagerVSBattleState.gkind = nGRKindPupupu;
+						gSCManagerTransferBattleState.game_rules = 0x2;
+						gSCManagerTransferBattleState.time_limit = 0;
+						gSCManagerTransferBattleState.stocks = 3;
+						gSCManagerTransferBattleState.gkind = nGRKindPupupu;
 
 						for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
 						{
@@ -1290,7 +1340,7 @@ void scManagerRunLoop(sb32 arg)
 					if (port_get_comp_ruleset())
 					{
 						extern __typeof__(gSCManagerTransferBattleState) gSCManagerVSBattleState;
-						gSCManagerVSBattleState.time_limit = SCBATTLE_TIMELIMIT_INFINITE;
+						gSCManagerTransferBattleState.time_limit = SCBATTLE_TIMELIMIT_INFINITE;
 					}
 				}
 				break;
