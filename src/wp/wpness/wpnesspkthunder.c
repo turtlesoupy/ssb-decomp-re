@@ -450,7 +450,10 @@ GObj* wpNessPKThunderTrailMakeWeapon(GObj *head_gobj, Vec3f *pos, s32 trail_id)
 
     if (trail_id == 0)
     {
-        trail_wp->group_id = wpManagerGetGroupID(head_gobj, trail_gobj); // Bruh this doesn't any take arguments but it doesn't match otherwise
+        /* PORT: the matching decomp passes two bogus args here ("doesn't take
+         * arguments but it doesn't match otherwise") — WASM traps on
+         * signature-mismatched calls, so call it as declared. */
+        trail_wp->group_id = wpManagerGetGroupID();
     }
     else trail_wp->group_id = head_wp->group_id;
 

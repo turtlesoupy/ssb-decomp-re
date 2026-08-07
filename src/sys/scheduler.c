@@ -1,6 +1,10 @@
 #include "common.h"
 #include "scheduler.h"
 
+#ifdef PORT
+extern void port_log(const char *fmt, ...);
+#endif
+
 #include <sys/debug.h>
 #include <sys/main.h>
 #include <sys/video.h>

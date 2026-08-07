@@ -15,7 +15,11 @@ extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned in
 // // // // // // // // // // // //
 
 // WARNING: Intentionally erroneous declaration. Missing two u16 arguments after f32. HAL's mistake, not mine.
-extern void itMainSetFighterRelease(GObj*, Vec3f*, f32);
+/* PORT: declared with the true 5-arg signature. The original game (and the
+ * matching decomp) declares this 3-arg here — the last two args were garbage
+ * registers on N64. WASM traps on signature-mismatched calls, so the port
+ * passes explicit benign values at the call site instead. */
+extern void itMainSetFighterRelease(GObj*, Vec3f*, f32, u16, u16);
 
 // // // // // // // // // // // //
 //                               //
@@ -405,7 +409,7 @@ sb32 itLinkBombHoldProcUpdate(GObj *item_gobj)
 			// Update 3/23/2023: itMainSetFighterRelease matches as variadic. No comment.
 			// Update  7/2/2023: variadic match confirmed fake, so does this file really use an erroneous decleration?
 
-			itMainSetFighterRelease(item_gobj, &ip->physics.vel_air, 1.0F);
+			itMainSetFighterRelease(item_gobj, &ip->physics.vel_air, 1.0F, nFTStatusAttackIDItemThrow, 0);
 			itMainClearOwnerStats(item_gobj);
 			itLinkBombExplodeInitVars(item_gobj);
 		}

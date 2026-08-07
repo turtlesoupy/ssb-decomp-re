@@ -7,7 +7,7 @@
 #endif
 
 extern void *gSYSchedulerCurrentFramebuffer;
-extern syRdpSetViewport(void*, f32, f32, f32, f32);
+extern void syRdpSetViewport(void*, f32, f32, f32, f32); /* PORT: was implicit-int; real fn returns void (WASM traps on mismatch) */
 
 // // // // // // // // // // // //
 //                               //

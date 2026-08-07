@@ -898,9 +898,11 @@ extern "C"
 
 	/* Address translation routines and macros */
 
-#ifdef PORT
+#if defined(PORT) && !defined(__EMSCRIPTEN__)
+	/* 64-bit hosts: libultraship defines this as uintptr_t (8 bytes). */
 	extern u64 osVirtualToPhysical(void*);
 #else
+	/* N64 and wasm32: pointers are 4 bytes (WASM traps on signature mismatch). */
 	extern u32 osVirtualToPhysical(void*);
 #endif
 	extern void* osPhysicalToVirtual(u32);

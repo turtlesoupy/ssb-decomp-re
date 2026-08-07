@@ -1,5 +1,12 @@
 #include "controller.h"
 
+#ifdef PORT
+extern void port_log(const char *fmt, ...);
+#endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include <sys/main.h>
 #include <sys/scheduler.h>
 #include <missing_libultra.h>
@@ -260,8 +267,17 @@ void syControllerInitDevices(void)
     u8 pattern;
 
     osCreateMesgQueue(&sSYControllerInitMesgQueue, sSYControllerInitMesg, ARRAY_COUNT(sSYControllerInitMesg));
+#ifdef PORT
+    port_log("SSB64: Thread6 — mesg queue created, setting event mesg\n");
+#endif
     osSetEventMesg(OS_EVENT_SI, &sSYControllerInitMesgQueue, (OSMesg)1);
+#ifdef PORT
+    port_log("SSB64: Thread6 — event mesg set, calling osContInit\n");
+#endif
     osContInit(&sSYControllerInitMesgQueue, &pattern, sSYControllerDeviceStatuses);
+#ifdef PORT
+    port_log("SSB64: Thread6 — osContInit returned pattern=%d\n", (int)pattern);
+#endif
 
     for (i = 0; i < (ARRAY_COUNT(sSYControllerDeviceStatuses) + ARRAY_COUNT(sSYControllerMotorPfs)) / 2; i++)
     {
@@ -529,7 +545,13 @@ void syControllerThreadMain(void *unused)
 {
     OSMesg mesg;
 
+#ifdef PORT
+    port_log("SSB64: Thread6 — controller thread entered, initializing devices\n");
+#endif
     syControllerInitDevices();
+#ifdef PORT
+    port_log("SSB64: Thread6 — devices initialized\n");
+#endif
     sySchedulerAddClient(&sSYControllerClient, &sSYControllerEventMesgQueue, sSYControllerEventMesgs, ARRAY_COUNT(sSYControllerEventMesgs));
     osSendMesg(&gSYMainThreadingMesgQueue, (OSMesg)1, OS_MESG_NOBLOCK);
 
