@@ -293,6 +293,87 @@ void port_dump_skeleton(GObj *fighter_gobj)
 
     port_log("SKELDUMP: end fkind=%d\n", (int)fp->fkind);
 }
+
+/* ========================================================================= */
+/*  OpenSmash pipeline: per-frame joint matrix dump (SSB64_DUMP_FRAMES=<n>)  */
+/*                                                                           */
+/*  Called from ftMainProcParams (priority 0 = last fighter proc each        */
+/*  frame). For the first <n> tics after fighters exist, emits one FRM       */
+/*  line per live joint per fighter per frame with the full world frame      */
+/*  (origin + basis rows via the 4-point walker trick). The offline          */
+/*  viewer (pipeline/viewer.html) scrubs these to render injected bundles   */
+/*  frame-by-frame against the vanilla skeleton.                             */
+/* ========================================================================= */
+
+extern u32 sySchedulerGetTicCount(void);
+extern char *getenv(const char *);
+extern int atoi(const char *);
+
+void port_dump_frame(GObj *fighter_gobj)
+{
+    static int limit = -2;          /* -2 unchecked, -1 disabled, else tic budget */
+    static u32 start_tic = 0;
+    FTStruct *fp;
+    u32 tic;
+    s32 i;
+
+    if (limit == -2)
+    {
+        const char *e = getenv("SSB64_DUMP_FRAMES");
+        limit = (e != NULL) ? atoi(e) : -1;
+        if (limit > 0)
+        {
+            start_tic = sySchedulerGetTicCount();
+        }
+    }
+    if (limit <= 0)
+    {
+        return;
+    }
+
+    tic = sySchedulerGetTicCount();
+    if (tic - start_tic >= (u32)limit)
+    {
+        return;
+    }
+
+    fp = ftGetStruct(fighter_gobj);
+    if (fp == NULL)
+    {
+        return;
+    }
+
+    port_log("FRMH: t=%u pl=%d fk=%d st=%d\n",
+             (unsigned)(tic - start_tic), (int)fp->player, (int)fp->fkind,
+             (int)fp->status_id);
+
+    for (i = 0; i < FTPARTS_JOINT_NUM_MAX; i++)
+    {
+        DObj *j = fp->joints[i];
+        Vec3f o, bx, by, bz;
+
+        if (j == NULL)
+        {
+            continue;
+        }
+
+        o.x = o.y = o.z = 0.0f;
+        bx.x = 1.0f; bx.y = 0.0f; bx.z = 0.0f;
+        by.x = 0.0f; by.y = 1.0f; by.z = 0.0f;
+        bz.x = 0.0f; bz.y = 0.0f; bz.z = 1.0f;
+        gmCollisionGetFighterPartsWorldPosition(j, &o);
+        gmCollisionGetFighterPartsWorldPosition(j, &bx);
+        gmCollisionGetFighterPartsWorldPosition(j, &by);
+        gmCollisionGetFighterPartsWorldPosition(j, &bz);
+
+        port_log("FRM: t=%u pl=%d j=%d o=(%.4f,%.4f,%.4f) x=(%.4f,%.4f,%.4f) y=(%.4f,%.4f,%.4f) z=(%.4f,%.4f,%.4f)\n",
+                 (unsigned)(tic - start_tic), (int)fp->player, (int)i,
+                 o.x, o.y, o.z,
+                 bx.x - o.x, bx.y - o.y, bx.z - o.z,
+                 by.x - o.x, by.y - o.y, by.z - o.z,
+                 bz.x - o.x, bz.y - o.y, bz.z - o.z);
+    }
+}
 #endif /* PORT */
 
 #ifdef PORT
@@ -401,6 +482,7 @@ void port_inject_bundle(GObj *fighter_gobj)
     FTStruct *fp = ftGetStruct(fighter_gobj);
     const char *path = getenv("SSB64_INJECT_BUNDLE");
     const char *fk_env = getenv("SSB64_INJECT_FKIND");
+    const char *pl_env = getenv("SSB64_INJECT_PLAYER");
     int want_fkind = (fk_env != NULL) ? atoi(fk_env) : 0;
     FILE *f;
     char magic[4];
@@ -408,6 +490,12 @@ void port_inject_bundle(GObj *fighter_gobj)
     u32 replaced = 0;
 
     if (path == NULL || fp == NULL || (int)fp->fkind != want_fkind)
+    {
+        return;
+    }
+    /* Optional per-player gate: lets a vanilla twin of the same fkind
+     * fight alongside the injected one for A/B comparison. */
+    if (pl_env != NULL && (int)fp->player != atoi(pl_env))
     {
         return;
     }

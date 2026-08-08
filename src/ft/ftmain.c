@@ -3921,9 +3921,15 @@ void ftMainProcSearchHitAll(GObj *fighter_gobj)
 }
 
 // 0x800E61EC
+#ifdef PORT
+extern void port_dump_frame(GObj *fighter_gobj);
+#endif
 void ftMainProcParams(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
+#ifdef PORT
+    port_dump_frame(fighter_gobj);
+#endif
     s32 damage;
     s32 status_id;
     f32 knockback_resist;
