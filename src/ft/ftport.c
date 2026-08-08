@@ -397,6 +397,101 @@ extern char *getenv(const char *);
 extern int atoi(const char *);
 
 typedef struct OSBVert { s16 x, y, z; u8 r, g, b, pad; } OSBVert;
+typedef struct OSB3Vert { s16 x, y, z, s, t; u8 shade, pad; } OSB3Vert;
+
+/* ---- OSB3: textured parts. One shared RGBA16 (big-endian byte pairs)
+ * atlas uploaded via LoadTile (LoadBlock's 12-bit texel count tops out at
+ * 64x64; LoadTile's S10.2 coords reach 1024x1024). Combiner multiplies
+ * TEXEL0 * SHADE, with the baked diffuse in the vertex colors. */
+static Gfx *osbBuildPartDL3(FILE *f, u32 nbatches, u8 *tex, u32 tw, u32 th)
+{
+    Gfx *dl;
+    Gfx *g;
+    Vtx *vtx_all;
+    u32 total_v = 0, total_t = 0, b, voff;
+    long part_start = ftell(f);
+
+    for (b = 0; b < nbatches; b++)
+    {
+        u32 hdr[2];
+        if (fread(hdr, 4, 2, f) != 2) return NULL;
+        total_v += hdr[0];
+        total_t += hdr[1];
+        fseek(f, (long)(hdr[0] * sizeof(OSB3Vert) + hdr[1] * 4), SEEK_CUR);
+    }
+    fseek(f, part_start, SEEK_SET);
+
+    vtx_all = (Vtx *)malloc(sizeof(Vtx) * total_v);
+    dl = (Gfx *)malloc(sizeof(Gfx) * (24 + nbatches + total_t + 6));
+    if (vtx_all == NULL || dl == NULL)
+    {
+        return NULL;
+    }
+    g = dl;
+
+    gDPPipeSync(g++);
+    gDPSetCycleType(g++, G_CYC_1CYCLE);
+    gDPSetRenderMode(g++, G_RM_AA_ZB_OPA_SURF, G_RM_AA_ZB_OPA_SURF2);
+    gSPClearGeometryMode(g++, G_LIGHTING | G_TEXTURE_GEN | G_CULL_BOTH);
+    gSPSetGeometryMode(g++, G_SHADE | G_SHADING_SMOOTH | G_ZBUFFER);
+    gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_MODULATEIA);
+    gDPSetTexturePersp(g++, G_TP_PERSP);
+    gDPSetTextureFilter(g++, G_TF_BILERP);
+    gSPTexture(g++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
+
+    /* upload: SETTIMG -> load tile descriptor -> LOADTILE -> render tile */
+    gDPSetTextureImage(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, tw, tex);
+    gDPSetTile(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, (tw * 2) / 8, 0,
+               G_TX_LOADTILE, 0,
+               G_TX_CLAMP, 0, G_TX_NOLOD, G_TX_CLAMP, 0, G_TX_NOLOD);
+    gDPLoadSync(g++);
+    gDPLoadTile(g++, G_TX_LOADTILE, 0, 0, (tw - 1) << 2, (th - 1) << 2);
+    gDPPipeSync(g++);
+    gDPSetTile(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, (tw * 2) / 8, 0,
+               G_TX_RENDERTILE, 0,
+               G_TX_CLAMP, 0, G_TX_NOLOD, G_TX_CLAMP, 0, G_TX_NOLOD);
+    gDPSetTileSize(g++, G_TX_RENDERTILE, 0, 0, (tw - 1) << 2, (th - 1) << 2);
+
+    voff = 0;
+    for (b = 0; b < nbatches; b++)
+    {
+        u32 hdr[2];
+        u32 i;
+        OSB3Vert vraw[30];
+        u8 traw[4 * 512];
+
+        fread(hdr, 4, 2, f);
+        fread(vraw, sizeof(OSB3Vert), hdr[0], f);
+        fread(traw, 4, hdr[1], f);
+
+        for (i = 0; i < hdr[0]; i++)
+        {
+            Vtx *v = &vtx_all[voff + i];
+            v->v.ob[0] = vraw[i].x;
+            v->v.ob[1] = vraw[i].y;
+            v->v.ob[2] = vraw[i].z;
+            v->v.flag = 0;
+            v->v.tc[0] = vraw[i].s;
+            v->v.tc[1] = vraw[i].t;
+            v->v.cn[0] = vraw[i].shade;
+            v->v.cn[1] = vraw[i].shade;
+            v->v.cn[2] = vraw[i].shade;
+            v->v.cn[3] = 0xFF;
+        }
+        gSPVertex(g++, &vtx_all[voff], hdr[0], 0);
+        for (i = 0; i < hdr[1]; i++)
+        {
+            gSP1Triangle(g++, traw[i * 4 + 0], traw[i * 4 + 1], traw[i * 4 + 2], 0);
+        }
+        voff += hdr[0];
+    }
+
+    gDPPipeSync(g++);
+    gSPSetGeometryMode(g++, G_LIGHTING | G_CULL_BACK);
+    gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_MODULATEIA);
+    gSPEndDisplayList(g++);
+    return dl;
+}
 
 static Gfx *osbBuildPartDL(FILE *f, u32 nbatches)
 {
@@ -507,13 +602,48 @@ void port_inject_bundle(GObj *fighter_gobj)
         return;
     }
     fread(magic, 1, 4, f);
-    if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' || magic[3] != '2')
+    if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' ||
+        (magic[3] != '2' && magic[3] != '3'))
     {
-        port_log("OSB: bad magic in %s (want OSB2)\n", path);
+        port_log("OSB: bad magic in %s (want OSB2/OSB3)\n", path);
         fclose(f);
         return;
     }
     fread(&nparts, 4, 1, f);
+
+    if (magic[3] == '3')
+    {
+        u32 twh[2];
+        u8 *tex;
+        fread(twh, 4, 2, f);
+        tex = (u8 *)malloc(twh[0] * twh[1] * 2);
+        if (tex == NULL)
+        {
+            fclose(f);
+            return;
+        }
+        fread(tex, 2, twh[0] * twh[1], f);
+        port_log("OSB3: injecting %s (%d parts, %dx%d atlas) into fkind=%d\n",
+                 path, (int)nparts, (int)twh[0], (int)twh[1], (int)fp->fkind);
+
+        for (p = 0; p < nparts; p++)
+        {
+            u32 hdr[2];
+            Gfx *dl;
+
+            fread(hdr, 4, 2, f);
+            dl = osbBuildPartDL3(f, hdr[1], tex, twh[0], twh[1]);
+            if (dl != NULL && hdr[0] < FTPARTS_JOINT_NUM_MAX && fp->joints[hdr[0]] != NULL)
+            {
+                fp->joints[hdr[0]]->dl = dl;
+                replaced++;
+            }
+        }
+        fclose(f);
+        port_log("OSB3: replaced %d joint DLs\n", (int)replaced);
+        return;
+    }
+
     port_log("OSB: injecting %s (%d parts) into fkind=%d\n", path, (int)nparts, (int)fp->fkind);
 
     for (p = 0; p < nparts; p++)
