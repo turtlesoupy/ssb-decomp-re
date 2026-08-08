@@ -271,6 +271,24 @@ void port_dump_skeleton(GObj *fighter_gobj)
                  world.x, world.y, world.z,
                  j->translate.vec.f.x, j->translate.vec.f.y, j->translate.vec.f.z,
                  (void *)j->dv, (unsigned)j->flags);
+
+        /* v2: full world frame via the same walker — transform the three
+         * basis points and subtract the origin to get world basis rows. */
+        {
+            Vec3f bx, by, bz;
+            bx.x = 1.0f; bx.y = 0.0f; bx.z = 0.0f;
+            by.x = 0.0f; by.y = 1.0f; by.z = 0.0f;
+            bz.x = 0.0f; bz.y = 0.0f; bz.z = 1.0f;
+            gmCollisionGetFighterPartsWorldPosition(j, &bx);
+            gmCollisionGetFighterPartsWorldPosition(j, &by);
+            gmCollisionGetFighterPartsWorldPosition(j, &bz);
+            port_log("SKELDUMP2: joint=%d o=(%.4f,%.4f,%.4f) x=(%.4f,%.4f,%.4f) y=(%.4f,%.4f,%.4f) z=(%.4f,%.4f,%.4f)\n",
+                     (int)i,
+                     world.x, world.y, world.z,
+                     bx.x - world.x, bx.y - world.y, bx.z - world.z,
+                     by.x - world.x, by.y - world.y, by.z - world.z,
+                     bz.x - world.x, bz.y - world.y, bz.z - world.z);
+        }
     }
 
     port_log("SKELDUMP: end fkind=%d\n", (int)fp->fkind);
@@ -319,7 +337,7 @@ static Gfx *osbBuildPartDL(FILE *f, u32 nbatches)
     fseek(f, part_start, SEEK_SET);
 
     vtx_all = (Vtx *)malloc(sizeof(Vtx) * total_v);
-    dl = (Gfx *)malloc(sizeof(Gfx) * (8 + nbatches + total_t + 2));
+    dl = (Gfx *)malloc(sizeof(Gfx) * (8 + nbatches + total_t + 5));
     if (vtx_all == NULL || dl == NULL)
     {
         return NULL;
@@ -367,7 +385,13 @@ static Gfx *osbBuildPartDL(FILE *f, u32 nbatches)
         voff += hdr[0];
     }
 
+    /* Restore conventional fighter render state — downstream DLs (the
+     * drop shadow in particular) assume the combiner/geometry state the
+     * original material pipeline leaves behind; leaking G_CC_SHADE turns
+     * the shadow into a bright vertex-colored blob. */
     gDPPipeSync(g++);
+    gSPSetGeometryMode(g++, G_LIGHTING | G_CULL_BACK);
+    gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_MODULATEIA);
     gSPEndDisplayList(g++);
     return dl;
 }
