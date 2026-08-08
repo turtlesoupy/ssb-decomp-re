@@ -276,3 +276,148 @@ void port_dump_skeleton(GObj *fighter_gobj)
     port_log("SKELDUMP: end fkind=%d\n", (int)fp->fkind);
 }
 #endif /* PORT */
+
+#ifdef PORT
+/* ========================================================================= */
+/*  OpenSmash pipeline: runtime mesh injection (SSB64_INJECT_BUNDLE)         */
+/*                                                                           */
+/*  Loads an .osb v2 bundle (pipeline/convert_glb.py write_binary) and       */
+/*  replaces the fighter's per-joint display lists with runtime-built,      */
+/*  Gouraud-shaded vertex-colored geometry. Bundle triangles arrive          */
+/*  pre-batched into <=30-unique-vertex windows, so no triangle is ever      */
+/*  dropped at DL build time. Gated on SSB64_INJECT_BUNDLE=<path> and        */
+/*  SSB64_INJECT_FKIND (default 0 = Mario).                                  */
+/* ========================================================================= */
+
+#include <PR/gbi.h>
+#include <stdio.h>
+
+extern void *malloc(size_t);
+extern void free(void *);
+extern char *getenv(const char *);
+extern int atoi(const char *);
+
+typedef struct OSBVert { s16 x, y, z; u8 r, g, b, pad; } OSBVert;
+
+static Gfx *osbBuildPartDL(FILE *f, u32 nbatches)
+{
+    Gfx *dl;
+    Gfx *g;
+    Vtx *vtx_all;
+    u32 total_v = 0, total_t = 0, b, voff;
+    long part_start = ftell(f);
+
+    /* Pass 1: size the allocations from the batch headers. */
+    for (b = 0; b < nbatches; b++)
+    {
+        u32 hdr[2];
+        if (fread(hdr, 4, 2, f) != 2) return NULL;
+        total_v += hdr[0];
+        total_t += hdr[1];
+        fseek(f, (long)(hdr[0] * sizeof(OSBVert) + hdr[1] * 4), SEEK_CUR);
+    }
+    fseek(f, part_start, SEEK_SET);
+
+    vtx_all = (Vtx *)malloc(sizeof(Vtx) * total_v);
+    dl = (Gfx *)malloc(sizeof(Gfx) * (8 + nbatches + total_t + 2));
+    if (vtx_all == NULL || dl == NULL)
+    {
+        return NULL;
+    }
+    g = dl;
+
+    gDPPipeSync(g++);
+    gDPSetCycleType(g++, G_CYC_1CYCLE);
+    gDPSetCombineMode(g++, G_CC_SHADE, G_CC_SHADE);
+    gDPSetRenderMode(g++, G_RM_AA_ZB_OPA_SURF, G_RM_AA_ZB_OPA_SURF2);
+    gSPClearGeometryMode(g++, G_LIGHTING | G_TEXTURE_GEN | G_CULL_BOTH);
+    gSPSetGeometryMode(g++, G_SHADE | G_SHADING_SMOOTH | G_ZBUFFER);
+
+    voff = 0;
+    for (b = 0; b < nbatches; b++)
+    {
+        u32 hdr[2];
+        u32 i;
+        OSBVert vraw[30];
+        u8 traw[4 * 512];
+
+        fread(hdr, 4, 2, f);
+        fread(vraw, sizeof(OSBVert), hdr[0], f);
+        fread(traw, 4, hdr[1], f);
+
+        for (i = 0; i < hdr[0]; i++)
+        {
+            Vtx *v = &vtx_all[voff + i];
+            v->v.ob[0] = vraw[i].x;
+            v->v.ob[1] = vraw[i].y;
+            v->v.ob[2] = vraw[i].z;
+            v->v.flag = 0;
+            v->v.tc[0] = 0;
+            v->v.tc[1] = 0;
+            v->v.cn[0] = vraw[i].r;
+            v->v.cn[1] = vraw[i].g;
+            v->v.cn[2] = vraw[i].b;
+            v->v.cn[3] = 0xFF;
+        }
+        gSPVertex(g++, &vtx_all[voff], hdr[0], 0);
+        for (i = 0; i < hdr[1]; i++)
+        {
+            gSP1Triangle(g++, traw[i * 4 + 0], traw[i * 4 + 1], traw[i * 4 + 2], 0);
+        }
+        voff += hdr[0];
+    }
+
+    gDPPipeSync(g++);
+    gSPEndDisplayList(g++);
+    return dl;
+}
+
+void port_inject_bundle(GObj *fighter_gobj)
+{
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    const char *path = getenv("SSB64_INJECT_BUNDLE");
+    const char *fk_env = getenv("SSB64_INJECT_FKIND");
+    int want_fkind = (fk_env != NULL) ? atoi(fk_env) : 0;
+    FILE *f;
+    char magic[4];
+    u32 nparts, p;
+    u32 replaced = 0;
+
+    if (path == NULL || fp == NULL || (int)fp->fkind != want_fkind)
+    {
+        return;
+    }
+
+    f = fopen(path, "rb");
+    if (f == NULL)
+    {
+        port_log("OSB: cannot open %s\n", path);
+        return;
+    }
+    fread(magic, 1, 4, f);
+    if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' || magic[3] != '2')
+    {
+        port_log("OSB: bad magic in %s (want OSB2)\n", path);
+        fclose(f);
+        return;
+    }
+    fread(&nparts, 4, 1, f);
+    port_log("OSB: injecting %s (%d parts) into fkind=%d\n", path, (int)nparts, (int)fp->fkind);
+
+    for (p = 0; p < nparts; p++)
+    {
+        u32 hdr[2];
+        Gfx *dl;
+
+        fread(hdr, 4, 2, f);
+        dl = osbBuildPartDL(f, hdr[1]);
+        if (dl != NULL && hdr[0] < FTPARTS_JOINT_NUM_MAX && fp->joints[hdr[0]] != NULL)
+        {
+            fp->joints[hdr[0]]->dl = dl;
+            replaced++;
+        }
+    }
+    fclose(f);
+    port_log("OSB: replaced %d joint DLs\n", (int)replaced);
+}
+#endif /* PORT */

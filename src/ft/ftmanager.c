@@ -1106,11 +1106,14 @@ GObj* ftManagerMakeFighter(FTDesc *desc) // Create fighter
      * SSB64_DUMP_SKELETON=<fkind> selects the fighter kind to dump. */
     {
         extern void port_dump_skeleton(GObj *fighter_gobj);
+        extern void port_inject_bundle(GObj *fighter_gobj);
         const char *want = getenv("SSB64_DUMP_SKELETON");
         if (want != NULL && atoi(want) == (int)fp->fkind)
         {
             port_dump_skeleton(fighter_gobj);
         }
+        /* OpenSmash mesh injection (SSB64_INJECT_BUNDLE=<path.osb>). */
+        port_inject_bundle(fighter_gobj);
     }
 #endif
     return fighter_gobj;
