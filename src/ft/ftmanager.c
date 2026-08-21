@@ -599,6 +599,35 @@ void ftManagerInitFighter(GObj *fighter_gobj, FTDesc *desc)
 
     DObjGetStruct(fighter_gobj)->translate.vec.f = desc->pos;
     DObjGetStruct(fighter_gobj)->scale.vec.f.x = DObjGetStruct(fighter_gobj)->scale.vec.f.y = DObjGetStruct(fighter_gobj)->scale.vec.f.z = attr->size;
+#ifdef PORT
+    {
+        /* eval hook: SSB64_TEST_SCALE multiplies the spawn scale so the
+         * giant/scaled paths can be reproduced in the replay harness. */
+        extern char *getenv(const char *);
+        const char *ts = getenv("SSB64_TEST_SCALE");
+        f32 m = 0.0f;
+        if (ts != NULL)
+        {
+            /* tiny decimal parser (libc float parsing isn't reachable
+             * through the decomp's header shims) */
+            f32 frac = 0.0f, div = 1.0f; s32 seen_dot = 0; const char *c;
+            for (c = ts; *c; c++)
+            {
+                if (*c == '.') { seen_dot = 1; continue; }
+                if (*c < '0' || *c > '9') break;
+                if (!seen_dot) m = m * 10.0f + (f32)(*c - '0');
+                else { div *= 10.0f; frac += (f32)(*c - '0') / div; }
+            }
+            m += frac;
+        }
+        if (m > 0.0f)
+        {
+            DObjGetStruct(fighter_gobj)->scale.vec.f.x *= m;
+            DObjGetStruct(fighter_gobj)->scale.vec.f.y *= m;
+            DObjGetStruct(fighter_gobj)->scale.vec.f.z *= m;
+        }
+    }
+#endif
 
     if (fp->pkind != nFTPlayerKindDemo)
     {
