@@ -292,6 +292,96 @@ void port_dump_skeleton(GObj *fighter_gobj)
     }
 
     port_log("SKELDUMP: end fkind=%d\n", (int)fp->fkind);
+
+    /* ---- vanilla part-mesh dump: walk each joint's F3DEX2 DL, collect
+     * G_VTX vertex arrays, and log joint-local positions. Drives the
+     * offline converter's per-part proportion conforming (the generated
+     * mesh's parts are rescaled to the vanilla part bounds). Embedded
+     * pointers inside loaded model data are u32 relocation tokens —
+     * resolve via the port reloc table; host heap pointers (top 32 bits
+     * set) pass through. */
+    {
+        extern void *portRelocResolvePointerDebug(unsigned int token, const char *file, int line);
+
+        for (i = 0; i < FTPARTS_JOINT_NUM_MAX; i++)
+        {
+            DObj *j = fp->joints[i];
+            Gfx *stack[8];
+            int sp = 0;
+            Gfx *g;
+            int guard = 0;
+            int nv_total = 0;
+            int bailed = 0;
+
+            if (j == NULL || j->dv == NULL)
+            {
+                continue;
+            }
+            /* The loaded model DLs are raw N64 8-byte commands (u32 word
+             * pairs, already byte-swapped to host LE). Embedded addresses
+             * are port reloc TOKENS (0x00100883-style) — resolve them;
+             * anything the resolver rejects (e.g. dynamic segment-0xE
+             * heap refs) is skipped rather than followed. */
+            {
+                const u32 *w = (const u32 *)j->dv;
+                const u32 *wstack[8];
+
+                port_log("MESHWALK: joint=%d dl=%p\n", (int)i, (void *)w);
+
+                while (w != NULL && guard++ < 20000)
+                {
+                    u32 w0 = w[0], w1 = w[1];
+                    u32 op = w0 >> 24;
+
+                    if (op == 0xDF) /* G_ENDDL */
+                    {
+                        if (sp > 0) { w = wstack[--sp]; continue; }
+                        break;
+                    }
+                    else if (op == 0xDE) /* G_DL */
+                    {
+                        u32 nopush = (w0 >> 16) & 0xFF;
+                        const u32 *tgt =
+                            (const u32 *)portRelocResolvePointerDebug(w1, "ftport-meshdump-dl", 0);
+                        if (tgt != NULL)
+                        {
+                            if (nopush == 0 && sp < 8)
+                            {
+                                wstack[sp++] = w + 2;
+                            }
+                            w = tgt;
+                            continue;
+                        }
+                        /* unresolvable (dynamic segment ref) — skip */
+                    }
+                    else if (op == 0x01) /* G_VTX (F3DEX2) */
+                    {
+                        u32 n = (w0 >> 12) & 0xFF;
+                        const Vtx *v =
+                            (const Vtx *)portRelocResolvePointerDebug(w1, "ftport-meshdump-vtx", 0);
+                        u32 k;
+                        if (v != NULL && n <= 32)
+                        {
+                            for (k = 0; k < n; k++)
+                            {
+                                port_log("MESHV: j=%d x=%d y=%d z=%d\n", (int)i,
+                                         (int)v[k].v.ob[0], (int)v[k].v.ob[1], (int)v[k].v.ob[2]);
+                            }
+                            nv_total += (int)n;
+                        }
+                    }
+                    else if (!((op >= 0x01 && op <= 0x07) || op == 0x00 || op >= 0xD7))
+                    {
+                        bailed = 1;
+                        break;
+                    }
+                    w += 2;
+                }
+            }
+            port_log("MESHDUMP: joint=%d nverts=%d guard=%d bailed=%d\n",
+                     (int)i, nv_total, guard, bailed);
+        }
+    }
 }
 
 /* ========================================================================= */
@@ -343,9 +433,11 @@ void port_dump_frame(GObj *fighter_gobj)
         return;
     }
 
-    port_log("FRMH: t=%u pl=%d fk=%d st=%d\n",
+    port_log("FRMH: t=%u pl=%d fk=%d st=%d gobj=%p pkind=%d ghost=%d root_flags=0x%x\n",
              (unsigned)(tic - start_tic), (int)fp->player, (int)fp->fkind,
-             (int)fp->status_id);
+             (int)fp->status_id, (void *)fighter_gobj, (int)fp->pkind,
+             (int)fp->is_ghost,
+             (fp->joints[0] != NULL) ? (unsigned)fp->joints[0]->flags : 0xdead);
 
     for (i = 0; i < FTPARTS_JOINT_NUM_MAX; i++)
     {
@@ -398,17 +490,19 @@ extern int atoi(const char *);
 
 typedef struct OSBVert { s16 x, y, z; u8 r, g, b, pad; } OSBVert;
 typedef struct OSB3Vert { s16 x, y, z, s, t; u8 shade, pad; } OSB3Vert;
+typedef struct OSB4Vert { s16 x, y, z, s, t; s8 nx, ny, nz; u8 pad; } OSB4Vert;
 
 /* ---- OSB3: textured parts. One shared RGBA16 (big-endian byte pairs)
  * atlas uploaded via LoadTile (LoadBlock's 12-bit texel count tops out at
  * 64x64; LoadTile's S10.2 coords reach 1024x1024). Combiner multiplies
  * TEXEL0 * SHADE, with the baked diffuse in the vertex colors. */
-static Gfx *osbBuildPartDL3(FILE *f, u32 nbatches, u8 *tex, u32 tw, u32 th)
+static Gfx *osbBuildPartDL3(FILE *f, u32 nbatches, u8 *tex, u32 tw, u32 th, int lit)
 {
     Gfx *dl;
     Gfx *g;
     Vtx *vtx_all;
     u32 total_v = 0, total_t = 0, b, voff;
+    u32 vsize = lit ? sizeof(OSB4Vert) : sizeof(OSB3Vert);
     long part_start = ftell(f);
 
     for (b = 0; b < nbatches; b++)
@@ -417,12 +511,12 @@ static Gfx *osbBuildPartDL3(FILE *f, u32 nbatches, u8 *tex, u32 tw, u32 th)
         if (fread(hdr, 4, 2, f) != 2) return NULL;
         total_v += hdr[0];
         total_t += hdr[1];
-        fseek(f, (long)(hdr[0] * sizeof(OSB3Vert) + hdr[1] * 4), SEEK_CUR);
+        fseek(f, (long)(hdr[0] * vsize + hdr[1] * 4), SEEK_CUR);
     }
     fseek(f, part_start, SEEK_SET);
 
     vtx_all = (Vtx *)malloc(sizeof(Vtx) * total_v);
-    dl = (Gfx *)malloc(sizeof(Gfx) * (24 + nbatches + total_t + 6));
+    dl = (Gfx *)malloc(sizeof(Gfx) * (32 + nbatches + total_t + 6));
     if (vtx_all == NULL || dl == NULL)
     {
         return NULL;
@@ -430,11 +524,42 @@ static Gfx *osbBuildPartDL3(FILE *f, u32 nbatches, u8 *tex, u32 tw, u32 th)
     g = dl;
 
     gDPPipeSync(g++);
-    gDPSetCycleType(g++, G_CYC_1CYCLE);
-    gDPSetRenderMode(g++, G_RM_AA_ZB_OPA_SURF, G_RM_AA_ZB_OPA_SURF2);
-    gSPClearGeometryMode(g++, G_LIGHTING | G_TEXTURE_GEN | G_CULL_BOTH);
-    gSPSetGeometryMode(g++, G_SHADE | G_SHADING_SMOOTH | G_ZBUFFER);
-    gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_MODULATEIA);
+    if (!lit)
+    {
+        gDPSetCycleType(g++, G_CYC_1CYCLE);
+        gDPSetRenderMode(g++, G_RM_AA_ZB_OPA_SURF, G_RM_AA_ZB_OPA_SURF2);
+    }
+    if (lit)
+    {
+        /* OSB4: real N64 lighting with our OWN neutral lights. The vanilla
+         * material pipeline programs LIGHT_1 with the part's MATERIAL
+         * color (untextured vanilla parts are colored by their lights);
+         * inheriting that state multiplies our already-colored texels by
+         * the vanilla part tint (~color squared) — the whole model read
+         * dark and over-saturated. White key + gray ambient keeps the
+         * texture as the single source of color. */
+        static Lights1 sOsbLights = gdSPDefLights1(
+            145, 145, 145,        /* ambient */
+            255, 255, 255,        /* diffuse white */
+            45, 95, 70);          /* key from front-top */
+        gSPClearGeometryMode(g++, G_TEXTURE_GEN | G_CULL_BOTH);
+        gSPSetGeometryMode(g++, G_LIGHTING | G_SHADE | G_SHADING_SMOOTH | G_ZBUFFER);
+        gSPSetLights1(g++, sOsbLights);
+        /* Inherit the fighter pipeline's 2-CYCLE + G_RM_FOG_PRIM_A render
+         * state (ftDisplayMain sets it right before the joint DLs, with
+         * the stage-light / colanim-flash color loaded as the fog/env
+         * color). Cycle 1 modulates our texture; cycle 2 passes through
+         * so the blender applies the fog wash exactly like vanilla
+         * fighter parts. Overriding cycle/render mode here was what made
+         * the injected fighter ignore stage tint and hit flashes. */
+        gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_PASS2);
+    }
+    else
+    {
+        gSPClearGeometryMode(g++, G_LIGHTING | G_TEXTURE_GEN | G_CULL_BOTH);
+        gSPSetGeometryMode(g++, G_SHADE | G_SHADING_SMOOTH | G_ZBUFFER);
+        gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_MODULATEIA);
+    }
     gDPSetTexturePersp(g++, G_TP_PERSP);
     gDPSetTextureFilter(g++, G_TF_BILERP);
     gSPTexture(g++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
@@ -457,26 +582,44 @@ static Gfx *osbBuildPartDL3(FILE *f, u32 nbatches, u8 *tex, u32 tw, u32 th)
     {
         u32 hdr[2];
         u32 i;
-        OSB3Vert vraw[30];
+        OSB3Vert vraw3[30];
+        OSB4Vert vraw4[30];
         u8 traw[4 * 512];
 
         fread(hdr, 4, 2, f);
-        fread(vraw, sizeof(OSB3Vert), hdr[0], f);
+        if (lit) fread(vraw4, sizeof(OSB4Vert), hdr[0], f);
+        else     fread(vraw3, sizeof(OSB3Vert), hdr[0], f);
         fread(traw, 4, hdr[1], f);
 
         for (i = 0; i < hdr[0]; i++)
         {
             Vtx *v = &vtx_all[voff + i];
-            v->v.ob[0] = vraw[i].x;
-            v->v.ob[1] = vraw[i].y;
-            v->v.ob[2] = vraw[i].z;
-            v->v.flag = 0;
-            v->v.tc[0] = vraw[i].s;
-            v->v.tc[1] = vraw[i].t;
-            v->v.cn[0] = vraw[i].shade;
-            v->v.cn[1] = vraw[i].shade;
-            v->v.cn[2] = vraw[i].shade;
-            v->v.cn[3] = 0xFF;
+            if (lit)
+            {
+                v->n.ob[0] = vraw4[i].x;
+                v->n.ob[1] = vraw4[i].y;
+                v->n.ob[2] = vraw4[i].z;
+                v->n.flag = 0;
+                v->n.tc[0] = vraw4[i].s;
+                v->n.tc[1] = vraw4[i].t;
+                v->n.n[0] = vraw4[i].nx;
+                v->n.n[1] = vraw4[i].ny;
+                v->n.n[2] = vraw4[i].nz;
+                v->n.a = 0xFF;
+            }
+            else
+            {
+                v->v.ob[0] = vraw3[i].x;
+                v->v.ob[1] = vraw3[i].y;
+                v->v.ob[2] = vraw3[i].z;
+                v->v.flag = 0;
+                v->v.tc[0] = vraw3[i].s;
+                v->v.tc[1] = vraw3[i].t;
+                v->v.cn[0] = vraw3[i].shade;
+                v->v.cn[1] = vraw3[i].shade;
+                v->v.cn[2] = vraw3[i].shade;
+                v->v.cn[3] = 0xFF;
+            }
         }
         gSPVertex(g++, &vtx_all[voff], hdr[0], 0);
         for (i = 0; i < hdr[1]; i++)
@@ -572,6 +715,395 @@ static Gfx *osbBuildPartDL(FILE *f, u32 nbatches)
     return dl;
 }
 
+
+/* ========================================================================= */
+/*  OSB5: CPU-skinned injected mesh (true smooth skinning).                  */
+/*                                                                           */
+/*  The whole generated mesh lives in ONE display list attached to joint 0   */
+/*  (TopN). Every frame, port_osb5_skin_update() recomputes each vertex      */
+/*  with full multi-bone LBS from the live joint matrices — the same         */
+/*  deformation model the rigging provider previews — so joints never        */
+/*  open a gap. Spawn-time inverse bind is captured at inject.               */
+/* ========================================================================= */
+
+typedef struct OSB5Vert { f32 x, y, z; s16 s, t; u8 j[4]; u8 w[4]; s8 n[3]; u8 pad; } OSB5Vert;
+
+typedef struct OSB5State
+{
+    s32 njoints;
+    s32 nverts;
+    u32 joint_ids[32];
+    OSB5Vert *src;          /* source verts, spawn-world space */
+    f32 (*bind_local)[4][3];/* per vert, per influence: joint-local coords */
+    f32 (*bind_nrm)[4][3];  /* per vert, per influence: joint-local normal */
+    Vtx *vtx;               /* live Vtx array the DL renders */
+    GObj *owner;
+} OSB5State;
+
+static OSB5State sOsb5;
+
+static void osb5_joint_frame(FTStruct *fp, s32 joint, f32 o[3], f32 m[3][3])
+{
+    DObj *j = fp->joints[joint];
+    Vec3f vo, vx, vy, vz;
+    vo.x = vo.y = vo.z = 0.0f;
+    vx.x = 1.0f; vx.y = 0.0f; vx.z = 0.0f;
+    vy.x = 0.0f; vy.y = 1.0f; vy.z = 0.0f;
+    vz.x = 0.0f; vz.y = 0.0f; vz.z = 1.0f;
+    gmCollisionGetFighterPartsWorldPosition(j, &vo);
+    gmCollisionGetFighterPartsWorldPosition(j, &vx);
+    gmCollisionGetFighterPartsWorldPosition(j, &vy);
+    gmCollisionGetFighterPartsWorldPosition(j, &vz);
+    o[0] = vo.x; o[1] = vo.y; o[2] = vo.z;
+    /* columns = transformed basis vectors (local -> world) */
+    m[0][0] = vx.x - vo.x; m[1][0] = vx.y - vo.y; m[2][0] = vx.z - vo.z;
+    m[0][1] = vy.x - vo.x; m[1][1] = vy.y - vo.y; m[2][1] = vy.z - vo.z;
+    m[0][2] = vz.x - vo.x; m[1][2] = vz.y - vo.y; m[2][2] = vz.z - vo.z;
+}
+
+static void osb5_inv3(f32 m[3][3], f32 out[3][3])
+{
+    f32 a = m[0][0], b = m[0][1], c = m[0][2];
+    f32 d = m[1][0], e = m[1][1], f = m[1][2];
+    f32 g = m[2][0], h = m[2][1], i = m[2][2];
+    f32 A = e*i - f*h, B = -(d*i - f*g), C = d*h - e*g;
+    f32 det = a*A + b*B + c*C;
+    if (det > -1e-9f && det < 1e-9f) det = 1e-9f;
+    out[0][0] = A/det;            out[0][1] = -(b*i - c*h)/det;  out[0][2] = (b*f - c*e)/det;
+    out[1][0] = B/det;            out[1][1] = (a*i - c*g)/det;   out[1][2] = -(a*f - c*d)/det;
+    out[2][0] = C/det;            out[2][1] = -(a*h - b*g)/det;  out[2][2] = (a*e - b*d)/det;
+}
+
+void port_osb5_skin_update(GObj *fighter_gobj)
+{
+    FTStruct *fp;
+    f32 jo[32][3], jm[32][3][3];
+    f32 t0o[3], t0m[3][3], t0inv[3][3];
+    s32 k, i;
+
+    if (sOsb5.vtx == NULL || sOsb5.owner != fighter_gobj)
+    {
+        return;
+    }
+    fp = ftGetStruct(fighter_gobj);
+    if (fp == NULL) return;
+
+    for (k = 0; k < sOsb5.njoints; k++)
+    {
+        s32 jid = (s32)sOsb5.joint_ids[k];
+        if (fp->joints[jid] == NULL) return;
+        osb5_joint_frame(fp, jid, jo[k], jm[k]);
+    }
+    if (fp->joints[0] == NULL) return;
+    osb5_joint_frame(fp, 0, t0o, t0m);
+    osb5_inv3(t0m, t0inv);
+
+    for (i = 0; i < sOsb5.nverts; i++)
+    {
+        OSB5Vert *v = &sOsb5.src[i];
+        f32 acc[3] = {0.0f, 0.0f, 0.0f};
+        f32 nacc[3] = {0.0f, 0.0f, 0.0f};
+        f32 wl[3], nw[3], nl[3], nlen, wsum = 0.0f;
+        s32 t;
+        for (t = 0; t < 4; t++)
+        {
+            f32 w = (f32)v->w[t] / 255.0f;
+            f32 *bl, *bn;
+            s32 kk = v->j[t];
+            if (w <= 0.0f) continue;
+            bl = sOsb5.bind_local[i][t];
+            bn = sOsb5.bind_nrm[i][t];
+            acc[0] += w * (jm[kk][0][0]*bl[0] + jm[kk][0][1]*bl[1] + jm[kk][0][2]*bl[2] + jo[kk][0]);
+            acc[1] += w * (jm[kk][1][0]*bl[0] + jm[kk][1][1]*bl[1] + jm[kk][1][2]*bl[2] + jo[kk][1]);
+            acc[2] += w * (jm[kk][2][0]*bl[0] + jm[kk][2][1]*bl[1] + jm[kk][2][2]*bl[2] + jo[kk][2]);
+            nacc[0] += w * (jm[kk][0][0]*bn[0] + jm[kk][0][1]*bn[1] + jm[kk][0][2]*bn[2]);
+            nacc[1] += w * (jm[kk][1][0]*bn[0] + jm[kk][1][1]*bn[1] + jm[kk][1][2]*bn[2]);
+            nacc[2] += w * (jm[kk][2][0]*bn[0] + jm[kk][2][1]*bn[1] + jm[kk][2][2]*bn[2]);
+            wsum += w;
+        }
+        if (wsum > 0.0f)
+        {
+            acc[0] /= wsum; acc[1] /= wsum; acc[2] /= wsum;
+        }
+        wl[0] = acc[0] - t0o[0]; wl[1] = acc[1] - t0o[1]; wl[2] = acc[2] - t0o[2];
+        sOsb5.vtx[i].n.ob[0] = (short)(t0inv[0][0]*wl[0] + t0inv[0][1]*wl[1] + t0inv[0][2]*wl[2]);
+        sOsb5.vtx[i].n.ob[1] = (short)(t0inv[1][0]*wl[0] + t0inv[1][1]*wl[1] + t0inv[1][2]*wl[2]);
+        sOsb5.vtx[i].n.ob[2] = (short)(t0inv[2][0]*wl[0] + t0inv[2][1]*wl[1] + t0inv[2][2]*wl[2]);
+        /* normals: same LBS rotation, back to joint-0 local (the DL's
+         * space), renormalized to s8 so lighting tracks the pose. */
+        nw[0] = t0inv[0][0]*nacc[0] + t0inv[0][1]*nacc[1] + t0inv[0][2]*nacc[2];
+        nw[1] = t0inv[1][0]*nacc[0] + t0inv[1][1]*nacc[1] + t0inv[1][2]*nacc[2];
+        nw[2] = t0inv[2][0]*nacc[0] + t0inv[2][1]*nacc[1] + t0inv[2][2]*nacc[2];
+        nlen = sqrtf(nw[0]*nw[0] + nw[1]*nw[1] + nw[2]*nw[2]);
+        if (nlen > 1e-6f)
+        {
+            nl[0] = nw[0] * (127.0f / nlen);
+            nl[1] = nw[1] * (127.0f / nlen);
+            nl[2] = nw[2] * (127.0f / nlen);
+            sOsb5.vtx[i].n.n[0] = (s8)nl[0];
+            sOsb5.vtx[i].n.n[1] = (s8)nl[1];
+            sOsb5.vtx[i].n.n[2] = (s8)nl[2];
+        }
+    }
+}
+
+static void osb5_reset_windows(void);
+
+static void osb5_load(FTStruct *fp, FILE *f)
+{
+    u32 hdr[5];
+    u32 njoints, nverts, ntris, tw, th;
+    u8 *tex;
+    Gfx *dl, *g;
+    Lights1 *lt;
+    u32 i, k;
+    f32 jo[32][3], jm[32][3][3], jinv[32][3][3];
+
+    /* a fighter is spawned many times per session (select screens,
+     * respawns, results); each attach must start with a fresh window
+     * table or the 512-slot cap fills after ~3 attaches and the new
+     * mesh renders empty. */
+    osb5_reset_windows();
+
+    fread(hdr, 4, 5, f);
+    njoints = hdr[0]; nverts = hdr[1]; ntris = hdr[2]; tw = hdr[3]; th = hdr[4];
+    if (njoints > 32) { port_log("OSB5: too many joints\n"); return; }
+
+    sOsb5.njoints = (s32)njoints;
+    sOsb5.nverts = (s32)nverts;
+    fread(sOsb5.joint_ids, 4, njoints, f);
+
+    tex = (u8 *)malloc(tw * th * 2);
+    fread(tex, 2, tw * th, f);
+
+    sOsb5.src = (OSB5Vert *)malloc(sizeof(OSB5Vert) * nverts);
+    fread(sOsb5.src, sizeof(OSB5Vert), nverts, f);
+
+    /* inverse bind: prefer the bind skeleton embedded in the bundle
+     * (the pose the verts were authored against). Binding to the LIVE
+     * pose only works if the mesh attaches at exactly that pose — in
+     * real play it attaches mid entry-animation and limbs fly off. */
+    {
+        long vpos = ftell(f);
+        char tag[4] = {0, 0, 0, 0};
+        s32 have_bind = 0;
+        fseek(f, (long)ntris * 8, SEEK_CUR);
+        if (fread(tag, 1, 4, f) == 4 && tag[0] == 'B' && tag[1] == 'I' && tag[2] == 'N' && tag[3] == 'D')
+        {
+            f32 fb[12];
+            have_bind = 1;
+            for (k = 0; k < njoints; k++)
+            {
+                if (fread(fb, 4, 12, f) != 12) { have_bind = 0; break; }
+                jo[k][0] = fb[0]; jo[k][1] = fb[1]; jo[k][2] = fb[2];
+                jm[k][0][0] = fb[3]; jm[k][0][1] = fb[4]; jm[k][0][2] = fb[5];
+                jm[k][1][0] = fb[6]; jm[k][1][1] = fb[7]; jm[k][1][2] = fb[8];
+                jm[k][2][0] = fb[9]; jm[k][2][1] = fb[10]; jm[k][2][2] = fb[11];
+                osb5_inv3(jm[k], jinv[k]);
+            }
+        }
+        fseek(f, vpos, SEEK_SET);
+        if (have_bind)
+        {
+            port_log("OSB5: using embedded bind skeleton\n");
+        }
+        else
+        {
+            for (k = 0; k < njoints; k++)
+            {
+                s32 jid = (s32)sOsb5.joint_ids[k];
+                if (fp->joints[jid] == NULL) { port_log("OSB5: missing joint %d\n", jid); return; }
+                osb5_joint_frame(fp, jid, jo[k], jm[k]);
+                osb5_inv3(jm[k], jinv[k]);
+            }
+        }
+    }
+    sOsb5.bind_local = malloc(sizeof(*sOsb5.bind_local) * nverts);
+    for (i = 0; i < nverts; i++)
+    {
+        OSB5Vert *v = &sOsb5.src[i];
+        s32 t;
+        for (t = 0; t < 4; t++)
+        {
+            s32 kk = v->j[t];
+            f32 d0 = v->x - jo[kk][0], d1 = v->y - jo[kk][1], d2 = v->z - jo[kk][2];
+            sOsb5.bind_local[i][t][0] = jinv[kk][0][0]*d0 + jinv[kk][0][1]*d1 + jinv[kk][0][2]*d2;
+            sOsb5.bind_local[i][t][1] = jinv[kk][1][0]*d0 + jinv[kk][1][1]*d1 + jinv[kk][1][2]*d2;
+            sOsb5.bind_local[i][t][2] = jinv[kk][2][0]*d0 + jinv[kk][2][1]*d1 + jinv[kk][2][2]*d2;
+        }
+    }
+    sOsb5.bind_nrm = malloc(sizeof(*sOsb5.bind_nrm) * nverts);
+    for (i = 0; i < nverts; i++)
+    {
+        OSB5Vert *v = &sOsb5.src[i];
+        f32 n0 = (f32)v->n[0], n1 = (f32)v->n[1], n2 = (f32)v->n[2];
+        s32 t;
+        for (t = 0; t < 4; t++)
+        {
+            s32 kk = v->j[t];
+            sOsb5.bind_nrm[i][t][0] = jinv[kk][0][0]*n0 + jinv[kk][0][1]*n1 + jinv[kk][0][2]*n2;
+            sOsb5.bind_nrm[i][t][1] = jinv[kk][1][0]*n0 + jinv[kk][1][1]*n1 + jinv[kk][1][2]*n2;
+            sOsb5.bind_nrm[i][t][2] = jinv[kk][2][0]*n0 + jinv[kk][2][1]*n1 + jinv[kk][2][2]*n2;
+        }
+    }
+
+    /* live Vtx array + one DL on joint 0; st/normals static, ob updated
+     * per frame by port_osb5_skin_update(). */
+    sOsb5.vtx = (Vtx *)malloc(sizeof(Vtx) * nverts);
+    for (i = 0; i < nverts; i++)
+    {
+        OSB5Vert *v = &sOsb5.src[i];
+        sOsb5.vtx[i].n.ob[0] = 0; sOsb5.vtx[i].n.ob[1] = 0; sOsb5.vtx[i].n.ob[2] = 0;
+        sOsb5.vtx[i].n.flag = 0;
+        sOsb5.vtx[i].n.tc[0] = v->s; sOsb5.vtx[i].n.tc[1] = v->t;
+        sOsb5.vtx[i].n.n[0] = v->n[0]; sOsb5.vtx[i].n.n[1] = v->n[1]; sOsb5.vtx[i].n.n[2] = v->n[2];
+        sOsb5.vtx[i].n.a = 0xFF;
+    }
+
+    dl = (Gfx *)malloc(sizeof(Gfx) * (32 + ntris * 2 + nverts / 8));
+    g = dl;
+    {
+        static Lights1 sOsb5Lights = gdSPDefLights1(145, 145, 145, 255, 255, 255, 45, 95, 70);
+        u16 *traw = (u16 *)malloc(ntris * 8);
+        fread(traw, 8, ntris, f);
+
+        gDPPipeSync(g++);
+        gSPClearGeometryMode(g++, G_TEXTURE_GEN | G_CULL_BOTH);
+        gSPSetGeometryMode(g++, G_LIGHTING | G_SHADE | G_SHADING_SMOOTH | G_ZBUFFER);
+        gSPSetLights1(g++, sOsb5Lights);
+        gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_PASS2);
+        gDPSetTexturePersp(g++, G_TP_PERSP);
+        gDPSetTextureFilter(g++, G_TF_BILERP);
+        gSPTexture(g++, 0xFFFF, 0xFFFF, 0, G_TX_RENDERTILE, G_ON);
+        gDPSetTextureImage(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, tw, tex);
+        gDPSetTile(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, (tw * 2) / 8, 0,
+                   G_TX_LOADTILE, 0, G_TX_CLAMP, 0, G_TX_NOLOD, G_TX_CLAMP, 0, G_TX_NOLOD);
+        gDPLoadSync(g++);
+        gDPLoadTile(g++, G_TX_LOADTILE, 0, 0, (tw - 1) << 2, (th - 1) << 2);
+        gDPPipeSync(g++);
+        gDPSetTile(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, (tw * 2) / 8, 0,
+                   G_TX_RENDERTILE, 0, G_TX_CLAMP, 0, G_TX_NOLOD, G_TX_CLAMP, 0, G_TX_NOLOD);
+        gDPSetTileSize(g++, G_TX_RENDERTILE, 0, 0, (tw - 1) << 2, (th - 1) << 2);
+
+        /* window the verts 30 at a time; tris indexed within windows.
+         * Reorder: emit tris grouped by vertex window of their max index.
+         * Simple approach: process tris in order, filling windows. */
+        {
+            u32 done = 0;
+            while (done < ntris)
+            {
+                s32 *map = (s32 *)malloc(sizeof(s32) * nverts);
+                u32 count = 0, twin = 0;
+                u32 start = done;
+                for (i = 0; i < nverts; i++) map[i] = -1;
+                while (done < ntris)
+                {
+                    u16 *t3 = &traw[done * 4];
+                    u32 need = 0, t;
+                    for (t = 0; t < 3; t++) if (map[t3[t]] < 0) need++;
+                    if (count + need > 30) break;
+                    for (t = 0; t < 3; t++)
+                        if (map[t3[t]] < 0) map[t3[t]] = (s32)count++;
+                    done++;
+                    twin++;
+                }
+                if (twin == 0) break;
+                /* window vtx list */
+                {
+                    static Vtx *winptrs[512];
+                    static u32 nwin = 0;
+                    Vtx *wv = (Vtx *)malloc(sizeof(Vtx) * count);
+                    (void)winptrs; (void)nwin;
+                    /* record mapping so skin update can copy: simpler —
+                     * keep per-window index list and copy in update. */
+                    {
+                        /* store window remap into a global table */
+                        extern void osb5_add_window(Vtx *wv, s32 *map_idx, u32 count);
+                        s32 *mi = (s32 *)malloc(sizeof(s32) * count);
+                        for (i = 0; i < nverts; i++)
+                            if (map[i] >= 0) mi[map[i]] = (s32)i;
+                        osb5_add_window(wv, mi, count);
+                    }
+                    for (i = 0; i < count; i++) { }
+                    gSPVertex(g++, wv, count, 0);
+                    for (i = start; i < done; i++)
+                    {
+                        u16 *t3 = &traw[i * 4];
+                        gSP1Triangle(g++, map[t3[0]], map[t3[1]], map[t3[2]], 0);
+                    }
+                }
+            }
+        }
+        free(traw);
+    }
+    gDPPipeSync(g++);
+    gSPSetGeometryMode(g++, G_LIGHTING | G_CULL_BACK);
+    gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_MODULATEIA);
+    gSPEndDisplayList(g++);
+
+    /* attach: joint 0 renders the whole mesh; blank every other joint DL */
+    {
+        static Gfx sNullDL[2];
+        Gfx *ng = sNullDL;
+        s32 jj;
+        gSPEndDisplayList(ng++);
+        for (jj = 1; jj < FTPARTS_JOINT_NUM_MAX; jj++)
+        {
+            if (fp->joints[jj] != NULL && fp->joints[jj]->dv != NULL)
+            {
+                fp->joints[jj]->dl = sNullDL;
+            }
+        }
+        fp->joints[0]->dl = dl;
+    }
+    sOsb5.owner = fp->fighter_gobj;
+    port_log("OSB5: skinned mesh attached (%u verts, %u tris, %u joints)\n",
+             nverts, ntris, njoints);
+    port_osb5_skin_update(fp->fighter_gobj);
+}
+
+/* window table: skin update copies skinned verts into window arrays */
+typedef struct { Vtx *wv; s32 *idx; u32 count; } OSB5Window;
+static OSB5Window sOsb5Windows[512];
+static u32 sOsb5NumWindows = 0;
+
+static void osb5_reset_windows(void)
+{
+    u32 w;
+    for (w = 0; w < sOsb5NumWindows; w++)
+    {
+        free(sOsb5Windows[w].idx);
+        sOsb5Windows[w].idx = NULL;
+        sOsb5Windows[w].wv = NULL;   /* referenced by the previous DL; leak it */
+    }
+    sOsb5NumWindows = 0;
+}
+
+void osb5_add_window(Vtx *wv, s32 *map_idx, u32 count)
+{
+    if (sOsb5NumWindows < 512)
+    {
+        sOsb5Windows[sOsb5NumWindows].wv = wv;
+        sOsb5Windows[sOsb5NumWindows].idx = map_idx;
+        sOsb5Windows[sOsb5NumWindows].count = count;
+        sOsb5NumWindows++;
+    }
+}
+
+void port_osb5_copy_windows(void)
+{
+    u32 w, i;
+    if (sOsb5.vtx == NULL) return;
+    for (w = 0; w < sOsb5NumWindows; w++)
+    {
+        OSB5Window *win = &sOsb5Windows[w];
+        for (i = 0; i < win->count; i++)
+        {
+            win->wv[i] = sOsb5.vtx[win->idx[i]];
+        }
+    }
+}
+
 void port_inject_bundle(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
@@ -602,16 +1134,22 @@ void port_inject_bundle(GObj *fighter_gobj)
         return;
     }
     fread(magic, 1, 4, f);
-    if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' ||
-        (magic[3] != '2' && magic[3] != '3'))
+    if (magic[0] == 'O' && magic[1] == 'S' && magic[2] == 'B' && magic[3] == '5')
     {
-        port_log("OSB: bad magic in %s (want OSB2/OSB3)\n", path);
+        osb5_load(fp, f);
+        fclose(f);
+        return;
+    }
+    if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' ||
+        (magic[3] != '2' && magic[3] != '3' && magic[3] != '4'))
+    {
+        port_log("OSB: bad magic in %s (want OSB2/OSB3/OSB4)\n", path);
         fclose(f);
         return;
     }
     fread(&nparts, 4, 1, f);
 
-    if (magic[3] == '3')
+    if (magic[3] == '3' || magic[3] == '4')
     {
         u32 twh[2];
         u8 *tex;
@@ -632,7 +1170,7 @@ void port_inject_bundle(GObj *fighter_gobj)
             Gfx *dl;
 
             fread(hdr, 4, 2, f);
-            dl = osbBuildPartDL3(f, hdr[1], tex, twh[0], twh[1]);
+            dl = osbBuildPartDL3(f, hdr[1], tex, twh[0], twh[1], magic[3] == '4');
             if (dl != NULL && hdr[0] < FTPARTS_JOINT_NUM_MAX && fp->joints[hdr[0]] != NULL)
             {
                 fp->joints[hdr[0]]->dl = dl;

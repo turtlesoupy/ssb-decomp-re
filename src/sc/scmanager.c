@@ -970,9 +970,11 @@ void scManagerRunLoop(sb32 arg)
 		gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
 	}
 
-	/* OpenSmash pipeline: SSB64_BOOT_BATTLE="p1fkind,p2fkind,gkind" boots
-	 * straight into a VS match (P1 human, P2 CPU lv1, 5 stock, no timer)
-	 * — the mesh-iteration shortcut: no intro, no menus. */
+	/* OpenSmash pipeline: SSB64_BOOT_BATTLE="p1fkind,p2fkind,gkind[,p2kind]"
+	 * boots straight into a VS match (P1 human, P2 CPU lv1 by default,
+	 * 5 stock, no timer) — the mesh-iteration shortcut: no intro, no
+	 * menus. Optional 4th field makes P2 human (0=HMN, 1=CPU) so a
+	 * scripted SSB64_REPLAY_PLAY input file can drive both fighters. */
 	{
 		extern char *getenv(const char *);
 		extern int sscanf(const char *, const char *, ...);
@@ -980,15 +982,16 @@ void scManagerRunLoop(sb32 arg)
 		if (bb != NULL)
 		{
 			int p1 = 0, p2 = 8, gk = 4; /* defaults: Mario vs Kirby, Dream Land */
+			int p2kind = 1;             /* default: CPU */
 			int i;
-			sscanf(bb, "%d,%d,%d", &p1, &p2, &gk);
+			sscanf(bb, "%d,%d,%d,%d", &p1, &p2, &gk, &p2kind);
 
 			gSCManagerTransferBattleState.game_type = nSCBattleGameTypeRoyal;
 			gSCManagerTransferBattleState.gkind = (u8)gk;
 			gSCManagerTransferBattleState.is_team_battle = FALSE;
 			gSCManagerTransferBattleState.game_rules = 0x2;   /* stock */
-			gSCManagerTransferBattleState.pl_count = 1;
-			gSCManagerTransferBattleState.cp_count = 1;
+			gSCManagerTransferBattleState.pl_count = (p2kind == 0) ? 2 : 1;
+			gSCManagerTransferBattleState.cp_count = (p2kind == 0) ? 0 : 1;
 			gSCManagerTransferBattleState.time_limit = 99;
 			gSCManagerTransferBattleState.stocks = 4;         /* 0-based: 5 stocks */
 			gSCManagerTransferBattleState.handicap = 0;
@@ -1002,21 +1005,23 @@ void scManagerRunLoop(sb32 arg)
 				SCPlayerData *pd = &gSCManagerTransferBattleState.players[i];
 				pd->level = 1;
 				pd->handicap = 9;
-				pd->pkind = (i <= 1) ? (u8)i : 2;      /* 0=HMN,1=CPU,2=none */
+				pd->pkind = (i == 0) ? 0 : (i == 1) ? (u8)((p2kind == 0) ? 0 : 1) : 2; /* 0=HMN,1=CPU,2=none */
 				pd->fkind = (i == 0) ? (u8)p1 : (u8)p2;
 				pd->team = (u8)i;
 				pd->player = (u8)i;
 				pd->costume = 0;
 				pd->shade = 0;
 				pd->color = (u8)i;
-				pd->tag = (u8)i;
+				/* eval mode (both human): hide the 1P/2P floating tags so
+				 * screenshot comparisons stay clean. */
+				pd->tag = (p2kind == 0) ? (u8)GMCOMMON_PLAYERS_MAX : (u8)i;
 				pd->stock_count = (i <= 1) ? 4 : -1;
 			}
 
 			gSCManagerSceneData.gkind = (u8)gk;
 			gSCManagerSceneData.scene_curr = nSCKindVSBattle;
 			gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
-			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d\n", p1, p2, gk);
+			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d\n", p1, p2, gk, p2kind);
 		}
 	}
 	port_log("SSB64: scManagerRunLoop — controllers=%d scene=%d\n",

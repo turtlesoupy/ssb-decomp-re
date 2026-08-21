@@ -3923,12 +3923,17 @@ void ftMainProcSearchHitAll(GObj *fighter_gobj)
 // 0x800E61EC
 #ifdef PORT
 extern void port_dump_frame(GObj *fighter_gobj);
+extern void port_osb5_skin_update(GObj *fighter_gobj);
+extern void port_osb5_copy_windows(void);
 #endif
 void ftMainProcParams(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
 #ifdef PORT
     port_dump_frame(fighter_gobj);
+    /* OSB5 CPU skinning: recompute the injected mesh every fighter tick */
+    port_osb5_skin_update(fighter_gobj);
+    port_osb5_copy_windows();
 #endif
     s32 damage;
     s32 status_id;
