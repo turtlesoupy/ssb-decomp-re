@@ -399,9 +399,62 @@ extern u32 sySchedulerGetTicCount(void);
 extern char *getenv(const char *);
 extern int atoi(const char *);
 
+/* eval hook: SSB64_TEST_GROW="tick,mult" scales the TopN joint of P1
+ * mid-match (after the mesh is bound) to reproduce mushroom-style
+ * growth. */
+static void port_test_grow(GObj *fighter_gobj)
+{
+    static int parsed = 0;
+    static int grow_tick = -1;
+    static f32 grow_mul = 1.0f;
+    static int applied = 0;
+    static u32 start_tic = 0;
+    FTStruct *fp;
+    if (!parsed)
+    {
+        const char *e = getenv("SSB64_TEST_GROW");
+        parsed = 1;
+        if (e != NULL)
+        {
+            const char *c = e; int t = 0; f32 m = 0.0f, frac = 0.0f, div = 1.0f; int dot = 0;
+            while (*c >= '0' && *c <= '9') { t = t * 10 + (*c - '0'); c++; }
+            if (*c == ',') c++;
+            for (; *c; c++)
+            {
+                if (*c == '.') { dot = 1; continue; }
+                if (*c < '0' || *c > '9') break;
+                if (!dot) m = m * 10.0f + (f32)(*c - '0'); else { div *= 10.0f; frac += (f32)(*c - '0') / div; }
+            }
+            grow_tick = t; grow_mul = m + frac;
+            start_tic = sySchedulerGetTicCount();
+        }
+    }
+    if (grow_tick < 0 || applied) return;
+    fp = ftGetStruct(fighter_gobj);
+    if (fp == NULL) return;
+    {
+        static int logged = 0;
+        if (!logged) { port_log("TEST_GROW: armed tick=%d mul=%.2f (player=%d)\n", grow_tick, grow_mul, (int)fp->player); logged = 1; }
+    }
+    if (fp->player != 0) return;
+    {
+        static int p1_ticks = 0;
+        p1_ticks++;
+        if (p1_ticks < grow_tick) return;
+    }
+    if (1)
+    {
+        DObj *top = DObjGetStruct(fighter_gobj);
+        top->scale.vec.f.x *= grow_mul; top->scale.vec.f.y *= grow_mul; top->scale.vec.f.z *= grow_mul;
+        applied = 1;
+        port_log("TEST_GROW: applied x%.2f at tick %d\n", grow_mul, grow_tick);
+    }
+}
+
 void port_dump_frame(GObj *fighter_gobj)
 {
     static int limit = -2;          /* -2 unchecked, -1 disabled, else tic budget */
+    port_test_grow(fighter_gobj);
     static u32 start_tic = 0;
     FTStruct *fp;
     u32 tic;
@@ -788,11 +841,60 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
 
+    /* Taunt hold: the appeal animation has the most extreme joint
+     * rotations in the moveset under a 3x camera zoom — smooth-skinned
+     * generated meshes distort there in a way rigid vanilla parts don't.
+     * Hold the mesh in its pre-taunt pose for the duration (the camera
+     * still zooms, the sound still plays, the fighter "presents"). */
     for (k = 0; k < sOsb5.njoints; k++)
     {
         s32 jid = (s32)sOsb5.joint_ids[k];
         if (fp->joints[jid] == NULL) return;
         osb5_joint_frame(fp, jid, jo[k], jm[k]);
+    }
+    {
+        /* pose hold: on taunt entry snapshot every joint relative to the
+         * hips; while taunting, re-pose the snapshot with the LIVE hips
+         * frame so root motion (the taunt walks the fighter toward the
+         * camera) is kept but the extreme limb rotations are not. */
+        static f32 snap_o[32][3], snap_m[32][3][3];
+        static int snap_valid = 0;
+        s32 hk = -1;
+        for (k = 0; k < sOsb5.njoints; k++) if (sOsb5.joint_ids[k] == 6) hk = k;
+        if (fp->status_id == nFTCommonStatusAppeal && hk >= 0 && getenv("SSB64_TAUNT_ANIMATE") == NULL)
+        {
+            f32 hinv[3][3];
+            if (!snap_valid)
+            {
+                osb5_inv3(jm[hk], hinv);
+                for (k = 0; k < sOsb5.njoints; k++)
+                {
+                    f32 d0 = jo[k][0] - jo[hk][0], d1 = jo[k][1] - jo[hk][1], d2 = jo[k][2] - jo[hk][2];
+                    s32 r, c;
+                    snap_o[k][0] = hinv[0][0]*d0 + hinv[0][1]*d1 + hinv[0][2]*d2;
+                    snap_o[k][1] = hinv[1][0]*d0 + hinv[1][1]*d1 + hinv[1][2]*d2;
+                    snap_o[k][2] = hinv[2][0]*d0 + hinv[2][1]*d1 + hinv[2][2]*d2;
+                    for (r = 0; r < 3; r++) for (c = 0; c < 3; c++)
+                        snap_m[k][r][c] = hinv[r][0]*jm[k][0][c] + hinv[r][1]*jm[k][1][c] + hinv[r][2]*jm[k][2][c];
+                }
+                snap_valid = 1;
+            }
+            for (k = 0; k < sOsb5.njoints; k++)
+            {
+                f32 nm[3][3]; s32 r, c;
+                if (k == hk) continue;
+                for (r = 0; r < 3; r++) for (c = 0; c < 3; c++)
+                    nm[r][c] = jm[hk][r][0]*snap_m[k][0][c] + jm[hk][r][1]*snap_m[k][1][c] + jm[hk][r][2]*snap_m[k][2][c];
+                jo[k][0] = jo[hk][0] + jm[hk][0][0]*snap_o[k][0] + jm[hk][0][1]*snap_o[k][1] + jm[hk][0][2]*snap_o[k][2];
+                jo[k][1] = jo[hk][1] + jm[hk][1][0]*snap_o[k][0] + jm[hk][1][1]*snap_o[k][1] + jm[hk][1][2]*snap_o[k][2];
+                jo[k][2] = jo[hk][2] + jm[hk][2][0]*snap_o[k][0] + jm[hk][2][1]*snap_o[k][1] + jm[hk][2][2]*snap_o[k][2];
+                for (r = 0; r < 3; r++) for (c = 0; c < 3; c++) jm[k][r][c] = nm[r][c];
+            }
+        }
+        else
+        {
+            snap_valid = 0;
+        }
     }
     if (fp->joints[0] == NULL) return;
     osb5_joint_frame(fp, 0, t0o, t0m);
