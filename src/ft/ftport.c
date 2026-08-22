@@ -882,6 +882,11 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             for (k = 0; k < sOsb5.njoints; k++)
             {
                 f32 nm[3][3]; s32 r, c;
+                u32 jid_ = sOsb5.joint_ids[k];
+                /* hold only the ARM chains (the taunt's extreme limb
+                 * rotations); torso, head and legs animate live so the
+                 * fighter still turns toward the camera like vanilla */
+                if (!(jid_ == 8 || jid_ == 9 || jid_ == 10 || jid_ == 14 || jid_ == 15 || jid_ == 16)) continue;
                 if (k == hk) continue;
                 for (r = 0; r < 3; r++) for (c = 0; c < 3; c++)
                     nm[r][c] = jm[hk][r][0]*snap_m[k][0][c] + jm[hk][r][1]*snap_m[k][1][c] + jm[hk][r][2]*snap_m[k][2][c];
