@@ -72,6 +72,20 @@ void scSubsysFighterProcUpdate(GObj *fighter_gobj)
     {
         fp->proc_update(fighter_gobj);
     }
+
+#ifdef PORT
+    /* OSB5 CPU skinning also runs for Demo-kind fighters (character
+     * select, VS screen, results) — they animate through this proc
+     * instead of ftMainProcParams, so without this the injected mesh's
+     * vertex buffer stays at its all-zero load state and the fighter
+     * is invisible on those screens. */
+    {
+        extern void port_osb5_skin_update(GObj *fighter_gobj);
+        extern void port_osb5_copy_windows(void);
+        port_osb5_skin_update(fighter_gobj);
+        port_osb5_copy_windows();
+    }
+#endif
 }
 
 // 0x803905CC
