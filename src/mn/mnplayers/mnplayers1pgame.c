@@ -3627,6 +3627,19 @@ void mnPlayers1PGameFuncStart(void)
 	lbRelocInitSetup(&rl_setup);
 	lbRelocLoadFilesListed(dMNPlayers1PGameFileIDs, sMNPlayers1PGameFiles);
 
+#ifdef PORT
+	/* OpenSmash: same UI-sprite injection as the VS CSS — this screen
+	 * loads its own copies of the portrait/name files.
+	 * Files: [0]=MNPlayersCommon (names), [4]=MNPlayersPortraits. */
+	{
+		extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg);
+		port_ui_css_hook(
+			lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[4], llMNPlayersPortraitsMarioSprite),
+			lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[0], llMNPlayersCommonMarioTextSprite),
+			lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[4], llMNPlayersPortraitsPortraitFireBgSprite));
+	}
+#endif
+
 	gcMakeGObjSPAfter(nGCCommonKindPlayerSelect, mnPlayers1PGameFuncRun, 15, GOBJ_PRIORITY_DEFAULT);
 	gcMakeDefaultCameraGObj(16, GOBJ_PRIORITY_DEFAULT, 100, COBJ_FLAG_ZBUFFER, GPACK_RGBA8888(0x00, 0x00, 0x00, 0x00));
 	efParticleInitAll();

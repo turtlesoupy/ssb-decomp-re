@@ -2207,6 +2207,15 @@ void sc1PIntroFuncStart(void)
     
     lbRelocInitSetup(&rl_setup);
     lbRelocLoadFilesListed(dSC1PIntroFileIDs, sSC1PIntroFiles);
+
+#ifdef PORT
+    /* OpenSmash: dump/inject the big VS-splash name sprite (CharacterNames
+     * file). Injection targets Mario's slot, like the CSS sprites. */
+    {
+        extern void port_ui_vs_hook(Sprite *name_sprite);
+        port_ui_vs_hook(lbRelocGetFileData(Sprite*, sSC1PIntroFiles[1], llCharacterNamesMarioSprite));
+    }
+#endif
     gcMakeGObjSPAfter(0, sc1PIntroFuncRun, 0, GOBJ_PRIORITY_DEFAULT);
     gcMakeDefaultCameraGObj(0, GOBJ_PRIORITY_DEFAULT, 100, COBJ_FLAG_FILLCOLOR | COBJ_FLAG_ZBUFFER, GPACK_RGBA8888(0x00, 0x00, 0x00, 0xFF));
     sc1PIntroInitVars();

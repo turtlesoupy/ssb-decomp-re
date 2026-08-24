@@ -1258,6 +1258,38 @@ void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg)
     }
 }
 
+/* VS-splash name (CharacterNames file): dumped as vs_name, injected from
+ * the OSBU section after the stock palette. */
+void port_ui_vs_hook(Sprite *name_sprite)
+{
+    const char *dump = getenv("SSB64_DUMP_SPRITES");
+    const char *ui = getenv("SSB64_INJECT_UI");
+    if (dump != NULL)
+    {
+        port_ui_dump_sprite(dump, "vs_name", name_sprite);
+    }
+    if (ui != NULL)
+    {
+        FILE *f = fopen(ui, "rb");
+        if (f != NULL)
+        {
+            char m[4];
+            fread(m, 1, 4, f);
+            if (m[0] == 'O' && m[3] == 'U')
+            {
+                /* [magic][portrait 8640][name 768][stock 80][pal 32][vs name] */
+                fseek(f, 4 + 8640 + 768 + 80 + 32, SEEK_SET);
+                port_ui_write_sprite(name_sprite, f, "vs_name");
+                if (dump != NULL)
+                {
+                    port_ui_dump_sprite(dump, "vs_name_post", name_sprite);
+                }
+            }
+            fclose(f);
+        }
+    }
+}
+
 void port_inject_bundle(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
