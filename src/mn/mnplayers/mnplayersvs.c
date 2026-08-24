@@ -5455,6 +5455,56 @@ void mnPlayersVSFuncStart(void)
 	lbRelocInitSetup(&rl_setup);
 	lbRelocLoadFilesListed(dMNPlayersVSFileIDs, sMNPlayersVSFiles);
 
+#ifdef PORT
+	/* OpenSmash: dump/inject the fighter-kind 2D sprites (CSS portrait +
+	 * name text; the stock icon is handled at fighter creation). */
+	{
+		extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg);
+		extern void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr);
+		port_ui_css_hook(
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsMarioSprite),
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonMarioTextSprite),
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite));
+		if (getenv("SSB64_DUMP_SPRITES") != NULL)
+		{
+			/* full roster dump: every name + portrait sprite, as pipeline
+			 * style references (letter atlas, portrait art style). */
+			static const intptr_t ndump[] =
+			{
+				llMNPlayersCommonMarioTextSprite,      llMNPlayersCommonFoxTextSprite,
+				llMNPlayersCommonDKTextSprite,         llMNPlayersCommonSamusTextSprite,
+				llMNPlayersCommonLuigiTextSprite,      llMNPlayersCommonLinkTextSprite,
+				llMNPlayersCommonYoshiTextSprite,      llMNPlayersCommonCaptainFalconTextSprite,
+				llMNPlayersCommonKirbyTextSprite,      llMNPlayersCommonPikachuTextSprite,
+				llMNPlayersCommonJigglypuffTextSprite, llMNPlayersCommonNessTextSprite
+			};
+			static const intptr_t pdump[] =
+			{
+				llMNPlayersPortraitsMarioSprite,  llMNPlayersPortraitsFoxSprite,
+				llMNPlayersPortraitsDonkeySprite, llMNPlayersPortraitsSamusSprite,
+				llMNPlayersPortraitsLuigiSprite,  llMNPlayersPortraitsLinkSprite,
+				llMNPlayersPortraitsYoshiSprite,  llMNPlayersPortraitsCaptainSprite,
+				llMNPlayersPortraitsKirbySprite,  llMNPlayersPortraitsPikachuSprite,
+				llMNPlayersPortraitsPurinSprite,  llMNPlayersPortraitsNessSprite
+			};
+			static const char *cnames[] = { "mario", "fox", "dk", "samus", "luigi", "link",
+				"yoshi", "captain", "kirby", "pikachu", "purin", "ness" };
+			extern int snprintf(char *, unsigned long, const char *, ...);
+			int di;
+			for (di = 0; di < 12; di++)
+			{
+				char nb[64];
+				snprintf(nb, sizeof nb, "name_%s", cnames[di]);
+				port_ui_dump_sprite(getenv("SSB64_DUMP_SPRITES"), nb,
+					lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], ndump[di]));
+				snprintf(nb, sizeof nb, "tile_%s", cnames[di]);
+				port_ui_dump_sprite(getenv("SSB64_DUMP_SPRITES"), nb,
+					lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], pdump[di]));
+			}
+		}
+	}
+#endif
+
 	gcMakeGObjSPAfter(nGCCommonKindPlayerSelect, mnPlayersVSFuncRun, 15, GOBJ_PRIORITY_DEFAULT);
 
 	gcMakeDefaultCameraGObj(16, GOBJ_PRIORITY_DEFAULT, 100, COBJ_FLAG_ZBUFFER, GPACK_RGBA8888(0x00, 0x00, 0x00, 0x00));

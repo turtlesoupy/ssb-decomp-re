@@ -1104,6 +1104,160 @@ void port_osb5_copy_windows(void)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/*  OpenSmash UI assets: dump / inject the 2D sprites tied to a        */
+/*  fighter kind — CSS portrait, CSS name text, in-battle stock icon.  */
+/*  Dump (SSB64_DUMP_SPRITES=<dir>) writes each sprite's decoded RGBA  */
+/*  plus a .json sidecar so the pipeline can match dimensions and      */
+/*  style. All sprites here are CI4/CI8 with RGBA5551 TLUTs.           */
+/* ------------------------------------------------------------------ */
+#include <PR/sp.h>
+
+static u32 port_sprite_px(u16 texel5551)
+{
+    u32 r = (texel5551 >> 11) & 0x1F, g = (texel5551 >> 6) & 0x1F;
+    u32 b = (texel5551 >> 1) & 0x1F, a = texel5551 & 1;
+    return (r << 3 | r >> 2) | ((g << 3 | g >> 2) << 8) | ((b << 3 | b >> 2) << 16) |
+           ((a ? 0xFFu : 0x00u) << 24);
+}
+
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, s32 count);
+
+/* Texel bytes are still in the file's blanket-u32-swapped state before
+ * the first draw; logical byte i lives at (i & ~3) | (3 - (i & 3)). */
+static u8 port_ui_texel(u8 *buf, s32 i)
+{
+    return buf[(i & ~3) | (3 - (i & 3))];
+}
+
+void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr)
+{
+    char path[1024];
+    FILE *f;
+    Bitmap *bms;
+    u8 *tlut;
+    s32 b;
+
+    if (spr == NULL) return;
+    portFixupSprite(spr);
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL) return;
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    tlut = (u8 *)PORT_RESOLVE(spr->LUT);
+
+    snprintf(path, sizeof path, "%s/%s.json", dir, name);
+    f = fopen(path, "w");
+    if (f != NULL)
+    {
+        fprintf(f, "{\"draw_w\": %d, \"draw_h\": %d, \"bmfmt\": %d, \"bmsiz\": %d,\n"
+                   " \"nbitmaps\": %d, \"bmheight\": %d, \"bmheight_real\": %d,\n"
+                   " \"ntlut\": %d, \"start_tlut\": %d, \"attr\": %d, \"bitmaps\": [\n",
+                spr->width, spr->height, spr->bmfmt, spr->bmsiz, spr->nbitmaps,
+                spr->bmheight, spr->bmHreal, spr->nTLUT, spr->startTLUT, spr->attr);
+        for (b = 0; b < spr->nbitmaps; b++)
+        {
+            fprintf(f, "  {\"width\": %d, \"width_img\": %d, \"s\": %d, \"t\": %d,"
+                       " \"actual_h\": %d, \"lut_off\": %d}%s\n",
+                    bms[b].width, bms[b].width_img, bms[b].s, bms[b].t,
+                    bms[b].actualHeight, bms[b].LUToffset, (b + 1 < spr->nbitmaps) ? "," : "");
+        }
+        fprintf(f, "]}\n");
+        fclose(f);
+    }
+    /* raw texel bytes per bitmap, concatenated, exactly as in memory */
+    snprintf(path, sizeof path, "%s/%s.bufs", dir, name);
+    f = fopen(path, "wb");
+    if (f != NULL)
+    {
+        for (b = 0; b < spr->nbitmaps; b++)
+        {
+            u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+            s32 bpt = (spr->bmsiz == G_IM_SIZ_16b) ? 16 : (spr->bmsiz == G_IM_SIZ_8b) ? 8 :
+                      (spr->bmsiz == G_IM_SIZ_32b) ? 32 : 4;
+            s32 nbytes = (bms[b].width_img * bms[b].actualHeight * bpt) / 8;
+            if (buf != NULL) fwrite(buf, 1, nbytes, f);
+        }
+        fclose(f);
+    }
+    if (tlut != NULL && spr->nTLUT > 0)
+    {
+        snprintf(path, sizeof path, "%s/%s.tlut", dir, name);
+        f = fopen(path, "wb");
+        if (f != NULL)
+        {
+            fwrite(tlut, 2, spr->nTLUT, f);
+            fclose(f);
+        }
+    }
+    port_log("OSBUI: dumped %s (fmt=%d siz=%d nbm=%d ntlut=%d)\n",
+             name, spr->bmfmt, spr->bmsiz, spr->nbitmaps, spr->nTLUT);
+}
+
+/* Called from the VS character-select screen right after its reloc
+ * files load. portrait/name are Mario's (fkind of the injection target
+ * is always 0 for now — the gate lives in the caller). */
+/* Overwrite a sprite's texel bytes with pre-encoded data (already in
+ * the file's blanket-swapped + TMEM-swizzled DRAM state, produced by
+ * pipeline/gen_ui_assets.py). Struct fixups are forced first so sizes
+ * read true; the texel fixup that runs at first draw then applies to
+ * our bytes exactly as it would to the originals. */
+static void port_ui_write_sprite(Sprite *spr, FILE *f, const char *what)
+{
+    Bitmap *bms;
+    s32 b;
+    if (spr == NULL) return;
+    portFixupSprite(spr);
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL) return;
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    for (b = 0; b < spr->nbitmaps; b++)
+    {
+        u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+        s32 bpt = (spr->bmsiz == G_IM_SIZ_16b) ? 16 : (spr->bmsiz == G_IM_SIZ_8b) ? 8 :
+                  (spr->bmsiz == G_IM_SIZ_32b) ? 32 : 4;
+        s32 nbytes = (bms[b].width_img * bms[b].actualHeight * bpt) / 8;
+        if (buf == NULL || fread(buf, 1, nbytes, f) != (size_t)nbytes)
+        {
+            port_log("OSBUI: short read injecting %s bitmap %d\n", what, (int)b);
+            return;
+        }
+    }
+    port_log("OSBUI: injected %s (%d bitmaps)\n", what, (int)spr->nbitmaps);
+}
+
+void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg)
+{
+    const char *dump = getenv("SSB64_DUMP_SPRITES");
+    const char *ui = getenv("SSB64_INJECT_UI");
+    if (dump != NULL)
+    {
+        port_ui_dump_sprite(dump, "css_portrait", portrait);
+        port_ui_dump_sprite(dump, "css_name", name_text);
+        port_ui_dump_sprite(dump, "css_firebg", fire_bg);
+    }
+    if (ui != NULL)
+    {
+        FILE *f = fopen(ui, "rb");
+        char magic[4];
+        if (f == NULL)
+        {
+            port_log("OSBUI: cannot open %s\n", ui);
+            return;
+        }
+        fread(magic, 1, 4, f);
+        if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' || magic[3] != 'U')
+        {
+            port_log("OSBUI: bad magic in %s\n", ui);
+            fclose(f);
+            return;
+        }
+        port_ui_write_sprite(portrait, f, "css_portrait");
+        port_ui_write_sprite(name_text, f, "css_name");
+        fclose(f);
+    }
+}
+
 void port_inject_bundle(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
@@ -1125,6 +1279,45 @@ void port_inject_bundle(GObj *fighter_gobj)
     if (pl_env != NULL && (int)fp->player != atoi(pl_env))
     {
         return;
+    }
+
+    {
+        const char *dump = getenv("SSB64_DUMP_SPRITES");
+        const char *ui = getenv("SSB64_INJECT_UI");
+        if ((dump != NULL || ui != NULL) && fp->attr != NULL && fp->attr->sprites != NULL)
+        {
+            FTSprites *_spr = (FTSprites *)PORT_RESOLVE(fp->attr->sprites);
+            Sprite *st = (Sprite *)PORT_RESOLVE(_spr->stock_sprite);
+            if (st != NULL && dump != NULL)
+            {
+                port_ui_dump_sprite(dump, "stock_icon", st);
+            }
+            /* stock icon pixels + costume-0 palette live at the end of the
+             * OSBU file: [magic][portrait][name][stock ci4][16x u16 pal] */
+            if (st != NULL && ui != NULL)
+            {
+                FILE *uf = fopen(ui, "rb");
+                if (uf != NULL)
+                {
+                    char m[4];
+                    fread(m, 1, 4, uf);
+                    if (m[0] == 'O' && m[3] == 'U')
+                    {
+                        fseek(uf, -(80 + 32), SEEK_END);
+                        port_ui_write_sprite(st, uf, "stock_icon");
+                        {
+                            u32 *_luts = (u32 *)PORT_RESOLVE(_spr->stock_luts);
+                            u8 *lut0 = (_luts != NULL) ? (u8 *)PORT_RESOLVE(_luts[0]) : NULL;
+                            if (lut0 != NULL && fread(lut0, 1, 32, uf) == 32)
+                            {
+                                port_log("OSBUI: injected stock palette (costume 0)\n");
+                            }
+                        }
+                    }
+                    fclose(uf);
+                }
+            }
+        }
     }
 
     f = fopen(path, "rb");
