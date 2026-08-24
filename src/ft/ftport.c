@@ -813,6 +813,18 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
 
+    /* self-heal: modelpart/detail code has several sites that re-point a
+     * part DL (face blinks, LOD switches, respawn resets). Whatever wrote
+     * a vanilla DL onto a replaced joint, blank it again this tick. */
+    for (k = 0; k < sOsb5.njoints; k++)
+    {
+        s32 jid = (s32)sOsb5.joint_ids[k];
+        if (jid != 0 && jid < FTPARTS_JOINT_NUM_MAX && fp->joints[jid] != NULL &&
+            fp->joints[jid]->dl != sOsb5NullDL)
+        {
+            fp->joints[jid]->dl = sOsb5NullDL;
+        }
+    }
     for (k = 0; k < sOsb5.njoints; k++)
     {
         s32 jid = (s32)sOsb5.joint_ids[k];
