@@ -741,6 +741,31 @@ typedef struct OSB5State
 } OSB5State;
 
 static OSB5State sOsb5;
+static Gfx sOsb5NullDL[2];
+
+/* TRUE if this joint's body part is replaced by the attached skinned mesh
+ * (modelpart swaps must not resurrect the vanilla part over it). */
+s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
+{
+    s32 k;
+    if (sOsb5.vtx == NULL || sOsb5.owner != fighter_gobj || joint_id == 0)
+    {
+        return 0;
+    }
+    for (k = 0; k < sOsb5.njoints; k++)
+    {
+        if ((s32)sOsb5.joint_ids[k] == joint_id)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+Gfx *port_osb5_null_dl(void)
+{
+    return sOsb5NullDL;
+}
 
 static void osb5_joint_frame(FTStruct *fp, s32 joint, f32 o[3], f32 m[3][3])
 {
@@ -1041,17 +1066,26 @@ static void osb5_load(FTStruct *fp, FILE *f)
     gDPSetCombineMode(g++, G_CC_MODULATEIA, G_CC_MODULATEIA);
     gSPEndDisplayList(g++);
 
-    /* attach: joint 0 renders the whole mesh; blank every other joint DL */
+    /* attach: joint 0 renders the whole mesh; blank exactly the joints the
+     * bundle REPLACES (its skinned skeleton). Accessory joints (Link's
+     * sword/shield, arm cannons, ...) are not in the bundle and keep their
+     * vanilla DLs and modelpart behavior 1:1. */
     {
-        static Gfx sNullDL[2];
-        Gfx *ng = sNullDL;
-        s32 jj;
-        gSPEndDisplayList(ng++);
+        s32 jj, k;
+        gSPEndDisplayList(&sOsb5NullDL[0]);
         for (jj = 1; jj < FTPARTS_JOINT_NUM_MAX; jj++)
         {
-            if (fp->joints[jj] != NULL && fp->joints[jj]->dv != NULL)
+            if (fp->joints[jj] == NULL)
             {
-                fp->joints[jj]->dl = sNullDL;
+                continue;
+            }
+            for (k = 0; k < sOsb5.njoints; k++)
+            {
+                if ((s32)sOsb5.joint_ids[k] == jj)
+                {
+                    fp->joints[jj]->dl = sOsb5NullDL;
+                    break;
+                }
             }
         }
         fp->joints[0]->dl = dl;
@@ -1194,9 +1228,117 @@ void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr)
              name, spr->bmfmt, spr->bmsiz, spr->nbitmaps, spr->nTLUT);
 }
 
+/* Write a LOGICAL pixel canvas into a sprite whose geometry varies per
+ * fighter (the name sprites are 40/48/64 wide depending on character).
+ * canvas is canvas_w wide, rows top-down; fmt 0 = one byte per texel
+ * (IA8: value used as-is; I4: high nibble used). The DRAM state (blanket
+ * u32 swap + odd-row group-half swizzle) is applied here per target row
+ * width, so one pack serves every fighter. */
+static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
+                                 s32 canvas_h, const char *what)
+{
+    Bitmap *bms;
+    s32 b, y, x, yy = 0;
+    s32 content_w = 0, avail;
+    if (spr == NULL) return;
+    portFixupSprite(spr);
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL) return;
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    /* content width of the canvas (right-most nonzero column + 1); if it
+     * exceeds this fighter's drawable width, nearest-resample to fit —
+     * the name sprites are 40/48/64 texels wide depending on character. */
+    for (y = 0; y < canvas_h; y++)
+    {
+        for (x = canvas_w - 1; x >= content_w; x--)
+        {
+            if (canvas[y * canvas_w + x] != 0)
+            {
+                content_w = x + 1;
+                break;
+            }
+        }
+    }
+    avail = (spr->width > 0 && spr->width < canvas_w) ? spr->width + 1 : canvas_w;
+    if (avail > bms[0].width_img)
+    {
+        avail = bms[0].width_img;
+    }
+    for (b = 0; b < spr->nbitmaps; b++)
+    {
+        u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+        s32 w = bms[b].width_img;
+        s32 bpp8 = (spr->bmsiz == G_IM_SIZ_8b);
+        s32 row_bytes = bpp8 ? w : (w / 2);
+        s32 grp = 8;
+        u8 tmp[256];
+        if (buf == NULL || row_bytes > (s32)sizeof(tmp)) continue;
+        for (y = 0; y < bms[b].actualHeight; y++)
+        {
+            s32 cy = yy + y;
+            for (x = 0; x < row_bytes; x++) tmp[x] = 0;
+            for (x = 0; x < w && x < canvas_w; x++)
+            {
+                s32 sx = (content_w > avail) ? (x * content_w) / avail : x;
+                u8 v = (cy < canvas_h && sx < canvas_w) ? canvas[cy * canvas_w + sx] : 0;
+                if (bpp8)
+                {
+                    tmp[x] = v;
+                }
+                else if (x & 1)
+                {
+                    tmp[x / 2] |= (v >> 4);
+                }
+                else
+                {
+                    tmp[x / 2] |= (v & 0xF0);
+                }
+            }
+            /* odd rows: swap group halves (TMEM line swizzle) */
+            if (y & 1)
+            {
+                for (x = 0; x + grp - 1 < row_bytes; x += grp)
+                {
+                    s32 k;
+                    for (k = 0; k < grp / 2; k++)
+                    {
+                        u8 t = tmp[x + k];
+                        tmp[x + k] = tmp[x + grp / 2 + k];
+                        tmp[x + grp / 2 + k] = t;
+                    }
+                }
+            }
+            /* blanket u32 byte reversal */
+            for (x = 0; x + 3 < row_bytes; x += 4)
+            {
+                u8 *dst = buf + y * row_bytes + x;
+                dst[0] = tmp[x + 3]; dst[1] = tmp[x + 2];
+                dst[2] = tmp[x + 1]; dst[3] = tmp[x];
+            }
+        }
+        yy += bms[b].actualHeight;
+    }
+    port_log("OSBUI: injected %s (canvas %dx%d -> %d bitmaps)\n",
+             what, (int)canvas_w, (int)canvas_h, (int)spr->nbitmaps);
+}
+
+/* OSBV layout: ['OSBV'][portrait 8640 pre-encoded][name canvas 64x16 IA8]
+ * [stock 80 pre-encoded][pal 32][vs canvas 64x12 intensity bytes] */
+#define OSBV_NAME_OFF   (4 + 8640)
+#define OSBV_STOCK_OFF  (OSBV_NAME_OFF + 64 * 16)
+#define OSBV_PAL_OFF    (OSBV_STOCK_OFF + 80)
+#define OSBV_VS_OFF     (OSBV_PAL_OFF + 32)
+
 /* Called from the VS character-select screen right after its reloc
  * files load. portrait/name are Mario's (fkind of the injection target
  * is always 0 for now — the gate lives in the caller). */
+/* Which fighter kind the injection replaces (drives UI slot choice). */
+s32 port_ui_target_fkind(void)
+{
+    const char *e = getenv("SSB64_INJECT_FKIND");
+    return (e != NULL) ? atoi(e) : 0;
+}
+
 /* Overwrite a sprite's texel bytes with pre-encoded data (already in
  * the file's blanket-swapped + TMEM-swizzled DRAM state, produced by
  * pipeline/gen_ui_assets.py). Struct fixups are forced first so sizes
@@ -1246,14 +1388,27 @@ void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg)
             return;
         }
         fread(magic, 1, 4, f);
-        if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' || magic[3] != 'U')
+        if (magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' ||
+            (magic[3] != 'U' && magic[3] != 'V'))
         {
             port_log("OSBUI: bad magic in %s\n", ui);
             fclose(f);
             return;
         }
         port_ui_write_sprite(portrait, f, "css_portrait");
-        port_ui_write_sprite(name_text, f, "css_name");
+        if (magic[3] == 'V')
+        {
+            static u8 canvas[64 * 16];
+            fseek(f, OSBV_NAME_OFF, SEEK_SET);
+            if (fread(canvas, 1, sizeof canvas, f) == sizeof canvas)
+            {
+                port_ui_write_canvas(name_text, canvas, 64, 16, "css_name");
+            }
+        }
+        else
+        {
+            port_ui_write_sprite(name_text, f, "css_name");
+        }
         fclose(f);
     }
 }
@@ -1275,15 +1430,24 @@ void port_ui_vs_hook(Sprite *name_sprite)
         {
             char m[4];
             fread(m, 1, 4, f);
-            if (m[0] == 'O' && m[3] == 'U')
+            if (m[0] == 'O' && m[3] == 'V')
             {
-                /* [magic][portrait 8640][name 768][stock 80][pal 32][vs name] */
+                static u8 canvas[64 * 12];
+                fseek(f, OSBV_VS_OFF, SEEK_SET);
+                if (fread(canvas, 1, sizeof canvas, f) == sizeof canvas)
+                {
+                    port_ui_write_canvas(name_sprite, canvas, 64, 12, "vs_name");
+                }
+            }
+            else if (m[0] == 'O' && m[3] == 'U')
+            {
+                /* legacy: [magic][portrait 8640][name 768][stock 80][pal 32][vs name] */
                 fseek(f, 4 + 8640 + 768 + 80 + 32, SEEK_SET);
                 port_ui_write_sprite(name_sprite, f, "vs_name");
-                if (dump != NULL)
-                {
-                    port_ui_dump_sprite(dump, "vs_name_post", name_sprite);
-                }
+            }
+            if (dump != NULL)
+            {
+                port_ui_dump_sprite(dump, "vs_name_post", name_sprite);
             }
             fclose(f);
         }
@@ -1333,9 +1497,10 @@ void port_inject_bundle(GObj *fighter_gobj)
                 {
                     char m[4];
                     fread(m, 1, 4, uf);
-                    if (m[0] == 'O' && m[3] == 'U')
+                    if (m[0] == 'O' && (m[3] == 'U' || m[3] == 'V'))
                     {
-                        fseek(uf, -(80 + 32), SEEK_END);
+                        if (m[3] == 'V') fseek(uf, OSBV_STOCK_OFF, SEEK_SET);
+                        else fseek(uf, -(80 + 32), SEEK_END);
                         port_ui_write_sprite(st, uf, "stock_icon");
                         {
                             u32 *_luts = (u32 *)PORT_RESOLVE(_spr->stock_luts);

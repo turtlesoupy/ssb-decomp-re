@@ -2213,7 +2213,19 @@ void sc1PIntroFuncStart(void)
      * file). Injection targets Mario's slot, like the CSS sprites. */
     {
         extern void port_ui_vs_hook(Sprite *name_sprite);
-        port_ui_vs_hook(lbRelocGetFileData(Sprite*, sSC1PIntroFiles[1], llCharacterNamesMarioSprite));
+        extern s32 port_ui_target_fkind(void);
+        static const intptr_t vs_name_offs[] =
+        {
+            llCharacterNamesMarioSprite,   llCharacterNamesFoxSprite,
+            llCharacterNamesDonkeySprite,  llCharacterNamesSamusSprite,
+            llCharacterNamesLuigiSprite,   llCharacterNamesLinkSprite,
+            llCharacterNamesYoshiSprite,   llCharacterNamesCaptainSprite,
+            llCharacterNamesKirbySprite,   llCharacterNamesPikachuSprite,
+            llCharacterNamesPurinSprite,   llCharacterNamesNessSprite
+        };
+        s32 tfk = port_ui_target_fkind();
+        if (tfk < 0 || tfk > 11) tfk = 0;
+        port_ui_vs_hook(lbRelocGetFileData(Sprite*, sSC1PIntroFiles[1], vs_name_offs[tfk]));
     }
 #endif
     gcMakeGObjSPAfter(0, sc1PIntroFuncRun, 0, GOBJ_PRIORITY_DEFAULT);

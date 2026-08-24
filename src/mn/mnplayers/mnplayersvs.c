@@ -5461,9 +5461,30 @@ void mnPlayersVSFuncStart(void)
 	{
 		extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg);
 		extern void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr);
+		extern s32 port_ui_target_fkind(void);
+		static const intptr_t css_portrait_offs[] =
+		{
+			llMNPlayersPortraitsMarioSprite,  llMNPlayersPortraitsFoxSprite,
+			llMNPlayersPortraitsDonkeySprite, llMNPlayersPortraitsSamusSprite,
+			llMNPlayersPortraitsLuigiSprite,  llMNPlayersPortraitsLinkSprite,
+			llMNPlayersPortraitsYoshiSprite,  llMNPlayersPortraitsCaptainSprite,
+			llMNPlayersPortraitsKirbySprite,  llMNPlayersPortraitsPikachuSprite,
+			llMNPlayersPortraitsPurinSprite,  llMNPlayersPortraitsNessSprite
+		};
+		static const intptr_t css_name_offs[] =
+		{
+			llMNPlayersCommonMarioTextSprite,      llMNPlayersCommonFoxTextSprite,
+			llMNPlayersCommonDKTextSprite,         llMNPlayersCommonSamusTextSprite,
+			llMNPlayersCommonLuigiTextSprite,      llMNPlayersCommonLinkTextSprite,
+			llMNPlayersCommonYoshiTextSprite,      llMNPlayersCommonCaptainFalconTextSprite,
+			llMNPlayersCommonKirbyTextSprite,      llMNPlayersCommonPikachuTextSprite,
+			llMNPlayersCommonJigglypuffTextSprite, llMNPlayersCommonNessTextSprite
+		};
+		s32 tfk = port_ui_target_fkind();
+		if (tfk < 0 || tfk > 11) tfk = 0;
 		port_ui_css_hook(
-			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsMarioSprite),
-			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonMarioTextSprite),
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], css_portrait_offs[tfk]),
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], css_name_offs[tfk]),
 			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite));
 		if (getenv("SSB64_DUMP_SPRITES") != NULL)
 		{

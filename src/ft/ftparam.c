@@ -866,6 +866,19 @@ void ftParamSetModelPartID(GObj *fighter_gobj, s32 joint_id, s32 modelpart_id)
                     modelpart = &FTMODELPARTCONTAINER_GET_DESC(modelparts_container, joint_id - nFTPartsJointCommonStart)->modelparts[modelpart_id][fp->detail_curr - nFTPartsDetailStart];
 
                     joint->dl = FTMODELPART_GET_DL(modelpart);
+#ifdef PORT
+                    /* OpenSmash: a skinned injected mesh replaces this
+                     * part — keep it blanked through modelpart swaps
+                     * (accessory joints pass through untouched). */
+                    {
+                        extern s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id);
+                        extern Gfx *port_osb5_null_dl(void);
+                        if (port_osb5_joint_replaced(fighter_gobj, joint_id))
+                        {
+                            joint->dl = port_osb5_null_dl();
+                        }
+                    }
+#endif
 
                     lbCommonAddMObjForFighterPartsDObj(joint, FTMODELPART_GET_MOBJSUBS(modelpart), FTMODELPART_GET_COSTUME_MATANIM_JOINTS(modelpart), FTMODELPART_GET_MAIN_MATANIM_JOINTS(modelpart), fp->costume);
 
