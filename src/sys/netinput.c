@@ -3,6 +3,10 @@
 #include <sys/netpeer.h>
 #include <sys/taskman.h>
 
+#ifdef PORT
+s32 gPortLastReplayTick = -1;
+#endif
+
 typedef struct SYNetInputSlot
 {
 	SYNetInputSource source;
@@ -239,6 +243,17 @@ void syNetInputResolveFrame(s32 player, u32 tick, SYNetInputFrame *out_frame)
 		{
 			out_frame->source = nSYNetInputSourceSaved;
 			out_frame->is_predicted = FALSE;
+#ifdef PORT
+			/* replay-relative clock for eval captures: scene start varies
+			 * by a few boot frames run to run, so the absolute frame
+			 * counter mis-aligns two "identical" replay runs. The replay
+			 * tick is identical across runs by construction. */
+			if (player == 0)
+			{
+				extern s32 gPortLastReplayTick;
+				gPortLastReplayTick = (s32)tick;
+			}
+#endif
 		}
 		else if (syNetInputGetStoredFrame(sSYNetInputSavedHistory, player, tick, out_frame) == FALSE)
 		{

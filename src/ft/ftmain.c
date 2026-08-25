@@ -3883,6 +3883,15 @@ void ftMainSearchFighterCatch(GObj *this_gobj)
 // 0x800E6100
 void ftMainProcSearchCatch(GObj *fighter_gobj)
 {
+#ifdef PORT
+    {
+        extern s32 port_pose_capture_active(void);
+        if (port_pose_capture_active())
+        {
+            return;
+        }
+    }
+#endif
     FTStruct *fp = ftGetStruct(fighter_gobj);
 
     ftMainSearchHitHazard(fighter_gobj);
@@ -3904,6 +3913,17 @@ void ftMainProcSearchHitAll(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
 
+#ifdef PORT
+    /* pose-capture eval: the two fighters run the same scripted tour as
+     * test/reference; any hit between them desyncs the comparison. */
+    {
+        extern s32 port_pose_capture_active(void);
+        if (port_pose_capture_active())
+        {
+            return;
+        }
+    }
+#endif
     if (!(fp->is_ghost))
     {
         sFTMainHitLogID = 0;
