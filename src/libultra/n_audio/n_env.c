@@ -5332,6 +5332,18 @@ ALWhatever8009EDD0_siz34* func_80026A10_27610(u16 id)
 
 ALWhatever8009EDD0_siz34* func_800269C0_275C0(u16 id)
 {
+#ifdef PORT
+  /* Injection harness: the target fighter's announcer name plays as a WAV
+   * overlay (SSB64_INJECT_VOICE) instead of the vanilla FGM clip. Callers
+   * null-check the returned handle. */
+  {
+    extern s32 port_voice_announce_filter(u16 id);
+    if (port_voice_announce_filter(id))
+    {
+      return NULL;
+    }
+  }
+#endif
   g_port_current_is_voice = (id >= 0x135) ? 1 : 0; // LUS: Tag the thread!
 
   if (id >= D_8009EDD0_406D0.fgm_ucode_count)

@@ -342,29 +342,41 @@ void mnVSResultsAnnounceWinner(void)
 	else if (sMNVSResultsIsTeamBattle == FALSE)
 	{
 		// FFA - "This Game's Winner Is..."
-		switch (sMNVSResultsTotalTimeTics)
-		{
-		case 81:
-			func_800269C0_275C0(nSYAudioVoiceAnnounceWinnerIs);
-			break;
-			
-		case 210:
 #ifdef PORT
+		/* The crowd cheer is hardcoded 60 tics after the name; a longer
+		 * injected announcer clip pushes it back until the name finishes. */
+		extern s32 port_voice_results_extra_wait_tics(void);
+		if (sMNVSResultsTotalTimeTics == 81)
+		{
+			func_800269C0_275C0(nSYAudioVoiceAnnounceWinnerIs);
+		}
+		else if (sMNVSResultsTotalTimeTics == 210)
 		{
 			s32 wk = mnVSResultsGetFighterKind(mnVSResultsGetWinPlayer());
 			func_800269C0_275C0((wk >= (s32)nFTKindEnumCount)
 			                    ? (u32)port_fighter_results_announce_fgm(wk)
 			                    : announce_names[wk]);
 		}
+		else if (sMNVSResultsTotalTimeTics == 270 + port_voice_results_extra_wait_tics())
+		{
+			func_800269C0_275C0(nSYAudioVoicePublicExcited);
+		}
 #else
-			func_800269C0_275C0(announce_names[mnVSResultsGetFighterKind(mnVSResultsGetWinPlayer())]);
-#endif
+		switch (sMNVSResultsTotalTimeTics)
+		{
+		case 81:
+			func_800269C0_275C0(nSYAudioVoiceAnnounceWinnerIs);
 			break;
-			
+
+		case 210:
+			func_800269C0_275C0(announce_names[mnVSResultsGetFighterKind(mnVSResultsGetWinPlayer())]);
+			break;
+
 		case 270:
 			func_800269C0_275C0(nSYAudioVoicePublicExcited);
 			break;
 		}
+#endif
 	}
 	else
 	{

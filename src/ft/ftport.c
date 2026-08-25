@@ -1365,6 +1365,80 @@ s32 port_ui_target_fkind(void)
     return (e != NULL) ? atoi(e) : 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Injected announcer voice (SSB64_INJECT_VOICE)                       */
+/* ------------------------------------------------------------------ */
+
+#include <gm/gmsound.h>
+#include "audio/voice_inject.h"
+
+/* Announcer name FGM id per vanilla fkind — mirrors the announce_names
+ * tables in mnplayersvs.c / mnvsresults.c / mnplayers1p*.c. */
+static u16 port_voice_announce_name_fgm(s32 fkind)
+{
+    static const u16 names[] =
+    {
+        nSYAudioVoiceAnnounceMario,
+        nSYAudioVoiceAnnounceFox,
+        nSYAudioVoiceAnnounceDonkey,
+        nSYAudioVoiceAnnounceSamus,
+        nSYAudioVoiceAnnounceLuigi,
+        nSYAudioVoiceAnnounceLink,
+        nSYAudioVoiceAnnounceYoshi,
+        nSYAudioVoiceAnnounceCaptain,
+        nSYAudioVoiceAnnounceKirby,
+        nSYAudioVoiceAnnouncePikachu,
+        nSYAudioVoiceAnnouncePurin,
+        nSYAudioVoiceAnnounceNess
+    };
+    return ((u32)fkind < ARRAY_COUNT(names)) ? names[fkind] : 0xFFFF;
+}
+
+/* Called from func_800269C0_275C0 (the universal FGM-play entry) before it
+ * touches the FGM engine. Returns nonzero when the requested id is the
+ * injection target's announcer name — the WAV overlay plays instead and
+ * the FGM call is suppressed (callers already tolerate a NULL sfx handle:
+ * the harness path takes it for synth fkinds too). Any other vanilla
+ * announcer name cuts a still-running overlay, matching how the game stops
+ * the previous name clip when a new one starts. */
+s32 port_voice_announce_filter(u16 id)
+{
+    s32 i;
+
+    if (!portVoiceInjectAvailable())
+    {
+        return 0;
+    }
+    if (id == port_voice_announce_name_fgm(port_ui_target_fkind()))
+    {
+        portVoiceInjectPlay();
+        return 1;
+    }
+    for (i = 0; i < 12; i++)
+    {
+        if (id == port_voice_announce_name_fgm(i))
+        {
+            portVoiceInjectStop();
+            break;
+        }
+    }
+    return 0;
+}
+
+/* VS-results plays the crowd cheer a fixed 60 tics after the winner's name.
+ * Extra tics to wait so a longer generated name can finish first. */
+s32 port_voice_results_extra_wait_tics(void)
+{
+    s32 dur;
+
+    if (!portVoiceInjectAvailable())
+    {
+        return 0;
+    }
+    dur = portVoiceInjectDurationTics();
+    return (dur > 60) ? dur - 60 : 0;
+}
+
 /* Overwrite a sprite's texel bytes with pre-encoded data (already in
  * the file's blanket-swapped + TMEM-swizzled DRAM state, produced by
  * pipeline/gen_ui_assets.py). Struct fixups are forced first so sizes
