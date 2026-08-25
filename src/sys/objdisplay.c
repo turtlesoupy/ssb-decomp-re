@@ -3316,6 +3316,21 @@ void func_8001663C(Gfx **dls, CObj *cobj, s32 buffer_id)
     gDPPipeSync(dl++);
     gDPSetColorImage(dl++, G_IM_FMT_RGBA, gSYVideoColorDepth, gSYVideoResWidth, (void*)0x0F000000);
 
+#ifdef PORT
+    /* pose-capture: with the stage draw filtered out nothing covers the
+     * frame, so the color buffer accumulates ghosts of every prior tick
+     * (visible on the GL/wasm backend). Clear to a neutral grey. */
+    {
+        extern s32 port_pose_capture_active(void);
+        if (port_pose_capture_active() && !(cobj->flags & COBJ_FLAG_FILLCOLOR))
+        {
+            gDPSetCycleType(dl++, G_CYC_FILL);
+            gDPSetRenderMode(dl++, G_RM_NOOP, G_RM_NOOP2);
+            gDPSetFillColor(dl++, syVideoGetFillColor(GPACK_RGBA8888(52, 52, 58, 255)));
+            gDPFillRectangle(dl++, ulx, uly, lrx, lry);
+        }
+    }
+#endif
     if (cobj->flags & COBJ_FLAG_FILLCOLOR)
     {
         gDPSetCycleType(dl++, G_CYC_FILL);
@@ -3762,6 +3777,18 @@ void gcCaptureTaggedGObjs(GObj *camera_gobj, s32 link_id, sb32 is_tag_mask_or_id
 
     while (current_gobj != NULL)
     {
+#ifdef PORT
+        /* pose-capture mode: draw ONLY player 1's fighter — no stage, HUD,
+         * effects, or other fighters — for clean mesh-eval captures. */
+        {
+            extern s32 port_pose_capture_filter(GObj *gobj);
+            if (port_pose_capture_filter(current_gobj))
+            {
+                current_gobj = current_gobj->dl_link_next;
+                continue;
+            }
+        }
+#endif
 #ifdef PORT_DIAG_HAVE_ASAN
         /* If the GObj is in poisoned (freed/redzone) memory, log identifying
          * info BEFORE letting the natural flag-read below trip ASan. ASan

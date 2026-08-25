@@ -846,6 +846,35 @@ s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
     return 0;
 }
 
+/* SSB64_POSE_CAPTURE: mesh-eval capture mode. The display walk asks about
+ * every GObj it would draw; answer TRUE (skip) for everything except
+ * player 1's fighter, leaving one character on a clean black frame with no
+ * stage, HUD, effects, or opponent. */
+s32 port_pose_capture_active(void)
+{
+    static s32 sMode = -1;
+    if (sMode < 0)
+    {
+        sMode = getenv("SSB64_POSE_CAPTURE") != NULL;
+    }
+    return sMode;
+}
+
+s32 port_pose_capture_filter(GObj *gobj)
+{
+    FTStruct *fp;
+    if (!port_pose_capture_active())
+    {
+        return 0;
+    }
+    if (gobj->proc_display != ftDisplayMainProcDisplay)
+    {
+        return 1;
+    }
+    fp = ftGetStruct(gobj);
+    return fp == NULL || fp->player != 0;
+}
+
 Gfx *port_osb5_null_dl(void)
 {
     return sOsb5NullDL;
