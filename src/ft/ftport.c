@@ -806,6 +806,7 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     f32 t0o[3], t0m[3][3], t0inv[3][3];
     s32 k, i;
 
+    if (getenv("SSB64_NO_SKIN") != NULL) return;
     if (sOsb5.vtx == NULL || sOsb5.owner != fighter_gobj)
     {
         return;
@@ -813,6 +814,8 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
 
+    if (getenv("SSB64_NO_SELFHEAL") == NULL)
+    {
     /* self-heal: modelpart/detail code has several sites that re-point a
      * part DL (face blinks, LOD switches, respawn resets). Whatever wrote
      * a vanilla DL onto a replaced joint, blank it again this tick. */
@@ -825,16 +828,23 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             fp->joints[jid]->dl = sOsb5NullDL;
         }
     }
+    }
     for (k = 0; k < sOsb5.njoints; k++)
     {
         s32 jid = (s32)sOsb5.joint_ids[k];
         if (fp->joints[jid] == NULL) return;
+        {
+            const char *upto = getenv("SSB64_SKIN_UPTO");
+            if (upto != NULL && k >= atoi(upto)) continue;
+        }
         osb5_joint_frame(fp, jid, jo[k], jm[k]);
     }
     if (fp->joints[0] == NULL) return;
+    if (getenv("SSB64_NO_ROOTFRAME") != NULL) return;
     osb5_joint_frame(fp, 0, t0o, t0m);
     osb5_inv3(t0m, t0inv);
 
+    if (getenv("SSB64_SKIN_FRAMES_ONLY") != NULL) return;
     for (i = 0; i < sOsb5.nverts; i++)
     {
         OSB5Vert *v = &sOsb5.src[i];
@@ -1085,7 +1095,8 @@ static void osb5_load(FTStruct *fp, FILE *f)
     {
         s32 jj, k;
         gSPEndDisplayList(&sOsb5NullDL[0]);
-        for (jj = 1; jj < FTPARTS_JOINT_NUM_MAX; jj++)
+        if (getenv("SSB64_NO_BLANK") != NULL) jj = FTPARTS_JOINT_NUM_MAX; else jj = 1;
+        for (; jj < FTPARTS_JOINT_NUM_MAX; jj++)
         {
             if (fp->joints[jj] == NULL)
             {
@@ -1100,7 +1111,10 @@ static void osb5_load(FTStruct *fp, FILE *f)
                 }
             }
         }
-        fp->joints[0]->dl = dl;
+        if (getenv("SSB64_NO_ROOTDL") == NULL)
+        {
+            fp->joints[0]->dl = dl;
+        }
     }
     sOsb5.owner = fp->fighter_gobj;
     port_log("OSB5: skinned mesh attached (%u verts, %u tris, %u joints)\n",
