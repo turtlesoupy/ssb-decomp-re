@@ -733,28 +733,112 @@ typedef struct OSB5State
     s32 njoints;
     s32 nverts;
     u32 joint_ids[32];
+    /* joints whose vanilla body geometry the bundle replaces (BLNK
+     * section). Superset of joint_ids when the target skeleton carries
+     * geometry on joints no canonical part maps to (Yoshi's neck/hips
+     * hold most of his head/body). 0 entries -> fall back to joint_ids. */
+    s32 nblank;
+    u32 blank_ids[64];
+    /* accessory vertex pins (ACC2 section): kept-vanilla accessory roots
+     * (tail, sword, ...) sit flush against the VANILLA body; the
+     * replacement mesh has different proportions AND deforms as a blend
+     * of joints, so each root is pinned to a MESH VERTEX, inset along the
+     * vertex's inward normal. The skinner computes that vertex's world
+     * position every tick anyway, so the root tracks the true surface
+     * through any pose. */
+    s32 naccs;
+    struct { u32 joint; u32 vert; f32 embed; } accs[8];
     OSB5Vert *src;          /* source verts, spawn-world space */
     f32 (*bind_local)[4][3];/* per vert, per influence: joint-local coords */
     f32 (*bind_nrm)[4][3];  /* per vert, per influence: joint-local normal */
     Vtx *vtx;               /* live Vtx array the DL renders */
     GObj *owner;
+    /* GObjs are pool-allocated: after the owner despawns (match end, CSS
+     * chip move) the next fighter can reuse the same address, and a bare
+     * pointer match would blank a VANILLA fighter's joints (the broken
+     * CSS previews). Ownership therefore also requires the fighter kind
+     * to match; every spawn of the injected kind re-attaches and
+     * refreshes both. */
+    s32 owner_fkind;
 } OSB5State;
 
 static OSB5State sOsb5;
 static Gfx sOsb5NullDL[2];
+/* Null for parts whose flags&0xF==1: those parts' union field is a
+ * Gfx** token-pair array (two-list draw), NOT a plain DL. Writing a
+ * plain Gfx* there gets our first command word (gDPPipeSync,
+ * 0xE7000000) dereferenced as a DL pointer — the Yoshi crash. */
+static u32 sOsb5NullDLPair[2] = { 0, 0 };
+
+/* the set of joints to blank: explicit BLNK list when present, else the
+ * skinned joint set. */
+static s32 osb5_blank_count(void)
+{
+    return (sOsb5.nblank > 0) ? sOsb5.nblank : sOsb5.njoints;
+}
+
+static s32 osb5_blank_id(s32 k)
+{
+    return (sOsb5.nblank > 0) ? (s32)sOsb5.blank_ids[k] : (s32)sOsb5.joint_ids[k];
+}
+
+static void osb5_blank_joint(FTStruct *fp, s32 jid)
+{
+    DObj *j = fp->joints[jid];
+    FTParts *parts;
+    if (j == NULL)
+    {
+        return;
+    }
+    parts = (FTParts *)j->user_data.p;
+    if (parts != NULL && (parts->flags & 0xF) == 1)
+    {
+        j->dls = (Gfx **)sOsb5NullDLPair;
+    }
+    else
+    {
+        j->dl = sOsb5NullDL;
+    }
+}
+
+static s32 osb5_joint_is_blanked(FTStruct *fp, s32 jid)
+{
+    DObj *j = fp->joints[jid];
+    FTParts *parts;
+    if (j == NULL)
+    {
+        return 1;
+    }
+    /* the blank must match the part's CURRENT draw type — modelpart
+     * swaps copy new flags onto the part, so a plain-DL blank on a part
+     * that just became two-list (flags&0xF==1) reads our null DL's
+     * bytes as a token array. Re-blank whenever the type flipped. */
+    parts = (FTParts *)j->user_data.p;
+    if (parts != NULL && (parts->flags & 0xF) == 1)
+    {
+        return j->dls == (Gfx **)sOsb5NullDLPair;
+    }
+    return j->dl == sOsb5NullDL;
+}
 
 /* TRUE if this joint's body part is replaced by the attached skinned mesh
  * (modelpart swaps must not resurrect the vanilla part over it). */
 s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
 {
     s32 k;
+    FTStruct *fp;
     if (sOsb5.vtx == NULL || sOsb5.owner != fighter_gobj || joint_id == 0)
     {
         return 0;
     }
-    for (k = 0; k < sOsb5.njoints; k++)
+    fp = ftGetStruct((GObj *)fighter_gobj);
+    if (fp == NULL || (s32)fp->fkind != sOsb5.owner_fkind)
     {
-        if ((s32)sOsb5.joint_ids[k] == joint_id)
+        return 0;
+    }
+    for (k = 0; k < osb5_blank_count(); k++)
+    {
+        if (osb5_blank_id(k) == joint_id)
         {
             return 1;
         }
@@ -767,9 +851,15 @@ Gfx *port_osb5_null_dl(void)
     return sOsb5NullDL;
 }
 
+static void osb5_dobj_frame(DObj *j, f32 o[3], f32 m[3][3]);
+
 static void osb5_joint_frame(FTStruct *fp, s32 joint, f32 o[3], f32 m[3][3])
 {
-    DObj *j = fp->joints[joint];
+    osb5_dobj_frame(fp->joints[joint], o, m);
+}
+
+static void osb5_dobj_frame(DObj *j, f32 o[3], f32 m[3][3])
+{
     Vec3f vo, vx, vy, vz;
     vo.x = vo.y = vo.z = 0.0f;
     vx.x = 1.0f; vx.y = 0.0f; vx.z = 0.0f;
@@ -813,19 +903,28 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     }
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
+    if ((s32)fp->fkind != sOsb5.owner_fkind) return;
 
     if (getenv("SSB64_NO_SELFHEAL") == NULL)
     {
     /* self-heal: modelpart/detail code has several sites that re-point a
      * part DL (face blinks, LOD switches, respawn resets). Whatever wrote
      * a vanilla DL onto a replaced joint, blank it again this tick. */
-    for (k = 0; k < sOsb5.njoints; k++)
+    for (k = 0; k < osb5_blank_count(); k++)
     {
-        s32 jid = (s32)sOsb5.joint_ids[k];
-        if (jid != 0 && jid < FTPARTS_JOINT_NUM_MAX && fp->joints[jid] != NULL &&
-            fp->joints[jid]->dl != sOsb5NullDL)
+        s32 jid = osb5_blank_id(k);
+        if (jid != 0 && jid < FTPARTS_JOINT_NUM_MAX && !osb5_joint_is_blanked(fp, jid))
         {
-            fp->joints[jid]->dl = sOsb5NullDL;
+            osb5_blank_joint(fp, jid);
+        }
+    }
+    /* keep the root on the plain-DL path (modelpart swaps copy flags) */
+    if (fp->joints[0] != NULL)
+    {
+        FTParts *rparts = (FTParts *)fp->joints[0]->user_data.p;
+        if (rparts != NULL && (rparts->flags & 0xF) != 0)
+        {
+            rparts->flags &= ~0xF;
         }
     }
     }
@@ -843,6 +942,75 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     if (getenv("SSB64_NO_ROOTFRAME") != NULL) return;
     osb5_joint_frame(fp, 0, t0o, t0m);
     osb5_inv3(t0m, t0inv);
+
+    /* re-seat kept accessories: pin each root to its pinned mesh vertex,
+     * inset along the vertex's inward world normal. The vertex world
+     * position is skinned with the same LBS as the mesh, so the root
+     * tracks the true surface through any pose. translate is
+     * parent-local, so solve through the parent DObj's frame. */
+    for (k = 0; k < sOsb5.naccs; k++)
+    {
+        s32 jid = (s32)sOsb5.accs[k].joint;
+        s32 vi = (s32)sOsb5.accs[k].vert;
+        DObj *aj;
+        OSB5Vert *sv;
+        f32 acc[3] = {0.0f, 0.0f, 0.0f};
+        f32 nacc[3] = {0.0f, 0.0f, 0.0f};
+        f32 po[3], pm[3][3], pinv[3][3], lo[3], wsum = 0.0f, nlen;
+        s32 t, c;
+        if (jid <= 0 || jid >= FTPARTS_JOINT_NUM_MAX || vi < 0 || vi >= sOsb5.nverts)
+        {
+            continue;
+        }
+        aj = fp->joints[jid];
+        if (aj == NULL || aj->parent == NULL)
+        {
+            continue;
+        }
+        sv = &sOsb5.src[vi];
+        for (t = 0; t < 4; t++)
+        {
+            f32 w = (f32)sv->w[t] / 255.0f;
+            f32 *bl, *bn;
+            s32 kk = sv->j[t];
+            if (w <= 0.0f) continue;
+            bl = sOsb5.bind_local[vi][t];
+            bn = sOsb5.bind_nrm[vi][t];
+            for (c = 0; c < 3; c++)
+            {
+                acc[c] += w * (jm[kk][c][0]*bl[0] + jm[kk][c][1]*bl[1] + jm[kk][c][2]*bl[2] + jo[kk][c]);
+                nacc[c] += w * (jm[kk][c][0]*bn[0] + jm[kk][c][1]*bn[1] + jm[kk][c][2]*bn[2]);
+            }
+            wsum += w;
+        }
+        if (wsum <= 0.0f)
+        {
+            continue;
+        }
+        for (c = 0; c < 3; c++)
+        {
+            acc[c] /= wsum;
+        }
+        nlen = sqrtf(nacc[0]*nacc[0] + nacc[1]*nacc[1] + nacc[2]*nacc[2]);
+        if (nlen > 1e-6f)
+        {
+            for (c = 0; c < 3; c++)
+            {
+                acc[c] -= nacc[c] * (sOsb5.accs[k].embed / nlen);
+            }
+        }
+        osb5_dobj_frame(aj->parent, po, pm);
+        osb5_inv3(pm, pinv);
+        for (c = 0; c < 3; c++)
+        {
+            lo[c] = pinv[c][0] * (acc[0] - po[0])
+                  + pinv[c][1] * (acc[1] - po[1])
+                  + pinv[c][2] * (acc[2] - po[2]);
+        }
+        aj->translate.vec.f.x = lo[0];
+        aj->translate.vec.f.y = lo[1];
+        aj->translate.vec.f.z = lo[2];
+    }
 
     if (getenv("SSB64_SKIN_FRAMES_ONLY") != NULL) return;
     for (i = 0; i < sOsb5.nverts; i++)
@@ -918,6 +1086,8 @@ static void osb5_load(FTStruct *fp, FILE *f)
 
     sOsb5.njoints = (s32)njoints;
     sOsb5.nverts = (s32)nverts;
+    sOsb5.nblank = 0;
+    sOsb5.naccs = 0;
     fread(sOsb5.joint_ids, 4, njoints, f);
 
     tex = (u8 *)malloc(tw * th * 2);
@@ -934,8 +1104,10 @@ static void osb5_load(FTStruct *fp, FILE *f)
         long vpos = ftell(f);
         char tag[4] = {0, 0, 0, 0};
         s32 have_bind = 0;
+        s32 have_tag;
         fseek(f, (long)ntris * 8, SEEK_CUR);
-        if (fread(tag, 1, 4, f) == 4 && tag[0] == 'B' && tag[1] == 'I' && tag[2] == 'N' && tag[3] == 'D')
+        have_tag = (fread(tag, 1, 4, f) == 4);
+        if (have_tag && tag[0] == 'B' && tag[1] == 'I' && tag[2] == 'N' && tag[3] == 'D')
         {
             f32 fb[12];
             have_bind = 1;
@@ -947,6 +1119,41 @@ static void osb5_load(FTStruct *fp, FILE *f)
                 jm[k][1][0] = fb[6]; jm[k][1][1] = fb[7]; jm[k][1][2] = fb[8];
                 jm[k][2][0] = fb[9]; jm[k][2][1] = fb[10]; jm[k][2][2] = fb[11];
                 osb5_inv3(jm[k], jinv[k]);
+            }
+            have_tag = (fread(tag, 1, 4, f) == 4);
+        }
+        if (have_tag && tag[0] == 'B' && tag[1] == 'L' && tag[2] == 'N' && tag[3] == 'K')
+        {
+            u32 nb = 0;
+            if (fread(&nb, 4, 1, f) == 1 && nb <= 64)
+            {
+                if (fread(sOsb5.blank_ids, 4, nb, f) == nb)
+                {
+                    sOsb5.nblank = (s32)nb;
+                    port_log("OSB5: blank list of %u joints\n", nb);
+                }
+            }
+            have_tag = (fread(tag, 1, 4, f) == 4);
+        }
+        if (have_tag && tag[0] == 'A' && tag[1] == 'C' && tag[2] == 'C' && tag[3] == '2')
+        {
+            u32 na = 0;
+            if (fread(&na, 4, 1, f) == 1 && na <= 8)
+            {
+                for (k = 0; k < na; k++)
+                {
+                    u32 aids[2];
+                    f32 ae;
+                    if (fread(aids, 4, 2, f) != 2 || fread(&ae, 4, 1, f) != 1)
+                    {
+                        break;
+                    }
+                    sOsb5.accs[k].joint = aids[0];
+                    sOsb5.accs[k].vert = aids[1];
+                    sOsb5.accs[k].embed = ae;
+                }
+                sOsb5.naccs = (s32)k;
+                port_log("OSB5: %d accessory vertex pin(s)\n", sOsb5.naccs);
             }
         }
         fseek(f, vpos, SEEK_SET);
@@ -1102,21 +1309,28 @@ static void osb5_load(FTStruct *fp, FILE *f)
             {
                 continue;
             }
-            for (k = 0; k < sOsb5.njoints; k++)
+            for (k = 0; k < osb5_blank_count(); k++)
             {
-                if ((s32)sOsb5.joint_ids[k] == jj)
+                if (osb5_blank_id(k) == jj)
                 {
-                    fp->joints[jj]->dl = sOsb5NullDL;
+                    osb5_blank_joint(fp, jj);
                     break;
                 }
             }
         }
         if (getenv("SSB64_NO_ROOTDL") == NULL)
         {
+            /* the mesh must draw via the plain-DL path */
+            FTParts *rparts = (FTParts *)fp->joints[0]->user_data.p;
+            if (rparts != NULL && (rparts->flags & 0xF) != 0)
+            {
+                rparts->flags &= ~0xF;
+            }
             fp->joints[0]->dl = dl;
         }
     }
     sOsb5.owner = fp->fighter_gobj;
+    sOsb5.owner_fkind = (s32)fp->fkind;
     port_log("OSB5: skinned mesh attached (%u verts, %u tris, %u joints)\n",
              nverts, ntris, njoints);
     port_osb5_skin_update(fp->fighter_gobj);
