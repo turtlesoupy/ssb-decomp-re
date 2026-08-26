@@ -1452,7 +1452,7 @@ void scManagerRunLoop(sb32 arg)
 						gSCManagerTransferBattleState.stocks = 3; // 4 Stocks
 						gSCManagerTransferBattleState.is_show_score = FALSE;
 						gSCManagerTransferBattleState.item_toggles = 0; // No Items
-						gSCManagerTransferBattleState.item_appearance_rate = 4; // None
+						gSCManagerTransferBattleState.item_appearance_rate = nSCBattleItemSwitchNone;
 						gSCManagerTransferBattleState.gkind = nGRKindPupupu; // Dream Land
 
 						// set Team Attack to ON
