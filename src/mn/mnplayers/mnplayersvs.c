@@ -195,6 +195,18 @@ void mnPlayersVSSelectFighterPuck(s32 player, s32 select_button)
 {
 	s32 held_player = sMNPlayersVSSlots[player].held_player, costume;
 
+#ifdef PORT
+	/* base-remapped roster picks always wear costume 0: tile costume ids
+	 * don't apply to the base fighter's tables */
+	{
+		extern s32 port_roster_tile_spawn_fkind(s32 fkind);
+		if (port_roster_tile_spawn_fkind(sMNPlayersVSSlots[held_player].fkind) !=
+		    sMNPlayersVSSlots[held_player].fkind)
+		{
+			select_button = nMNPlayersSelectButtonA;
+		}
+	}
+#endif
 	if (select_button != nMNPlayersSelectButtonA)
 	{
 		costume = ftParamGetCostumeCommonID(sMNPlayersVSSlots[held_player].fkind, select_button);
@@ -1901,10 +1913,21 @@ void mnPlayersVSMakeFighter(GObj *fighter_gobj, s32 player, s32 fkind, s32 costu
 		 * this player BEFORE the preview spawns, so the injection hook
 		 * resolves the pick (and it sticks through page flips into the
 		 * match). Transient re-makes during a drag re-bind each time —
-		 * the final placement wins. */
+		 * the final placement wins. The character may declare a BASE
+		 * fighter distinct from its tile: the preview then spawns as that
+		 * fighter (its skeleton carries the character's mesh variant);
+		 * costume drops to 0 since tile costume ids don't transfer. */
 		{
 			extern void port_roster_bind_player(s32 player, s32 fkind);
+			extern s32 port_roster_tile_spawn_fkind(s32 fkind);
+			s32 spawn_fk;
 			port_roster_bind_player(player, fkind);
+			spawn_fk = port_roster_tile_spawn_fkind(fkind);
+			if (spawn_fk != fkind)
+			{
+				fkind = spawn_fk;
+				costume = 0;
+			}
 		}
 #endif
 		if (fighter_gobj != NULL)
@@ -2698,9 +2721,15 @@ void mnPlayersVSUpdateFighter(s32 player)
 		#ifdef PORT
 		costume = mnPlayersVSGetFreeCostume(sMNPlayersVSSlots[player].fkind, player);
 
+		{
+		extern s32 port_roster_tile_spawn_fkind(s32 fkind);
 		if (
 			(fighter_gobj != NULL) &&
-			(ftGetStruct(fighter_gobj)->fkind == sMNPlayersVSSlots[player].fkind))
+			/* the live preview spawns as the tile character's BASE fighter
+			 * — compare against that, not the raw tile, or the preview
+			 * would re-make every frame */
+			(ftGetStruct(fighter_gobj)->fkind ==
+			 port_roster_tile_spawn_fkind(sMNPlayersVSSlots[player].fkind)))
 		{
 			if (sMNPlayersVSSlots[player].costume != costume)
 			{
@@ -2726,6 +2755,7 @@ void mnPlayersVSUpdateFighter(s32 player)
 				player,
 				sMNPlayersVSSlots[player].fkind, costume
 			);
+		}
 		}
 #else
 		mnPlayersVSMakeFighter
@@ -4318,10 +4348,10 @@ void mnPlayersVSPuckAdjustPortraitEdge(s32 player)
 		if (!port_roster_player_matches_tile(player, sMNPlayersVSSlots[player].fkind))
 		{
 			SObj *ps = SObjGetStruct(sMNPlayersVSSlots[player].puck);
-			/* flush against the card's right edge so the preview stays
+			/* rest at the card's TOP-LEFT corner so the preview stays
 			 * visible (the chip disc draws ~9px left of pos) */
-			f32 rx = (f32)(player * 69 + 66);
-			f32 ry = 155.0F;
+			f32 rx = (f32)(player * 69 + 12);
+			f32 ry = 130.0F;
 			if (ps != NULL)
 			{
 				sMNPlayersVSSlots[player].puck_vel_x = (rx - ps->pos.x) / 6.0F;
@@ -4950,6 +4980,19 @@ void mnPlayersVSSetSceneData(void)
 		gSCManagerTransferBattleState.players[i].pkind = sMNPlayersVSSlots[i].pkind;
 		gSCManagerTransferBattleState.players[i].costume = sMNPlayersVSSlots[i].costume;
 		gSCManagerTransferBattleState.players[i].shade = sMNPlayersVSSlots[i].shade;
+#ifdef PORT
+		/* OpenSmash roster: a bound character with a BASE fighter enters
+		 * the match as that fighter (tile costume ids don't transfer) */
+		{
+			extern s32 port_roster_spawn_fkind(s32 player, s32 fkind);
+			s32 spawn_fk = port_roster_spawn_fkind(i, sMNPlayersVSSlots[i].fkind);
+			if (spawn_fk != sMNPlayersVSSlots[i].fkind)
+			{
+				gSCManagerTransferBattleState.players[i].fkind = spawn_fk;
+				gSCManagerTransferBattleState.players[i].costume = 0;
+			}
+		}
+#endif
 
 		if (gSCManagerTransferBattleState.players[i].pkind == nFTPlayerKindMan)
 		{
@@ -5261,8 +5304,8 @@ void mnPlayersVSPortApplyRosterPage(void)
 		}
 		else
 		{
-			psobj->pos.x = (f32)(pl * 69 + 66);
-			psobj->pos.y = 155.0F;
+			psobj->pos.x = (f32)(pl * 69 + 12);
+			psobj->pos.y = 130.0F;
 		}
 	}
 	mnPlayersVSPortMakeArrows();

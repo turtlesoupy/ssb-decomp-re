@@ -891,9 +891,12 @@ static const char *port_inject_bundle_path(s32 fkind, s32 *from_single)
 /* -------------------------------------------------------------------- */
 /* Character registry: the scalable roster. The shell stages a line file  */
 /* (SSB64_ROSTER_FILE, default /roster.txt when present):                 */
-/*   slug|assigned_fkind|bundle|ui|voice|short                            */
+/*   slug|assigned_fkind|bundle|ui|voice|short[|base_fkind]               */
 /* Entry i lives on CSS page 1 + i/12, on the tile of its assigned fkind  */
 /* (the shell lays pages out and fetches the matching skeleton variant).  */
+/* base_fkind decouples the PLAYED fighter from the tile: the character   */
+/* keeps its tile position but spawns as base_fkind (skeleton, moveset,   */
+/* mesh variant). Absent/-1 = play as the tile's fighter (legacy).        */
 /* Page 0 keeps the legacy env-var bindings (vanilla + SSB64_INJECT_*).   */
 /* -------------------------------------------------------------------- */
 #define PORT_CHAR_MAX 2048
@@ -902,6 +905,7 @@ typedef struct
     char slug[64];
     char shortname[8];
     s32  fkind;          /* home tile */
+    s32  base;           /* fighter actually played; -1 = tile fighter */
     char bundle[256];
     char ui[256];
     char voice[256];
@@ -942,12 +946,12 @@ static void port_roster_parse(void)
     }
     while (sNChars < PORT_CHAR_MAX && fgets(line, sizeof line, f) != NULL)
     {
-        /* slug|fkind|bundle|ui|voice|short */
-        const char *fld[6];
-        size_t len[6];
+        /* slug|fkind|bundle|ui|voice|short[|base_fkind] */
+        const char *fld[7];
+        size_t len[7];
         s32 nf = 0;
         const char *q = line, *start = line;
-        while (nf < 6)
+        while (nf < 7)
         {
             if (*q == '|' || *q == '\n' || *q == '\r' || *q == '\0')
             {
@@ -973,6 +977,12 @@ static void port_roster_parse(void)
             if (nf > 3) port_roster_field(c->ui, sizeof c->ui, fld[3], len[3]);
             if (nf > 4) port_roster_field(c->voice, sizeof c->voice, fld[4], len[4]);
             if (nf > 5) port_roster_field(c->shortname, sizeof c->shortname, fld[5], len[5]);
+            c->base = -1;
+            if (nf > 6 && len[6] > 0)
+            {
+                c->base = atoi(fld[6]);
+                if ((u32)c->base >= OSB5_SLOTS) c->base = -1;
+            }
             sNChars++;
         }
     }
@@ -1156,6 +1166,37 @@ s32 port_roster_player_matches_tile(s32 player, s32 fkind)
         return tile < 0;        /* vanilla pick matches vanilla tile */
     }
     return sPlayerChar[player] == tile;
+}
+
+/* The fighter kind a pick on this tile actually PLAYS as: the tile
+ * character's base fighter when one is declared, else the tile itself.
+ * Drives the CSS preview spawn (so the mesh variant, skeleton and idle
+ * animation match the base fighter, not the tile position). */
+s32 port_roster_tile_spawn_fkind(s32 fkind)
+{
+    PortChar *c = port_char_at_tile(fkind);
+    if (c != NULL && c->base >= 0)
+    {
+        return c->base;
+    }
+    return fkind;
+}
+
+/* Same remap keyed by the player's recorded binding — used when the CSS
+ * hands picks to the battle: a bound character with a base fighter enters
+ * the match as that fighter. Unbound / vanilla picks pass through. */
+s32 port_roster_spawn_fkind(s32 player, s32 fkind)
+{
+    port_roster_parse();
+    if ((u32)player < 4 && sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
+    {
+        PortChar *c = &sChars[sPlayerChar[player]];
+        if (c->base >= 0)
+        {
+            return c->base;
+        }
+    }
+    return fkind;
 }
 
 /* JS bridge: the shell's search dialog requests a page switch without a
@@ -2702,10 +2743,12 @@ void port_inject_bundle(GObj *fighter_gobj)
         PortChar *c = port_char_for_player((s32)fp->player, (s32)fp->fkind, NULL);
         if (c != NULL)
         {
-            /* registry character: only when its home skeleton matches the
+            /* registry character: only when the skeleton its bundle targets
+             * (base fighter when declared, else home tile) matches the
              * fighter actually spawning (transient CSS re-makes and preset
              * players on foreign boots must not cross-skin). */
-            path = (c->fkind == (s32)fp->fkind && c->bundle[0] != '\0') ? c->bundle : NULL;
+            s32 eff = (c->base >= 0) ? c->base : c->fkind;
+            path = (eff == (s32)fp->fkind && c->bundle[0] != '\0') ? c->bundle : NULL;
         }
         else
         {
