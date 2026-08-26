@@ -1592,11 +1592,215 @@ static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
 }
 
 /* OSBV layout: ['OSBV'][portrait 8640 pre-encoded][name canvas 64x16 IA8]
- * [stock 80 pre-encoded][pal 32][vs canvas 64x12 intensity bytes] */
+ * [stock 80 pre-encoded][pal 32][vs canvas 64x12 intensity bytes]
+ * [optional emblem canvas 48x48 coverage bytes — series-emblem glyph] */
 #define OSBV_NAME_OFF   (4 + 8640)
 #define OSBV_STOCK_OFF  (OSBV_NAME_OFF + 64 * 16)
 #define OSBV_PAL_OFF    (OSBV_STOCK_OFF + 80)
 #define OSBV_VS_OFF     (OSBV_PAL_OFF + 32)
+#define OSBV_EMBL_OFF   (OSBV_VS_OFF + 64 * 12)
+#define OSBV_EMBL_W     48
+#define OSBV_EMBL_H     48
+
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+
+/* Write a coverage canvas into a sprite of ANY 4/8-bit intensity geometry,
+ * nearest-resampling both axes so the glyph's content bbox fills the
+ * sprite's drawn area (aspect preserved, centered). Canvas bytes are pure
+ * 0-255 coverage, thresholded to a flat full-intensity silhouette with a
+ * hard edge — the vanilla emblem look (the engine tints it at draw time).
+ * The bitmap data is force-converted to the port's linear texel state
+ * first (portFixupSpriteBitmapData is idempotent), and linear bytes are
+ * written, so re-running on a later reselect stays correct — writing the
+ * DRAM-swizzled state here corrupts on the second pass because the
+ * one-time draw fixup will not run again. */
+static void port_ui_write_canvas_fit(Sprite *spr, const u8 *canvas, s32 cw,
+                                     s32 ch, const char *what)
+{
+    Bitmap *bms;
+    s32 b, x, y, yy = 0, total_h = 0;
+    s32 x0 = cw, x1 = -1, y0 = ch, y1 = -1;
+    s32 dw, dh, ow, oh, ox, oy;
+    s32 peak_nib = 15;
+    f32 s;
+
+    if (spr == NULL) return;
+    portFixupSprite(spr);
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL) return;
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    if (spr->bmfmt != G_IM_FMT_I && spr->bmfmt != G_IM_FMT_IA)
+    {
+        port_log("OSBUI: %s target fmt=%d not I/IA — skipped\n", what, spr->bmfmt);
+        return;
+    }
+    if (spr->bmsiz != G_IM_SIZ_4b && spr->bmsiz != G_IM_SIZ_8b)
+    {
+        port_log("OSBUI: %s target siz=%d not 4/8-bit — skipped\n", what, spr->bmsiz);
+        return;
+    }
+    portFixupSpriteBitmapData(spr, bms);
+    for (y = 0; y < ch; y++)
+    {
+        for (x = 0; x < cw; x++)
+        {
+            if (canvas[y * cw + x] != 0)
+            {
+                if (x < x0) x0 = x;
+                if (x > x1) x1 = x;
+                if (y < y0) y0 = y;
+                if (y > y1) y1 = y;
+            }
+        }
+    }
+    if (x1 < 0)
+    {
+        x0 = 0; x1 = cw - 1; y0 = 0; y1 = ch - 1;
+    }
+    /* match the vanilla art's peak intensity so the tinted overlay keeps
+     * its stock translucency (I doubles as alpha for I-format sprites).
+     * Scanning the current texels self-calibrates per target — the CSS
+     * emblems peak at 9/15, others may differ — and is stable across
+     * rewrites since our own output peaks at the same value. */
+    {
+        s32 peak = 0;
+        for (b = 0; b < spr->nbitmaps; b++)
+        {
+            u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+            s32 n = bms[b].width_img * bms[b].actualHeight;
+            s32 i;
+            if (buf == NULL) continue;
+            if (spr->bmsiz == G_IM_SIZ_4b) n /= 2;
+            for (i = 0; i < n; i++)
+            {
+                if ((buf[i] >> 4) > peak) peak = buf[i] >> 4;
+                if (spr->bmsiz == G_IM_SIZ_4b && (buf[i] & 0xF) > peak) peak = buf[i] & 0xF;
+            }
+        }
+        if (peak > 0) peak_nib = peak;
+    }
+    for (b = 0; b < spr->nbitmaps; b++) total_h += bms[b].actualHeight;
+    dw = (spr->width > 0 && spr->width <= bms[0].width_img) ? spr->width : bms[0].width_img;
+    dh = (spr->height > 0 && spr->height <= total_h) ? spr->height : total_h;
+    s = (f32)dw / (x1 - x0 + 1);
+    if ((f32)dh / (y1 - y0 + 1) < s) s = (f32)dh / (y1 - y0 + 1);
+    ow = (s32)((x1 - x0 + 1) * s + 0.5F);
+    oh = (s32)((y1 - y0 + 1) * s + 0.5F);
+    if (ow < 1) ow = 1;
+    if (oh < 1) oh = 1;
+    ox = (dw - ow) / 2;
+    oy = (dh - oh) / 2;
+    for (b = 0; b < spr->nbitmaps; b++)
+    {
+        u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+        s32 w = bms[b].width_img;
+        s32 bpp8 = (spr->bmsiz == G_IM_SIZ_8b);
+        s32 row_bytes = bpp8 ? w : (w / 2);
+        u8 tmp[256];
+        if (buf == NULL || row_bytes > (s32)sizeof(tmp)) continue;
+        for (y = 0; y < bms[b].actualHeight; y++)
+        {
+            s32 cy = yy + y;
+            for (x = 0; x < row_bytes; x++) tmp[x] = 0;
+            for (x = 0; x < w; x++)
+            {
+                u8 v = 0, t;
+                if (x >= ox && x < ox + ow && cy >= oy && cy < oy + oh)
+                {
+                    s32 sx = x0 + (s32)((x - ox) / s);
+                    s32 sy = y0 + (s32)((cy - oy) / s);
+                    if (sx > x1) sx = x1;
+                    if (sy > y1) sy = y1;
+                    v = canvas[sy * cw + sx];
+                }
+                /* scale coverage to the target's vanilla peak intensity
+                 * (I doubles as alpha for I-format sprites; the CSS
+                 * emblems peak at 9/15 for the translucent watermark) and
+                 * mirror the nibble into both halves so the same byte
+                 * serves 4-bit (high nibble) and 8-bit. */
+                t = (u8)((v * peak_nib + 127) / 255);
+                t = (u8)((t << 4) | t);
+                if (bpp8)
+                {
+                    tmp[x] = t;
+                }
+                else if (x & 1)
+                {
+                    tmp[x / 2] |= (t >> 4);
+                }
+                else
+                {
+                    tmp[x / 2] |= (t & 0xF0);
+                }
+            }
+            /* buffer is in the port's linear texel state — write rows as-is */
+            for (x = 0; x < row_bytes; x++)
+            {
+                buf[y * row_bytes + x] = tmp[x];
+            }
+        }
+        yy += bms[b].actualHeight;
+    }
+    port_log("OSBUI: injected %s (canvas %dx%d -> %dx%d in %dx%d)\n",
+             what, (int)cw, (int)ch, (int)ow, (int)oh, (int)dw, (int)dh);
+}
+
+s32 port_ui_target_fkind(void);
+
+/* Read the OSBV emblem canvas (if the file carries one) and write it into
+ * the given emblem sprite. Shared by the menu hook and the in-match HUD
+ * (damage-backdrop) injection. */
+static void port_ui_apply_emblem(Sprite *spr, const char *what)
+{
+    static u8 canvas[OSBV_EMBL_W * OSBV_EMBL_H];
+    const char *ui = getenv("SSB64_INJECT_UI");
+    FILE *f;
+    char m[4];
+
+    if (spr == NULL || ui == NULL)
+    {
+        return;
+    }
+    f = fopen(ui, "rb");
+    if (f == NULL)
+    {
+        return;
+    }
+    if (fread(m, 1, 4, f) == 4 && m[0] == 'O' && m[3] == 'V' &&
+        fseek(f, OSBV_EMBL_OFF, SEEK_SET) == 0 &&
+        fread(canvas, 1, sizeof canvas, f) == sizeof canvas)
+    {
+        port_ui_write_canvas_fit(spr, canvas, OSBV_EMBL_W, OSBV_EMBL_H, what);
+    }
+    fclose(f);
+}
+
+/* Series-emblem hook — called wherever a menu screen makes an SObj from
+ * an llFTEmblemSprites entry (CSS card watermark, stage-select tags).
+ * The emblem file data is shared per SERIES, so replacing the injection
+ * target's emblem also restyles series-mates on the same screen (e.g.
+ * Luigi's card when Mario is the target) — acceptable for the harness. */
+void port_ui_emblem_hook(Sprite *emblem, s32 fkind)
+{
+    const char *dump = getenv("SSB64_DUMP_SPRITES");
+    const char *ui = getenv("SSB64_INJECT_UI");
+
+    if (emblem == NULL)
+    {
+        return;
+    }
+    if (dump != NULL)
+    {
+        char nm[32];
+        snprintf(nm, sizeof nm, "emblem_fk%d", (int)fkind);
+        port_ui_dump_sprite(dump, nm, emblem);
+    }
+    if (ui == NULL || fkind != port_ui_target_fkind())
+    {
+        return;
+    }
+    port_ui_apply_emblem(emblem, "emblem");
+}
 
 /* Called from the VS character-select screen right after its reloc
  * files load. portrait/name are Mario's (fkind of the injection target
@@ -1830,6 +2034,19 @@ void port_inject_bundle(GObj *fighter_gobj)
             if (st != NULL && dump != NULL)
             {
                 port_ui_dump_sprite(dump, "stock_icon", st);
+            }
+            /* in-match HUD damage-backdrop emblem (per-fighter sprite in
+             * the fighter's own data, tinted per player color) */
+            {
+                Sprite *hud_emb = (Sprite *)PORT_RESOLVE(_spr->emblem);
+                if (hud_emb != NULL && dump != NULL)
+                {
+                    port_ui_dump_sprite(dump, "hud_emblem", hud_emb);
+                }
+                if (hud_emb != NULL && ui != NULL)
+                {
+                    port_ui_apply_emblem(hud_emb, "hud_emblem");
+                }
             }
             /* stock icon pixels + costume-0 palette live at the end of the
              * OSBU file: [magic][portrait][name][stock ci4][16x u16 pal] */

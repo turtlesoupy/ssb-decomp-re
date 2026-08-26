@@ -649,6 +649,12 @@ void mnPlayersVSMakeNameAndEmblem(GObj *gobj, s32 player, s32 fkind)
 	{
 		gcRemoveSObjAll(gobj);
 
+#ifdef PORT
+		{
+			extern void port_ui_emblem_hook(Sprite *emblem, s32 fkind);
+			port_ui_emblem_hook(lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[2], emblem_offsets[fkind]), fkind);
+		}
+#endif
 		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[2], emblem_offsets[fkind]));
 		sobj->pos.x = (player * 69) + 24;
 		sobj->pos.y = 143.0F;
