@@ -5111,8 +5111,8 @@ static void mnPlayersVSPortMakeArrows(void)
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
 	/* the R sprite's chevron sits ~9px right of pos (L's ~3px left of
-	 * pos): 289 mirrors the left arrow's overlap onto its corner tile */
-	sobj->pos.x = 289.0F;
+	 * pos): 292 mirrors the left chevron's flush-outside placement */
+	sobj->pos.x = 292.0F;
 	sobj->pos.y = 88.0F;
 }
 
