@@ -927,6 +927,11 @@ void scManagerRunLoop(sb32 arg)
 			 * unlocks alongside the scene override keeps backup-mask
 			 * state consistent with where the user told us to start. */
 			gSCManagerBackupData.unlock_mask |= LBBACKUP_UNLOCK_MASK_ALL;
+			/* the CSS keys hidden tiles off fighter_mask, not unlock_mask —
+			 * grant the four unlockables too so injected characters on
+			 * Luigi/Captain/Ness/Purin slots are pickable in demo boots. */
+			gSCManagerBackupData.fighter_mask |= (u16)((1 << nFTKindLuigi) | (1 << nFTKindCaptain) |
+			                                           (1 << nFTKindNess) | (1 << nFTKindPurin));
 			port_log("SSB64: SSB64_START_SCENE override → scene=%d (unlock_mask |= ALL)\n", n);
 		}
 		const char *stage_env = getenv("SSB64_SPGAME_STAGE");
@@ -970,11 +975,13 @@ void scManagerRunLoop(sb32 arg)
 		gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
 	}
 
-	/* OpenSmash pipeline: SSB64_BOOT_BATTLE="p1fkind,p2fkind,gkind[,p2kind]"
+	/* OpenSmash pipeline: SSB64_BOOT_BATTLE="p1fkind,p2fkind,gkind[,p2kind[,p3fkind,p4fkind]]"
 	 * boots straight into a VS match (P1 human, P2 CPU lv1 by default,
 	 * 5 stock, no timer) — the mesh-iteration shortcut: no intro, no
 	 * menus. Optional 4th field makes P2 human (0=HMN, 1=CPU) so a
-	 * scripted SSB64_REPLAY_PLAY input file can drive both fighters. */
+	 * scripted SSB64_REPLAY_PLAY input file can drive both fighters.
+	 * Optional fields 5/6 add CPU players 3/4 (fkind, -1 = absent) for
+	 * multi-injection demo matches. */
 	{
 		extern char *getenv(const char *);
 		extern int sscanf(const char *, const char *, ...);
@@ -983,15 +990,19 @@ void scManagerRunLoop(sb32 arg)
 		{
 			int p1 = 0, p2 = 8, gk = 4; /* defaults: Mario vs Kirby, Dream Land */
 			int p2kind = 1;             /* default: CPU */
+			int p3 = -1, p4 = -1;       /* optional CPU players 3/4 */
+			int fks[4];
 			int i;
-			sscanf(bb, "%d,%d,%d,%d", &p1, &p2, &gk, &p2kind);
+			sscanf(bb, "%d,%d,%d,%d,%d,%d", &p1, &p2, &gk, &p2kind, &p3, &p4);
+			fks[0] = p1; fks[1] = p2; fks[2] = p3; fks[3] = p4;
 
 			gSCManagerTransferBattleState.game_type = nSCBattleGameTypeRoyal;
 			gSCManagerTransferBattleState.gkind = (u8)gk;
 			gSCManagerTransferBattleState.is_team_battle = FALSE;
 			gSCManagerTransferBattleState.game_rules = 0x2;   /* stock */
 			gSCManagerTransferBattleState.pl_count = (p2kind == 0) ? 2 : 1;
-			gSCManagerTransferBattleState.cp_count = (p2kind == 0) ? 0 : 1;
+			gSCManagerTransferBattleState.cp_count = ((p2kind == 0) ? 0 : 1) +
+			                                         ((p3 >= 0) ? 1 : 0) + ((p4 >= 0) ? 1 : 0);
 			gSCManagerTransferBattleState.time_limit = 99;
 			gSCManagerTransferBattleState.stocks = 4;         /* 0-based: 5 stocks */
 			gSCManagerTransferBattleState.handicap = 0;
@@ -1005,8 +1016,11 @@ void scManagerRunLoop(sb32 arg)
 				SCPlayerData *pd = &gSCManagerTransferBattleState.players[i];
 				pd->level = 1;
 				pd->handicap = 9;
-				pd->pkind = (i == 0) ? 0 : (i == 1) ? (u8)((p2kind == 0) ? 0 : 1) : 2; /* 0=HMN,1=CPU,2=none */
-				pd->fkind = (i == 0) ? (u8)p1 : (u8)p2;
+				/* 0=HMN,1=CPU,2=none */
+				pd->pkind = (i == 0) ? 0
+				          : (i == 1) ? (u8)((p2kind == 0) ? 0 : 1)
+				          : (fks[i] >= 0) ? 1 : 2;
+				pd->fkind = (fks[i] >= 0) ? (u8)fks[i] : (u8)nFTKindNull;
 				pd->team = (u8)i;
 				pd->player = (u8)i;
 				pd->costume = 0;
@@ -1015,13 +1029,26 @@ void scManagerRunLoop(sb32 arg)
 				/* eval mode (both human): hide the 1P/2P floating tags so
 				 * screenshot comparisons stay clean. */
 				pd->tag = (p2kind == 0) ? (u8)GMCOMMON_PLAYERS_MAX : (u8)i;
-				pd->stock_count = (i <= 1) ? 4 : -1;
+				pd->stock_count = (i <= 1 || fks[i] >= 0) ? 4 : -1;
 			}
 
 			gSCManagerSceneData.gkind = (u8)gk;
-			gSCManagerSceneData.scene_curr = nSCKindVSBattle;
-			gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
-			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d\n", p1, p2, gk, p2kind);
+			if (getenv("SSB64_START_SCENE") == NULL)
+			{
+				gSCManagerSceneData.scene_curr = nSCKindVSBattle;
+				gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
+			}
+			else
+			{
+				/* CSS-preset mode: SSB64_START_SCENE (16 = VS CSS) keeps the
+				 * scene override, and the select screen restores this roster
+				 * with every token pre-placed (mnPlayersVSInitPlayer reads
+				 * TransferBattleState when is_reset_players is clear). Use
+				 * fkind -1 for a slot the player should pick live. */
+				gSCManagerTransferBattleState.is_reset_players = FALSE;
+			}
+			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d\n",
+			         p1, p2, gk, p2kind, p3, p4);
 		}
 	}
 	port_log("SSB64: scManagerRunLoop — controllers=%d scene=%d\n",

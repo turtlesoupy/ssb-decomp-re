@@ -3632,8 +3632,9 @@ void mnPlayers1PGameFuncStart(void)
 	 * loads its own copies of the portrait/name files.
 	 * Files: [0]=MNPlayersCommon (names), [4]=MNPlayersPortraits. */
 	{
-		extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg);
+		extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 fkind);
 		extern s32 port_ui_target_fkind(void);
+		extern const char *port_ui_path_for_fkind(s32 fkind);
 		static const intptr_t css1p_portrait_offs[] =
 		{
 			llMNPlayersPortraitsMarioSprite,  llMNPlayersPortraitsFoxSprite,
@@ -3652,12 +3653,19 @@ void mnPlayers1PGameFuncStart(void)
 			llMNPlayersCommonKirbyTextSprite,      llMNPlayersCommonPikachuTextSprite,
 			llMNPlayersCommonJigglypuffTextSprite, llMNPlayersCommonNessTextSprite
 		};
-		s32 tfk1 = port_ui_target_fkind();
-		if (tfk1 < 0 || tfk1 > 11) tfk1 = 0;
-		port_ui_css_hook(
-			lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[4], css1p_portrait_offs[tfk1]),
-			lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[0], css1p_name_offs[tfk1]),
-			lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[4], llMNPlayersPortraitsPortraitFireBgSprite));
+		s32 tfk1;
+		for (tfk1 = 0; tfk1 < 12; tfk1++)
+		{
+			if (port_ui_path_for_fkind(tfk1) == NULL)
+			{
+				continue;
+			}
+			port_ui_css_hook(
+				lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[4], css1p_portrait_offs[tfk1]),
+				lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[0], css1p_name_offs[tfk1]),
+				lbRelocGetFileData(Sprite*, sMNPlayers1PGameFiles[4], llMNPlayersPortraitsPortraitFireBgSprite),
+				tfk1);
+		}
 	}
 #endif
 

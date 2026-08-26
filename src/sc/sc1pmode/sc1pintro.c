@@ -2212,8 +2212,9 @@ void sc1PIntroFuncStart(void)
     /* OpenSmash: dump/inject the big VS-splash name sprite (CharacterNames
      * file). Injection targets Mario's slot, like the CSS sprites. */
     {
-        extern void port_ui_vs_hook(Sprite *name_sprite);
+        extern void port_ui_vs_hook(Sprite *name_sprite, s32 fkind);
         extern s32 port_ui_target_fkind(void);
+        extern const char *port_ui_path_for_fkind(s32 fkind);
         static const intptr_t vs_name_offs[] =
         {
             llCharacterNamesMarioSprite,   llCharacterNamesFoxSprite,
@@ -2223,9 +2224,15 @@ void sc1PIntroFuncStart(void)
             llCharacterNamesKirbySprite,   llCharacterNamesPikachuSprite,
             llCharacterNamesPurinSprite,   llCharacterNamesNessSprite
         };
-        s32 tfk = port_ui_target_fkind();
-        if (tfk < 0 || tfk > 11) tfk = 0;
-        port_ui_vs_hook(lbRelocGetFileData(Sprite*, sSC1PIntroFiles[1], vs_name_offs[tfk]));
+        s32 tfk;
+        for (tfk = 0; tfk < 12; tfk++)
+        {
+            if (port_ui_path_for_fkind(tfk) == NULL)
+            {
+                continue;
+            }
+            port_ui_vs_hook(lbRelocGetFileData(Sprite*, sSC1PIntroFiles[1], vs_name_offs[tfk]), tfk);
+        }
     }
 #endif
     gcMakeGObjSPAfter(0, sc1PIntroFuncRun, 0, GOBJ_PRIORITY_DEFAULT);

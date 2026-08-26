@@ -5465,9 +5465,10 @@ void mnPlayersVSFuncStart(void)
 	/* OpenSmash: dump/inject the fighter-kind 2D sprites (CSS portrait +
 	 * name text; the stock icon is handled at fighter creation). */
 	{
-		extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg);
+		extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 fkind);
 		extern void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr);
 		extern s32 port_ui_target_fkind(void);
+		extern const char *port_ui_path_for_fkind(s32 fkind);
 		static const intptr_t css_portrait_offs[] =
 		{
 			llMNPlayersPortraitsMarioSprite,  llMNPlayersPortraitsFoxSprite,
@@ -5486,12 +5487,20 @@ void mnPlayersVSFuncStart(void)
 			llMNPlayersCommonKirbyTextSprite,      llMNPlayersCommonPikachuTextSprite,
 			llMNPlayersCommonJigglypuffTextSprite, llMNPlayersCommonNessTextSprite
 		};
-		s32 tfk = port_ui_target_fkind();
-		if (tfk < 0 || tfk > 11) tfk = 0;
-		port_ui_css_hook(
-			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], css_portrait_offs[tfk]),
-			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], css_name_offs[tfk]),
-			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite));
+		s32 tfk;
+		for (tfk = 0; tfk < 12; tfk++)
+		{
+			if (port_ui_path_for_fkind(tfk) == NULL &&
+			    (getenv("SSB64_DUMP_SPRITES") == NULL || tfk != port_ui_target_fkind()))
+			{
+				continue;
+			}
+			port_ui_css_hook(
+				lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], css_portrait_offs[tfk]),
+				lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], css_name_offs[tfk]),
+				lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite),
+				tfk);
+		}
 		if (getenv("SSB64_DUMP_SPRITES") != NULL)
 		{
 			/* full roster dump: every name + portrait sprite, as pipeline

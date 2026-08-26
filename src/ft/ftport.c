@@ -482,6 +482,8 @@ void port_dump_frame(GObj *fighter_gobj)
 
 #include <PR/gbi.h>
 #include <stdio.h>
+#include <stddef.h>
+#include <string.h>
 
 extern void *malloc(size_t);
 extern void free(void *);
@@ -762,7 +764,11 @@ typedef struct OSB5State
     s32 owner_fkind;
 } OSB5State;
 
-static OSB5State sOsb5;
+/* One slot per vanilla fighter kind: a match can field several injected
+ * characters at once (demo mode: human + injected CPUs), each replacing
+ * a DIFFERENT fkind. Slot k belongs to fkind k. */
+#define OSB5_SLOTS 12
+static OSB5State sOsb5Slots[OSB5_SLOTS];
 static Gfx sOsb5NullDL[2];
 /* Null for parts whose flags&0xF==1: those parts' union field is a
  * Gfx** token-pair array (two-list draw), NOT a plain DL. Writing a
@@ -770,16 +776,139 @@ static Gfx sOsb5NullDL[2];
  * 0xE7000000) dereferenced as a DL pointer — the Yoshi crash. */
 static u32 sOsb5NullDLPair[2] = { 0, 0 };
 
-/* the set of joints to blank: explicit BLNK list when present, else the
- * skinned joint set. */
-static s32 osb5_blank_count(void)
+static OSB5State *osb5_slot(s32 fkind)
 {
-    return (sOsb5.nblank > 0) ? sOsb5.nblank : sOsb5.njoints;
+    return ((u32)fkind < OSB5_SLOTS) ? &sOsb5Slots[fkind] : NULL;
 }
 
-static s32 osb5_blank_id(s32 k)
+/* -------------------------------------------------------------------- */
+/* Injection roster: which bundle/ui/voice serves each fkind.            */
+/* SSB64_INJECT_SET      = "path:fkind,path:fkind,..."                   */
+/* SSB64_INJECT_UI_SET   = "path:fkind,..."                              */
+/* SSB64_INJECT_VOICE_SET= "path:fkind,..."                              */
+/* The single-target vars (SSB64_INJECT_BUNDLE/FKIND/UI/VOICE) remain    */
+/* as compat and fill the target fkind's entry when the sets don't.      */
+/* -------------------------------------------------------------------- */
+typedef struct
 {
-    return (sOsb5.nblank > 0) ? (s32)sOsb5.blank_ids[k] : (s32)sOsb5.joint_ids[k];
+    char bundle[512];
+    char ui[512];
+    char voice[512];
+    s32 has_bundle;   /* 1 = from set, 2 = from single-target compat vars */
+    s32 has_ui;
+    s32 has_voice;
+} OSB5SetEntry;
+static OSB5SetEntry sInjectSet[OSB5_SLOTS];
+static s32 sInjectSetParsed = 0;
+
+s32 port_ui_target_fkind(void);
+
+static void port_inject_parse_one_set(const char *env, size_t field_off, size_t flag_off)
+{
+    const char *p = getenv(env);
+    while (p != NULL && *p != '\0')
+    {
+        const char *comma = strchr(p, ',');
+        const char *end = (comma != NULL) ? comma : p + strlen(p);
+        const char *colon = NULL;
+        {
+            const char *q;
+            for (q = p; q < end; q++) if (*q == ':') colon = q;
+        }
+        if (colon != NULL && colon > p)
+        {
+            s32 fk = atoi(colon + 1);
+            size_t n = (size_t)(colon - p);
+            if ((u32)fk < OSB5_SLOTS && n < 511)
+            {
+                OSB5SetEntry *e = &sInjectSet[fk];
+                char *dst = (char *)e + field_off;
+                memcpy(dst, p, n);
+                dst[n] = '\0';
+                *(s32 *)((char *)e + flag_off) = 1;
+            }
+        }
+        p = (comma != NULL) ? comma + 1 : NULL;
+    }
+}
+
+static void port_inject_parse_set(void)
+{
+    if (sInjectSetParsed)
+    {
+        return;
+    }
+    sInjectSetParsed = 1;
+    port_inject_parse_one_set("SSB64_INJECT_SET",
+                              offsetof(OSB5SetEntry, bundle), offsetof(OSB5SetEntry, has_bundle));
+    port_inject_parse_one_set("SSB64_INJECT_UI_SET",
+                              offsetof(OSB5SetEntry, ui), offsetof(OSB5SetEntry, has_ui));
+    port_inject_parse_one_set("SSB64_INJECT_VOICE_SET",
+                              offsetof(OSB5SetEntry, voice), offsetof(OSB5SetEntry, has_voice));
+    {
+        s32 tfk = port_ui_target_fkind();
+        if ((u32)tfk < OSB5_SLOTS)
+        {
+            OSB5SetEntry *e = &sInjectSet[tfk];
+            const char *v;
+            if (!e->has_bundle && (v = getenv("SSB64_INJECT_BUNDLE")) != NULL && strlen(v) < 511)
+            {
+                memcpy(e->bundle, v, strlen(v) + 1);
+                e->has_bundle = 2;
+            }
+            if (!e->has_ui && (v = getenv("SSB64_INJECT_UI")) != NULL && strlen(v) < 511)
+            {
+                memcpy(e->ui, v, strlen(v) + 1);
+                e->has_ui = 2;
+            }
+            if (!e->has_voice && (v = getenv("SSB64_INJECT_VOICE")) != NULL && strlen(v) < 511)
+            {
+                memcpy(e->voice, v, strlen(v) + 1);
+                e->has_voice = 2;
+            }
+        }
+    }
+}
+
+/* Bundle path for a fighter kind (NULL when that kind is not injected). */
+static const char *port_inject_bundle_path(s32 fkind, s32 *from_single)
+{
+    port_inject_parse_set();
+    if ((u32)fkind >= OSB5_SLOTS || !sInjectSet[fkind].has_bundle)
+    {
+        return NULL;
+    }
+    if (from_single != NULL)
+    {
+        *from_single = (sInjectSet[fkind].has_bundle == 2);
+    }
+    return sInjectSet[fkind].bundle;
+}
+
+/* OSBV/OSBU path for a fighter kind (NULL when none). */
+const char *port_ui_path_for_fkind(s32 fkind)
+{
+    port_inject_parse_set();
+    return ((u32)fkind < OSB5_SLOTS && sInjectSet[fkind].has_ui) ? sInjectSet[fkind].ui : NULL;
+}
+
+/* Announcer clip path for a fighter kind (NULL when none). */
+const char *port_voice_path_for_fkind(s32 fkind)
+{
+    port_inject_parse_set();
+    return ((u32)fkind < OSB5_SLOTS && sInjectSet[fkind].has_voice) ? sInjectSet[fkind].voice : NULL;
+}
+
+/* the set of joints to blank: explicit BLNK list when present, else the
+ * skinned joint set. */
+static s32 osb5_blank_count(OSB5State *o)
+{
+    return (o->nblank > 0) ? o->nblank : o->njoints;
+}
+
+static s32 osb5_blank_id(OSB5State *o, s32 k)
+{
+    return (o->nblank > 0) ? (s32)o->blank_ids[k] : (s32)o->joint_ids[k];
 }
 
 static void osb5_blank_joint(FTStruct *fp, s32 jid)
@@ -827,18 +956,25 @@ s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
 {
     s32 k;
     FTStruct *fp;
-    if (sOsb5.vtx == NULL || sOsb5.owner != fighter_gobj || joint_id == 0)
+    OSB5State *o;
+    if (joint_id == 0)
     {
         return 0;
     }
     fp = ftGetStruct((GObj *)fighter_gobj);
-    if (fp == NULL || (s32)fp->fkind != sOsb5.owner_fkind)
+    if (fp == NULL)
     {
         return 0;
     }
-    for (k = 0; k < osb5_blank_count(); k++)
+    o = osb5_slot((s32)fp->fkind);
+    if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj ||
+        (s32)fp->fkind != o->owner_fkind)
     {
-        if (osb5_blank_id(k) == joint_id)
+        return 0;
+    }
+    for (k = 0; k < osb5_blank_count(o); k++)
+    {
+        if (osb5_blank_id(o, k) == joint_id)
         {
             return 1;
         }
@@ -921,27 +1057,29 @@ static void osb5_inv3(f32 m[3][3], f32 out[3][3])
 void port_osb5_skin_update(GObj *fighter_gobj)
 {
     FTStruct *fp;
+    OSB5State *o;
     f32 jo[32][3], jm[32][3][3];
     f32 t0o[3], t0m[3][3], t0inv[3][3];
     s32 k, i;
 
     if (getenv("SSB64_NO_SKIN") != NULL) return;
-    if (sOsb5.vtx == NULL || sOsb5.owner != fighter_gobj)
+    fp = ftGetStruct(fighter_gobj);
+    if (fp == NULL) return;
+    o = osb5_slot((s32)fp->fkind);
+    if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj)
     {
         return;
     }
-    fp = ftGetStruct(fighter_gobj);
-    if (fp == NULL) return;
-    if ((s32)fp->fkind != sOsb5.owner_fkind) return;
+    if ((s32)fp->fkind != o->owner_fkind) return;
 
     if (getenv("SSB64_NO_SELFHEAL") == NULL)
     {
     /* self-heal: modelpart/detail code has several sites that re-point a
      * part DL (face blinks, LOD switches, respawn resets). Whatever wrote
      * a vanilla DL onto a replaced joint, blank it again this tick. */
-    for (k = 0; k < osb5_blank_count(); k++)
+    for (k = 0; k < osb5_blank_count(o); k++)
     {
-        s32 jid = osb5_blank_id(k);
+        s32 jid = osb5_blank_id(o, k);
         if (jid != 0 && jid < FTPARTS_JOINT_NUM_MAX && !osb5_joint_is_blanked(fp, jid))
         {
             osb5_blank_joint(fp, jid);
@@ -957,9 +1095,9 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         }
     }
     }
-    for (k = 0; k < sOsb5.njoints; k++)
+    for (k = 0; k < o->njoints; k++)
     {
-        s32 jid = (s32)sOsb5.joint_ids[k];
+        s32 jid = (s32)o->joint_ids[k];
         if (fp->joints[jid] == NULL) return;
         {
             const char *upto = getenv("SSB64_SKIN_UPTO");
@@ -977,17 +1115,17 @@ void port_osb5_skin_update(GObj *fighter_gobj)
      * position is skinned with the same LBS as the mesh, so the root
      * tracks the true surface through any pose. translate is
      * parent-local, so solve through the parent DObj's frame. */
-    for (k = 0; k < sOsb5.naccs; k++)
+    for (k = 0; k < o->naccs; k++)
     {
-        s32 jid = (s32)sOsb5.accs[k].joint;
-        s32 vi = (s32)sOsb5.accs[k].vert;
+        s32 jid = (s32)o->accs[k].joint;
+        s32 vi = (s32)o->accs[k].vert;
         DObj *aj;
         OSB5Vert *sv;
         f32 acc[3] = {0.0f, 0.0f, 0.0f};
         f32 nacc[3] = {0.0f, 0.0f, 0.0f};
         f32 po[3], pm[3][3], pinv[3][3], lo[3], wsum = 0.0f, nlen;
         s32 t, c;
-        if (jid <= 0 || jid >= FTPARTS_JOINT_NUM_MAX || vi < 0 || vi >= sOsb5.nverts)
+        if (jid <= 0 || jid >= FTPARTS_JOINT_NUM_MAX || vi < 0 || vi >= o->nverts)
         {
             continue;
         }
@@ -996,15 +1134,15 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         {
             continue;
         }
-        sv = &sOsb5.src[vi];
+        sv = &o->src[vi];
         for (t = 0; t < 4; t++)
         {
             f32 w = (f32)sv->w[t] / 255.0f;
             f32 *bl, *bn;
             s32 kk = sv->j[t];
             if (w <= 0.0f) continue;
-            bl = sOsb5.bind_local[vi][t];
-            bn = sOsb5.bind_nrm[vi][t];
+            bl = o->bind_local[vi][t];
+            bn = o->bind_nrm[vi][t];
             for (c = 0; c < 3; c++)
             {
                 acc[c] += w * (jm[kk][c][0]*bl[0] + jm[kk][c][1]*bl[1] + jm[kk][c][2]*bl[2] + jo[kk][c]);
@@ -1025,7 +1163,7 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         {
             for (c = 0; c < 3; c++)
             {
-                acc[c] -= nacc[c] * (sOsb5.accs[k].embed / nlen);
+                acc[c] -= nacc[c] * (o->accs[k].embed / nlen);
             }
         }
         osb5_dobj_frame(aj->parent, po, pm);
@@ -1042,9 +1180,9 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     }
 
     if (getenv("SSB64_SKIN_FRAMES_ONLY") != NULL) return;
-    for (i = 0; i < sOsb5.nverts; i++)
+    for (i = 0; i < o->nverts; i++)
     {
-        OSB5Vert *v = &sOsb5.src[i];
+        OSB5Vert *v = &o->src[i];
         f32 acc[3] = {0.0f, 0.0f, 0.0f};
         f32 nacc[3] = {0.0f, 0.0f, 0.0f};
         f32 wl[3], nw[3], nl[3], nlen, wsum = 0.0f;
@@ -1055,8 +1193,8 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             f32 *bl, *bn;
             s32 kk = v->j[t];
             if (w <= 0.0f) continue;
-            bl = sOsb5.bind_local[i][t];
-            bn = sOsb5.bind_nrm[i][t];
+            bl = o->bind_local[i][t];
+            bn = o->bind_nrm[i][t];
             acc[0] += w * (jm[kk][0][0]*bl[0] + jm[kk][0][1]*bl[1] + jm[kk][0][2]*bl[2] + jo[kk][0]);
             acc[1] += w * (jm[kk][1][0]*bl[0] + jm[kk][1][1]*bl[1] + jm[kk][1][2]*bl[2] + jo[kk][1]);
             acc[2] += w * (jm[kk][2][0]*bl[0] + jm[kk][2][1]*bl[1] + jm[kk][2][2]*bl[2] + jo[kk][2]);
@@ -1070,9 +1208,9 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             acc[0] /= wsum; acc[1] /= wsum; acc[2] /= wsum;
         }
         wl[0] = acc[0] - t0o[0]; wl[1] = acc[1] - t0o[1]; wl[2] = acc[2] - t0o[2];
-        sOsb5.vtx[i].n.ob[0] = (short)(t0inv[0][0]*wl[0] + t0inv[0][1]*wl[1] + t0inv[0][2]*wl[2]);
-        sOsb5.vtx[i].n.ob[1] = (short)(t0inv[1][0]*wl[0] + t0inv[1][1]*wl[1] + t0inv[1][2]*wl[2]);
-        sOsb5.vtx[i].n.ob[2] = (short)(t0inv[2][0]*wl[0] + t0inv[2][1]*wl[1] + t0inv[2][2]*wl[2]);
+        o->vtx[i].n.ob[0] = (short)(t0inv[0][0]*wl[0] + t0inv[0][1]*wl[1] + t0inv[0][2]*wl[2]);
+        o->vtx[i].n.ob[1] = (short)(t0inv[1][0]*wl[0] + t0inv[1][1]*wl[1] + t0inv[1][2]*wl[2]);
+        o->vtx[i].n.ob[2] = (short)(t0inv[2][0]*wl[0] + t0inv[2][1]*wl[1] + t0inv[2][2]*wl[2]);
         /* normals: same LBS rotation, back to joint-0 local (the DL's
          * space), renormalized to s8 so lighting tracks the pose. */
         nw[0] = t0inv[0][0]*nacc[0] + t0inv[0][1]*nacc[1] + t0inv[0][2]*nacc[2];
@@ -1084,17 +1222,19 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             nl[0] = nw[0] * (127.0f / nlen);
             nl[1] = nw[1] * (127.0f / nlen);
             nl[2] = nw[2] * (127.0f / nlen);
-            sOsb5.vtx[i].n.n[0] = (s8)nl[0];
-            sOsb5.vtx[i].n.n[1] = (s8)nl[1];
-            sOsb5.vtx[i].n.n[2] = (s8)nl[2];
+            o->vtx[i].n.n[0] = (s8)nl[0];
+            o->vtx[i].n.n[1] = (s8)nl[1];
+            o->vtx[i].n.n[2] = (s8)nl[2];
         }
     }
 }
 
-static void osb5_reset_windows(void);
+static void osb5_reset_windows(OSB5State *o);
+static OSB5State *sOsb5Loading = NULL;  /* slot whose DL is being built */
 
 static void osb5_load(FTStruct *fp, FILE *f)
 {
+    OSB5State *o = osb5_slot((s32)fp->fkind);
     u32 hdr[5];
     u32 njoints, nverts, ntris, tw, th;
     u8 *tex;
@@ -1103,27 +1243,32 @@ static void osb5_load(FTStruct *fp, FILE *f)
     u32 i, k;
     f32 jo[32][3], jm[32][3][3], jinv[32][3][3];
 
+    if (o == NULL)
+    {
+        return;
+    }
+    sOsb5Loading = o;
     /* a fighter is spawned many times per session (select screens,
      * respawns, results); each attach must start with a fresh window
-     * table or the 512-slot cap fills after ~3 attaches and the new
-     * mesh renders empty. */
-    osb5_reset_windows();
+     * table (for THIS slot) or the 512-slot cap fills after a few
+     * attaches and the new mesh renders empty. */
+    osb5_reset_windows(o);
 
     fread(hdr, 4, 5, f);
     njoints = hdr[0]; nverts = hdr[1]; ntris = hdr[2]; tw = hdr[3]; th = hdr[4];
     if (njoints > 32) { port_log("OSB5: too many joints\n"); return; }
 
-    sOsb5.njoints = (s32)njoints;
-    sOsb5.nverts = (s32)nverts;
-    sOsb5.nblank = 0;
-    sOsb5.naccs = 0;
-    fread(sOsb5.joint_ids, 4, njoints, f);
+    o->njoints = (s32)njoints;
+    o->nverts = (s32)nverts;
+    o->nblank = 0;
+    o->naccs = 0;
+    fread(o->joint_ids, 4, njoints, f);
 
     tex = (u8 *)malloc(tw * th * 2);
     fread(tex, 2, tw * th, f);
 
-    sOsb5.src = (OSB5Vert *)malloc(sizeof(OSB5Vert) * nverts);
-    fread(sOsb5.src, sizeof(OSB5Vert), nverts, f);
+    o->src = (OSB5Vert *)malloc(sizeof(OSB5Vert) * nverts);
+    fread(o->src, sizeof(OSB5Vert), nverts, f);
 
     /* inverse bind: prefer the bind skeleton embedded in the bundle
      * (the pose the verts were authored against). Binding to the LIVE
@@ -1156,9 +1301,9 @@ static void osb5_load(FTStruct *fp, FILE *f)
             u32 nb = 0;
             if (fread(&nb, 4, 1, f) == 1 && nb <= 64)
             {
-                if (fread(sOsb5.blank_ids, 4, nb, f) == nb)
+                if (fread(o->blank_ids, 4, nb, f) == nb)
                 {
-                    sOsb5.nblank = (s32)nb;
+                    o->nblank = (s32)nb;
                     port_log("OSB5: blank list of %u joints\n", nb);
                 }
             }
@@ -1177,12 +1322,12 @@ static void osb5_load(FTStruct *fp, FILE *f)
                     {
                         break;
                     }
-                    sOsb5.accs[k].joint = aids[0];
-                    sOsb5.accs[k].vert = aids[1];
-                    sOsb5.accs[k].embed = ae;
+                    o->accs[k].joint = aids[0];
+                    o->accs[k].vert = aids[1];
+                    o->accs[k].embed = ae;
                 }
-                sOsb5.naccs = (s32)k;
-                port_log("OSB5: %d accessory vertex pin(s)\n", sOsb5.naccs);
+                o->naccs = (s32)k;
+                port_log("OSB5: %d accessory vertex pin(s)\n", o->naccs);
             }
         }
         fseek(f, vpos, SEEK_SET);
@@ -1194,53 +1339,53 @@ static void osb5_load(FTStruct *fp, FILE *f)
         {
             for (k = 0; k < njoints; k++)
             {
-                s32 jid = (s32)sOsb5.joint_ids[k];
+                s32 jid = (s32)o->joint_ids[k];
                 if (fp->joints[jid] == NULL) { port_log("OSB5: missing joint %d\n", jid); return; }
                 osb5_joint_frame(fp, jid, jo[k], jm[k]);
                 osb5_inv3(jm[k], jinv[k]);
             }
         }
     }
-    sOsb5.bind_local = malloc(sizeof(*sOsb5.bind_local) * nverts);
+    o->bind_local = malloc(sizeof(*o->bind_local) * nverts);
     for (i = 0; i < nverts; i++)
     {
-        OSB5Vert *v = &sOsb5.src[i];
+        OSB5Vert *v = &o->src[i];
         s32 t;
         for (t = 0; t < 4; t++)
         {
             s32 kk = v->j[t];
             f32 d0 = v->x - jo[kk][0], d1 = v->y - jo[kk][1], d2 = v->z - jo[kk][2];
-            sOsb5.bind_local[i][t][0] = jinv[kk][0][0]*d0 + jinv[kk][0][1]*d1 + jinv[kk][0][2]*d2;
-            sOsb5.bind_local[i][t][1] = jinv[kk][1][0]*d0 + jinv[kk][1][1]*d1 + jinv[kk][1][2]*d2;
-            sOsb5.bind_local[i][t][2] = jinv[kk][2][0]*d0 + jinv[kk][2][1]*d1 + jinv[kk][2][2]*d2;
+            o->bind_local[i][t][0] = jinv[kk][0][0]*d0 + jinv[kk][0][1]*d1 + jinv[kk][0][2]*d2;
+            o->bind_local[i][t][1] = jinv[kk][1][0]*d0 + jinv[kk][1][1]*d1 + jinv[kk][1][2]*d2;
+            o->bind_local[i][t][2] = jinv[kk][2][0]*d0 + jinv[kk][2][1]*d1 + jinv[kk][2][2]*d2;
         }
     }
-    sOsb5.bind_nrm = malloc(sizeof(*sOsb5.bind_nrm) * nverts);
+    o->bind_nrm = malloc(sizeof(*o->bind_nrm) * nverts);
     for (i = 0; i < nverts; i++)
     {
-        OSB5Vert *v = &sOsb5.src[i];
+        OSB5Vert *v = &o->src[i];
         f32 n0 = (f32)v->n[0], n1 = (f32)v->n[1], n2 = (f32)v->n[2];
         s32 t;
         for (t = 0; t < 4; t++)
         {
             s32 kk = v->j[t];
-            sOsb5.bind_nrm[i][t][0] = jinv[kk][0][0]*n0 + jinv[kk][0][1]*n1 + jinv[kk][0][2]*n2;
-            sOsb5.bind_nrm[i][t][1] = jinv[kk][1][0]*n0 + jinv[kk][1][1]*n1 + jinv[kk][1][2]*n2;
-            sOsb5.bind_nrm[i][t][2] = jinv[kk][2][0]*n0 + jinv[kk][2][1]*n1 + jinv[kk][2][2]*n2;
+            o->bind_nrm[i][t][0] = jinv[kk][0][0]*n0 + jinv[kk][0][1]*n1 + jinv[kk][0][2]*n2;
+            o->bind_nrm[i][t][1] = jinv[kk][1][0]*n0 + jinv[kk][1][1]*n1 + jinv[kk][1][2]*n2;
+            o->bind_nrm[i][t][2] = jinv[kk][2][0]*n0 + jinv[kk][2][1]*n1 + jinv[kk][2][2]*n2;
         }
     }
 
     /* live Vtx array + one DL on joint 0; st/normals static, ob updated
      * per frame by port_osb5_skin_update(). */
-    sOsb5.vtx = (Vtx *)malloc(sizeof(Vtx) * nverts);
+    o->vtx = (Vtx *)malloc(sizeof(Vtx) * nverts);
     for (i = 0; i < nverts; i++)
     {
-        OSB5Vert *v = &sOsb5.src[i];
-        sOsb5.vtx[i].n.ob[0] = 0; sOsb5.vtx[i].n.ob[1] = 0; sOsb5.vtx[i].n.ob[2] = 0;
-        sOsb5.vtx[i].n.flag = 0;
-        sOsb5.vtx[i].n.tc[0] = v->s; sOsb5.vtx[i].n.tc[1] = v->t;
-        sOsb5.vtx[i].n.n[0] = v->n[0]; sOsb5.vtx[i].n.n[1] = v->n[1]; sOsb5.vtx[i].n.n[2] = v->n[2];
-        sOsb5.vtx[i].n.a = 0xFF;
+        OSB5Vert *v = &o->src[i];
+        o->vtx[i].n.ob[0] = 0; o->vtx[i].n.ob[1] = 0; o->vtx[i].n.ob[2] = 0;
+        o->vtx[i].n.flag = 0;
+        o->vtx[i].n.tc[0] = v->s; o->vtx[i].n.tc[1] = v->t;
+        o->vtx[i].n.n[0] = v->n[0]; o->vtx[i].n.n[1] = v->n[1]; o->vtx[i].n.n[2] = v->n[2];
+        o->vtx[i].n.a = 0xFF;
     }
 
     dl = (Gfx *)malloc(sizeof(Gfx) * (32 + ntris * 2 + nverts / 8));
@@ -1338,9 +1483,9 @@ static void osb5_load(FTStruct *fp, FILE *f)
             {
                 continue;
             }
-            for (k = 0; k < osb5_blank_count(); k++)
+            for (k = 0; k < osb5_blank_count(o); k++)
             {
-                if (osb5_blank_id(k) == jj)
+                if (osb5_blank_id(o, (s32)k) == jj)
                 {
                     osb5_blank_joint(fp, jj);
                     break;
@@ -1358,37 +1503,54 @@ static void osb5_load(FTStruct *fp, FILE *f)
             fp->joints[0]->dl = dl;
         }
     }
-    sOsb5.owner = fp->fighter_gobj;
-    sOsb5.owner_fkind = (s32)fp->fkind;
+    o->owner = fp->fighter_gobj;
+    o->owner_fkind = (s32)fp->fkind;
     port_log("OSB5: skinned mesh attached (%u verts, %u tris, %u joints)\n",
              nverts, ntris, njoints);
     port_osb5_skin_update(fp->fighter_gobj);
 }
 
-/* window table: skin update copies skinned verts into window arrays */
-typedef struct { Vtx *wv; s32 *idx; u32 count; } OSB5Window;
-static OSB5Window sOsb5Windows[512];
+/* window table: skin update copies skinned verts into window arrays.
+ * Windows are tagged with the slot whose DL owns them so per-slot
+ * reloads (each fighter respawn) don't orphan other slots' windows. */
+typedef struct { Vtx *wv; s32 *idx; u32 count; OSB5State *slot; } OSB5Window;
+/* Each skinned mesh needs ~300 windows (30-vert gSPVertex batches), and a
+ * demo roster runs several meshes at once — 512 silently truncated the
+ * SECOND character's later windows (face detail), leaving those verts at
+ * the origin. Size for a full 4-fighter roster with headroom. */
+#define OSB5_MAX_WINDOWS 4096
+static OSB5Window sOsb5Windows[OSB5_MAX_WINDOWS];
 static u32 sOsb5NumWindows = 0;
 
-static void osb5_reset_windows(void)
+static void osb5_reset_windows(OSB5State *o)
 {
-    u32 w;
+    u32 w, out = 0;
     for (w = 0; w < sOsb5NumWindows; w++)
     {
-        free(sOsb5Windows[w].idx);
-        sOsb5Windows[w].idx = NULL;
-        sOsb5Windows[w].wv = NULL;   /* referenced by the previous DL; leak it */
+        if (sOsb5Windows[w].slot == o)
+        {
+            free(sOsb5Windows[w].idx);   /* wv referenced by the old DL; leak it */
+            continue;
+        }
+        sOsb5Windows[out++] = sOsb5Windows[w];
     }
-    sOsb5NumWindows = 0;
+    sOsb5NumWindows = out;
 }
 
 void osb5_add_window(Vtx *wv, s32 *map_idx, u32 count)
 {
-    if (sOsb5NumWindows < 512)
+    if (sOsb5NumWindows >= OSB5_MAX_WINDOWS)
+    {
+        port_log("OSB5: window table FULL (%d) — mesh will render incomplete\n",
+                 (int)sOsb5NumWindows);
+        return;
+    }
+    if (1)
     {
         sOsb5Windows[sOsb5NumWindows].wv = wv;
         sOsb5Windows[sOsb5NumWindows].idx = map_idx;
         sOsb5Windows[sOsb5NumWindows].count = count;
+        sOsb5Windows[sOsb5NumWindows].slot = sOsb5Loading;
         sOsb5NumWindows++;
     }
 }
@@ -1396,13 +1558,17 @@ void osb5_add_window(Vtx *wv, s32 *map_idx, u32 count)
 void port_osb5_copy_windows(void)
 {
     u32 w, i;
-    if (sOsb5.vtx == NULL) return;
     for (w = 0; w < sOsb5NumWindows; w++)
     {
         OSB5Window *win = &sOsb5Windows[w];
+        OSB5State *o = win->slot;
+        if (o == NULL || o->vtx == NULL)
+        {
+            continue;
+        }
         for (i = 0; i < win->count; i++)
         {
-            win->wv[i] = sOsb5.vtx[win->idx[i]];
+            win->wv[i] = o->vtx[win->idx[i]];
         }
     }
 }
@@ -1750,10 +1916,9 @@ s32 port_ui_target_fkind(void);
 /* Read the OSBV emblem canvas (if the file carries one) and write it into
  * the given emblem sprite. Shared by the menu hook and the in-match HUD
  * (damage-backdrop) injection. */
-static void port_ui_apply_emblem(Sprite *spr, const char *what)
+static void port_ui_apply_emblem(Sprite *spr, const char *ui, const char *what)
 {
     static u8 canvas[OSBV_EMBL_W * OSBV_EMBL_H];
-    const char *ui = getenv("SSB64_INJECT_UI");
     FILE *f;
     char m[4];
 
@@ -1783,7 +1948,7 @@ static void port_ui_apply_emblem(Sprite *spr, const char *what)
 void port_ui_emblem_hook(Sprite *emblem, s32 fkind)
 {
     const char *dump = getenv("SSB64_DUMP_SPRITES");
-    const char *ui = getenv("SSB64_INJECT_UI");
+    const char *ui = port_ui_path_for_fkind(fkind);
 
     if (emblem == NULL)
     {
@@ -1795,11 +1960,11 @@ void port_ui_emblem_hook(Sprite *emblem, s32 fkind)
         snprintf(nm, sizeof nm, "emblem_fk%d", (int)fkind);
         port_ui_dump_sprite(dump, nm, emblem);
     }
-    if (ui == NULL || fkind != port_ui_target_fkind())
+    if (ui == NULL)
     {
         return;
     }
-    port_ui_apply_emblem(emblem, "emblem");
+    port_ui_apply_emblem(emblem, ui, "emblem");
 }
 
 /* Called from the VS character-select screen right after its reloc
@@ -1856,17 +2021,19 @@ s32 port_voice_announce_filter(u16 id)
     {
         return 0;
     }
-    if (id == port_voice_announce_name_fgm(port_ui_target_fkind()))
-    {
-        portVoiceInjectPlay();
-        return 1;
-    }
     for (i = 0; i < 12; i++)
     {
         if (id == port_voice_announce_name_fgm(i))
         {
+            const char *path = port_voice_path_for_fkind(i);
+            if (path != NULL)
+            {
+                portVoiceInjectPlayPath(path);
+                return 1;
+            }
+            /* a vanilla name supersedes a still-running injected clip */
             portVoiceInjectStop();
-            break;
+            return 0;
         }
     }
     return 0;
@@ -1915,11 +2082,11 @@ static void port_ui_write_sprite(Sprite *spr, FILE *f, const char *what)
     port_log("OSBUI: injected %s (%d bitmaps)\n", what, (int)spr->nbitmaps);
 }
 
-void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg)
+void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 fkind)
 {
     const char *dump = getenv("SSB64_DUMP_SPRITES");
-    const char *ui = getenv("SSB64_INJECT_UI");
-    if (dump != NULL)
+    const char *ui = port_ui_path_for_fkind(fkind);
+    if (dump != NULL && fkind == port_ui_target_fkind())
     {
         port_ui_dump_sprite(dump, "css_portrait", portrait);
         port_ui_dump_sprite(dump, "css_name", name_text);
@@ -1962,10 +2129,10 @@ void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg)
 
 /* VS-splash name (CharacterNames file): dumped as vs_name, injected from
  * the OSBU section after the stock palette. */
-void port_ui_vs_hook(Sprite *name_sprite)
+void port_ui_vs_hook(Sprite *name_sprite, s32 fkind)
 {
     const char *dump = getenv("SSB64_DUMP_SPRITES");
-    const char *ui = getenv("SSB64_INJECT_UI");
+    const char *ui = port_ui_path_for_fkind(fkind);
     if (dump != NULL)
     {
         port_ui_dump_sprite(dump, "vs_name", name_sprite);
@@ -2004,29 +2171,38 @@ void port_ui_vs_hook(Sprite *name_sprite)
 void port_inject_bundle(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
-    const char *path = getenv("SSB64_INJECT_BUNDLE");
-    const char *fk_env = getenv("SSB64_INJECT_FKIND");
-    const char *pl_env = getenv("SSB64_INJECT_PLAYER");
-    int want_fkind = (fk_env != NULL) ? atoi(fk_env) : 0;
+    const char *path;
+    s32 from_single = 0;
     FILE *f;
     char magic[4];
     u32 nparts, p;
     u32 replaced = 0;
 
-    if (path == NULL || fp == NULL || (int)fp->fkind != want_fkind)
+    if (fp == NULL)
     {
         return;
     }
-    /* Optional per-player gate: lets a vanilla twin of the same fkind
-     * fight alongside the injected one for A/B comparison. */
-    if (pl_env != NULL && (int)fp->player != atoi(pl_env))
+    path = port_inject_bundle_path((s32)fp->fkind, &from_single);
+    if (path == NULL)
     {
         return;
+    }
+    /* Optional per-player gate (single-target mode only): lets a vanilla
+     * twin of the same fkind fight alongside the injected one for A/B
+     * comparison. Roster (SET) entries always apply to every player of
+     * their fkind. */
+    if (from_single)
+    {
+        const char *pl_env = getenv("SSB64_INJECT_PLAYER");
+        if (pl_env != NULL && (int)fp->player != atoi(pl_env))
+        {
+            return;
+        }
     }
 
     {
         const char *dump = getenv("SSB64_DUMP_SPRITES");
-        const char *ui = getenv("SSB64_INJECT_UI");
+        const char *ui = port_ui_path_for_fkind((s32)fp->fkind);
         if ((dump != NULL || ui != NULL) && fp->attr != NULL && fp->attr->sprites != NULL)
         {
             FTSprites *_spr = (FTSprites *)PORT_RESOLVE(fp->attr->sprites);
@@ -2045,7 +2221,7 @@ void port_inject_bundle(GObj *fighter_gobj)
                 }
                 if (hud_emb != NULL && ui != NULL)
                 {
-                    port_ui_apply_emblem(hud_emb, "hud_emblem");
+                    port_ui_apply_emblem(hud_emb, ui, "hud_emblem");
                 }
             }
             /* stock icon pixels + costume-0 palette live at the end of the
