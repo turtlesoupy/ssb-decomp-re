@@ -2633,20 +2633,6 @@ void mnPlayersVSUpdatePuckDisplay(GObj *gobj, s32 player)
 		gobj->flags = GOBJ_FLAG_HIDDEN;
 		break;
 	}
-#ifdef PORT
-	/* OpenSmash roster: a placed chip belongs to the character it was
-	 * placed ON — hide it while the current page shows someone else on
-	 * that tile (the pick itself stays bound to the player). */
-	if (gobj->flags == GOBJ_FLAG_NONE &&
-	    sMNPlayersVSSlots[player].fkind != nFTKindNull)
-	{
-		extern s32 port_roster_player_matches_tile(s32 player, s32 fkind);
-		if (!port_roster_player_matches_tile(player, sMNPlayersVSSlots[player].fkind))
-		{
-			gobj->flags = GOBJ_FLAG_HIDDEN;
-		}
-	}
-#endif
 	return;
 }
 
@@ -5129,19 +5115,33 @@ void mnPlayersVSPortApplyRosterPage(void)
 			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite),
 			fk);
 	}
-	/* placed chips: only show a player's puck when the CURRENT page's tile
-	 * still holds the character they picked (their card keeps the pick;
-	 * the chip belongs to the tile) */
+	/* placed chips: when the CURRENT page still shows a player's pick on
+	 * its tile the chip sits on that tile; otherwise it returns to rest
+	 * near the player's card (still grabbable, so re-picking a character
+	 * — e.g. moving a CPU chip onto someone new — works from any page;
+	 * the bound pick itself is untouched until the chip is re-placed) */
 	for (pl = 0; pl < GMCOMMON_PLAYERS_MAX; pl++)
 	{
+		SObj *psobj;
 		if (sMNPlayersVSSlots[pl].puck == NULL || sMNPlayersVSSlots[pl].is_selected == FALSE ||
 		    sMNPlayersVSSlots[pl].fkind == nFTKindNull)
 		{
 			continue;
 		}
-		sMNPlayersVSSlots[pl].puck->flags =
-			port_roster_player_matches_tile(pl, sMNPlayersVSSlots[pl].fkind)
-				? GOBJ_FLAG_NONE : GOBJ_FLAG_HIDDEN;
+		psobj = SObjGetStruct(sMNPlayersVSSlots[pl].puck);
+		if (psobj == NULL)
+		{
+			continue;
+		}
+		if (port_roster_player_matches_tile(pl, sMNPlayersVSSlots[pl].fkind))
+		{
+			mnPlayersVSCenterPuckInPortrait(sMNPlayersVSSlots[pl].puck, sMNPlayersVSSlots[pl].fkind);
+		}
+		else
+		{
+			psobj->pos.x = (f32)(pl * 69 + 44);
+			psobj->pos.y = 161.0F;
+		}
 	}
 	mnPlayersVSPortMakeArrows();
 }
@@ -5149,29 +5149,37 @@ void mnPlayersVSPortApplyRosterPage(void)
 static void mnPlayersVSPortPageInput(void)
 {
 	extern s32 port_roster_take_page_request(void);
+	static s32 sFlipCooldown = 0;
 	s32 i, dir = 0;
 	s32 req;
 	if (port_roster_page_count() <= 1)
 	{
 		return;
 	}
+	if (sFlipCooldown > 0)
+	{
+		sFlipCooldown--;
+	}
 	for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
 	{
 		if (gSYControllerDevices[i].button_tap & R_TRIG) dir = 1;
 		if (gSYControllerDevices[i].button_tap & L_TRIG) dir = -1;
-		/* clickable arrows: A (mouse click) with the player's cursor in
-		 * the arrow strips at the roster's left/right edge */
+		/* the hand cursor over an arrow + A pages, like everything else
+		 * on this screen */
 		if ((gSYControllerDevices[i].button_tap & A_BUTTON) &&
 		    sMNPlayersVSSlots[i].cursor != NULL)
 		{
 			SObj *cs = SObjGetStruct(sMNPlayersVSSlots[i].cursor);
 			if (cs != NULL)
 			{
-				f32 cx = cs->pos.x, cy = cs->pos.y;
-				if (cy >= 45.0F && cy <= 120.0F)
+				/* fingertip = sprite pos + half the hand, so the visible
+				 * pointer decides; strips sit OUTSIDE the tile grid
+				 * (~16..304) so tile presses never double-fire */
+				f32 cx = cs->pos.x + 8.0F, cy = cs->pos.y + 8.0F;
+				if (cy >= 50.0F && cy <= 128.0F)
 				{
-					if (cx <= 26.0F) dir = -1;
-					else if (cx >= 292.0F) dir = 1;
+					if (cx <= 15.0F) dir = -1;
+					else if (cx >= 305.0F) dir = 1;
 				}
 			}
 		}
@@ -5181,12 +5189,14 @@ static void mnPlayersVSPortPageInput(void)
 	{
 		port_roster_set_page(req);
 		mnPlayersVSPortApplyRosterPage();
+		sFlipCooldown = 12;
 		return;
 	}
-	if (dir != 0)
+	if (dir != 0 && sFlipCooldown == 0)
 	{
 		port_roster_set_page(port_roster_page() + dir);
 		mnPlayersVSPortApplyRosterPage();
+		sFlipCooldown = 12;   /* one flip per press (taps can double-edge) */
 	}
 }
 #endif
