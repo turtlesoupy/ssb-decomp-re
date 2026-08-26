@@ -763,6 +763,17 @@ typedef struct OSB5State
      * (the VS CSS re-makes the preview GObj every ~10 ticks, so it
      * flashed continuously while a token sat on a custom character). */
     Gfx *mesh_dl;
+    /* Variant fit scale from the bundle's SCAL section (1.0 = none): the
+     * conform keeps the chibi silhouette, which on tall small-headed
+     * skeletons (samus) tops out ~20-30% above the vanilla fighter. The
+     * pipeline emits the measured ratio and the game scales the fighter's
+     * ROOT joint by it — the same mechanism the CSS card scales use, so
+     * pose, hitboxes and feet-on-ground all stay consistent. Applied
+     * idempotently in skin_update: whenever someone else rewrites the
+     * root scale (CSS card scale, results screen), we detect the change
+     * and re-multiply. */
+    f32 fit_scale;
+    f32 scl_applied;
     /* Successful skin fills since attach. The DL is attached at the SECOND
      * fill, not the first: the attach-time fill runs inside
      * ftManagerMakeFighter while the fighter still sits at its default
@@ -1499,6 +1510,22 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         return;
     }
 
+    /* Variant fit scale: multiply into the root joint scale, rebasing
+     * whenever an external writer (CSS card scale, results screen) has
+     * replaced our last value. Root joint 0 (TopN) sits at ground level,
+     * so the character scales about its feet. */
+    if (o->fit_scale < 0.995f && fp->joints[0] != NULL)
+    {
+        f32 cur = fp->joints[0]->scale.vec.f.x;
+        if (cur != o->scl_applied && cur > 0.0f)
+        {
+            o->scl_applied = cur * o->fit_scale;
+            fp->joints[0]->scale.vec.f.x = o->scl_applied;
+            fp->joints[0]->scale.vec.f.y = o->scl_applied;
+            fp->joints[0]->scale.vec.f.z = o->scl_applied;
+        }
+    }
+
     /* Invalidate the gmCollision per-part matrix memo for the whole
      * skeleton before reading joint frames (same call the engine makes
      * after transform mutations — see ftmain.c and the character
@@ -1758,6 +1785,8 @@ static void osb5_load(FTStruct *fp, FILE *f)
     o->nverts = (s32)nverts;
     o->nblank = 0;
     o->naccs = 0;
+    o->fit_scale = 1.0f;
+    o->scl_applied = 0.0f;
     fread(o->joint_ids, 4, njoints, f);
 
     /* Fail-open on a skeleton mismatch: every tracked joint must exist on
@@ -1843,6 +1872,16 @@ static void osb5_load(FTStruct *fp, FILE *f)
                 }
                 o->naccs = (s32)k;
                 port_log("OSB5: %d accessory vertex pin(s)\n", o->naccs);
+            }
+            have_tag = (fread(tag, 1, 4, f) == 4);
+        }
+        if (have_tag && tag[0] == 'S' && tag[1] == 'C' && tag[2] == 'A' && tag[3] == 'L')
+        {
+            f32 fs = 1.0f;
+            if (fread(&fs, 4, 1, f) == 1 && fs >= 0.5f && fs <= 1.0f)
+            {
+                o->fit_scale = fs;
+                port_log("OSB5: fit scale x%.3f\n", fs);
             }
         }
         fseek(f, vpos, SEEK_SET);
