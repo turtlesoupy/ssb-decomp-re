@@ -1103,6 +1103,16 @@ void scManagerRunLoop(sb32 arg)
 			sMNPlayersVSTimeValue    = SCBATTLE_TIMELIMIT_INFINITE;
 			sMNPlayersVSIsTeamBattle = FALSE;
 
+			/* Clear the board first. mnPlayersVSGetFreeCostume() below scans
+			 * the *other* slots for an already-taken costume on the same
+			 * fighter, so any stale fkind/costume left over from a previous
+			 * character-select session would skew the allocation. */
+			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+			{
+				sMNPlayersVSSlots[i].fkind   = nFTKindNull;
+				sMNPlayersVSSlots[i].costume = 0;
+			}
+
 			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
 			{
 				MNPlayersSlotVS *slot = &sMNPlayersVSSlots[i];
@@ -1113,11 +1123,23 @@ void scManagerRunLoop(sb32 arg)
 				slot->pkind = (i == 0) ? nFTPlayerKindMan
 				            : (i == 1) ? ((p2kind == 0) ? nFTPlayerKindMan : nFTPlayerKindCom)
 				            : (fks[i] >= 0) ? nFTPlayerKindCom : nFTPlayerKindNot;
-				slot->fkind     = (fks[i] >= 0) ? fks[i] : nFTKindNull;
-				slot->costume   = 0;
-				slot->shade     = 0;
-				slot->team      = i;
-				slot->cpu_level = 1;
+				slot->fkind = (fks[i] >= 0) ? fks[i] : nFTKindNull;
+
+				/* Assigning in port order reproduces the character-select's
+				 * incremental picking: slots below this one already hold a
+				 * real fighter and costume, slots above are still nFTKindNull
+				 * and cannot collide. Without this a ditto match booted two
+				 * identically-coloured fighters — the CSS never does that. */
+				slot->costume = (fks[i] >= 0) ? mnPlayersVSGetFreeCostume(slot->fkind, i) : 0;
+				slot->shade   = 0;
+				slot->team    = i;
+
+				/* Inherited rather than restated, exactly as the CSS seeds it
+				 * (mnplayersvs.c: sMNPlayersVSSlots[p].cpu_level =
+				 * ...players[p].level). Default battle state says 3; the old
+				 * hardcoded 1 made CPUs barely fight. port_enhancement_cpu_level_9()
+				 * still overrides this at VSBattle entry when enabled. */
+				slot->cpu_level = gSCManagerTransferBattleState.players[i].level;
 				slot->handicap  = FTCOMMON_HANDICAP_DEFAULT;
 			}
 
