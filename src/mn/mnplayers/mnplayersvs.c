@@ -5169,6 +5169,7 @@ void mnPlayersVSPortApplyRosterPage(void);
 sb32 mnPlayersVSPortCheckPageArrowPress(GObj *gobj)
 {
 	SObj *sobj = SObjGetStruct(gobj);
+	s32 player = gobj->user_data.s;
 	f32 pos_x, pos_y;
 	s32 dir = 0;
 
@@ -5176,22 +5177,43 @@ sb32 mnPlayersVSPortCheckPageArrowPress(GObj *gobj)
 	{
 		return FALSE;
 	}
+	/* probe 1: fingertip (pointer convention, same as the TIME arrows);
+	 * y reaches 118 so the chevron's lower half (y104..115) is pressable */
 	pos_y = sobj->pos.y + 3.0F;
-	if ((pos_y < 28.0F) || (pos_y > 112.0F))
+	if ((pos_y >= 28.0F) && (pos_y <= 118.0F))
 	{
-		return FALSE;
+		/* zones centered on the drawn chevrons (left ~x2..10, right
+		 * ~x292..302); the few-pixel overlap with the outer tiles' border
+		 * slivers is intentional — the pager wins there */
+		pos_x = sobj->pos.x + 20.0F;
+		if (pos_x <= 26.0F || sobj->pos.x <= 2.0F)
+		{
+			dir = -1;
+		}
+		else if (pos_x >= 292.0F)
+		{
+			dir = 1;
+		}
 	}
-	/* zones centered on the drawn chevrons (left ~x2..10, right
-	 * ~x292..302); the few-pixel overlap with the outer tiles' border
-	 * slivers is intentional — the pager wins there */
-	pos_x = sobj->pos.x + 20.0F;
-	if (pos_x <= 26.0F || sobj->pos.x <= 2.0F)
+	/* probe 2, only while carrying a token: the player aims the CHIP,
+	 * which rides at cursor + (11,-14) (26x24 sprite) — a few px off the
+	 * fingertip, enough to fall out of probe 1's window. Flip when the
+	 * chip's center sits on a chevron (17..24 / 296..303, y 104..115). */
+	if ((dir == 0) && (sMNPlayersVSSlots[player].held_player != -1))
 	{
-		dir = -1;
-	}
-	else if (pos_x >= 292.0F)
-	{
-		dir = 1;
+		pos_x = sobj->pos.x + 24.0F;
+		pos_y = sobj->pos.y + -2.0F;
+		if ((pos_y >= 95.0F) && (pos_y <= 123.0F))
+		{
+			if (pos_x <= 32.0F)
+			{
+				dir = -1;
+			}
+			else if (pos_x >= 288.0F)
+			{
+				dir = 1;
+			}
+		}
 	}
 	if (dir == 0)
 	{
