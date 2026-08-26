@@ -2714,6 +2714,15 @@ void port_inject_bundle(GObj *fighter_gobj)
     }
     if (path == NULL)
     {
+        /* uninjected spawn: disown any mesh slot still pointing at this
+         * GObj — the pool reuses addresses, and a stale owner match (same
+         * gobj, same fkind after re-picking vanilla on the injected
+         * character's home tile) would keep blanking the vanilla mesh */
+        OSB5State *o = osb5_slot((s32)fp->player);
+        if (o != NULL && o->owner == fighter_gobj)
+        {
+            o->owner = NULL;
+        }
         return;
     }
     /* Optional per-player gate (single-target mode only): lets a vanilla
