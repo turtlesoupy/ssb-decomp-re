@@ -2347,6 +2347,63 @@ void port_ui_restore(Sprite *spr)
     }
 }
 
+/* Give an SObj a PRIVATE copy of its sprite's bitmaps + texels. The CSS
+ * card name/emblem SObjs otherwise reference the shared per-fkind sprite
+ * data, which the roster page repaints rewrite — a placed card would
+ * morph into whatever the current page shows on that tile. Cloning at
+ * selection time pins the card to the pick. Buffers are copied in the
+ * converted state and registered as synthetic so the one-time draw
+ * fixups skip them. */
+extern unsigned int portRelocRegisterPointer(void *ptr);
+extern void portMarkSyntheticSprite(void *sprite, void *bitmaps, unsigned int nbitmaps, void **bufs);
+
+void port_ui_privatize_sprite(Sprite *spr)
+{
+    Bitmap *bms;
+    Bitmap *clone;
+    void *bufs[8];
+    s32 b, n;
+
+    if (spr == NULL)
+    {
+        return;
+    }
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL)
+    {
+        return;
+    }
+    n = spr->nbitmaps;
+    if (n <= 0 || n > 8)
+    {
+        return;
+    }
+    /* source is fully converted already (snapshot/write machinery forces
+     * the fixups before any roster repaint) */
+    portFixupSpriteBitmapData(spr, bms);
+    clone = (Bitmap *)malloc(sizeof(Bitmap) * n);
+    if (clone == NULL)
+    {
+        return;
+    }
+    for (b = 0; b < n; b++)
+    {
+        u8 *src = (u8 *)PORT_RESOLVE(bms[b].buf);
+        u32 nbytes = port_ui_sprite_bytes(spr, bms, b);
+        u8 *dst;
+        clone[b] = bms[b];
+        dst = (u8 *)malloc(nbytes);
+        if (src != NULL && dst != NULL)
+        {
+            memcpy(dst, src, nbytes);
+        }
+        clone[b].buf = portRelocRegisterPointer(dst);
+        bufs[b] = dst;
+    }
+    spr->bitmap = portRelocRegisterPointer(clone);
+    portMarkSyntheticSprite(spr, clone, (unsigned int)n, bufs);
+}
+
 /* Series-emblem hook — called wherever a menu screen makes an SObj from
  * an llFTEmblemSprites entry (CSS card watermark, stage-select tags).
  * The emblem file data is shared per SERIES, so replacing the injection

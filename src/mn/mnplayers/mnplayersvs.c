@@ -660,6 +660,14 @@ void mnPlayersVSMakeNameAndEmblem(GObj *gobj, s32 player, s32 fkind)
 		sobj->pos.y = 143.0F;
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 		sobj->sprite.attr |= SP_TRANSPARENT;
+#ifdef PORT
+		/* OpenSmash roster: pin the card's emblem to THIS pick — the
+		 * shared per-fkind sprite data gets repainted on page flips */
+		{
+			extern void port_ui_privatize_sprite(Sprite *spr);
+			port_ui_privatize_sprite(&sobj->sprite);
+		}
+#endif
 
 		if (sMNPlayersVSSlots[player].pkind == nFTPlayerKindMan)
 		{
@@ -678,6 +686,13 @@ void mnPlayersVSMakeNameAndEmblem(GObj *gobj, s32 player, s32 fkind)
 		sobj->pos.y = 201.0F;
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 		sobj->sprite.attr |= SP_TRANSPARENT;
+#ifdef PORT
+		/* same pinning for the card's name text */
+		{
+			extern void port_ui_privatize_sprite(Sprite *spr);
+			port_ui_privatize_sprite(&sobj->sprite);
+		}
+#endif
 	}
 }
 
@@ -4303,8 +4318,10 @@ void mnPlayersVSPuckAdjustPortraitEdge(s32 player)
 		if (!port_roster_player_matches_tile(player, sMNPlayersVSSlots[player].fkind))
 		{
 			SObj *ps = SObjGetStruct(sMNPlayersVSSlots[player].puck);
-			f32 rx = (f32)(player * 69 + 44);
-			f32 ry = 161.0F;
+			/* flush against the card's right edge so the preview stays
+			 * visible (the chip disc draws ~9px left of pos) */
+			f32 rx = (f32)(player * 69 + 66);
+			f32 ry = 155.0F;
 			if (ps != NULL)
 			{
 				sMNPlayersVSSlots[player].puck_vel_x = (rx - ps->pos.x) / 6.0F;
@@ -5222,8 +5239,8 @@ void mnPlayersVSPortApplyRosterPage(void)
 		}
 		else
 		{
-			psobj->pos.x = (f32)(pl * 69 + 44);
-			psobj->pos.y = 161.0F;
+			psobj->pos.x = (f32)(pl * 69 + 66);
+			psobj->pos.y = 155.0F;
 		}
 	}
 	mnPlayersVSPortMakeArrows();
