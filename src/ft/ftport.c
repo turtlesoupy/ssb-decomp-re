@@ -1480,9 +1480,24 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     o = osb5_slot((s32)fp->player);
     if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj)
     {
+        if (getenv("SSB64_OSB5_DEBUG") != NULL && o != NULL && o->vtx != NULL && o->dbg_ticks < 3)
+        {
+            port_log("OSB5DBG: bail owner: slot owner=%p gobj=%p player=%d\n",
+                     (void *)o->owner, (void *)fighter_gobj, (int)fp->player);
+            o->dbg_ticks++;
+        }
         return;
     }
-    if ((s32)fp->fkind != o->owner_fkind) return;
+    if ((s32)fp->fkind != o->owner_fkind)
+    {
+        if (getenv("SSB64_OSB5_DEBUG") != NULL && o->dbg_ticks < 3)
+        {
+            port_log("OSB5DBG: bail fkind: fp=%d owner_fkind=%d\n",
+                     (int)fp->fkind, (int)o->owner_fkind);
+            o->dbg_ticks++;
+        }
+        return;
+    }
 
     /* Invalidate the gmCollision per-part matrix memo for the whole
      * skeleton before reading joint frames (same call the engine makes
@@ -1529,14 +1544,30 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     for (k = 0; k < o->njoints; k++)
     {
         s32 jid = (s32)o->joint_ids[k];
-        if (fp->joints[jid] == NULL) return;
+        if (fp->joints[jid] == NULL)
+        {
+            if (getenv("SSB64_OSB5_DEBUG") != NULL && o->dbg_ticks < 3)
+            {
+                port_log("OSB5DBG: bail joint %d (id %d) NULL\n", (int)k, (int)jid);
+                o->dbg_ticks++;
+            }
+            return;
+        }
         {
             const char *upto = getenv("SSB64_SKIN_UPTO");
             if (upto != NULL && k >= atoi(upto)) continue;
         }
         osb5_joint_frame(fp, jid, jo[k], jm[k]);
     }
-    if (fp->joints[0] == NULL) return;
+    if (fp->joints[0] == NULL)
+    {
+        if (getenv("SSB64_OSB5_DEBUG") != NULL && o->dbg_ticks < 3)
+        {
+            port_log("OSB5DBG: bail root joint NULL\n");
+            o->dbg_ticks++;
+        }
+        return;
+    }
     if (getenv("SSB64_NO_ROOTFRAME") != NULL) return;
     osb5_joint_frame(fp, 0, t0o, t0m);
     /* SSB64_OSB5_DEBUG=1: dump the frames the skinner actually reads for
@@ -1728,6 +1759,25 @@ static void osb5_load(FTStruct *fp, FILE *f)
     o->nblank = 0;
     o->naccs = 0;
     fread(o->joint_ids, 4, njoints, f);
+
+    /* Fail-open on a skeleton mismatch: every tracked joint must exist on
+     * the fighter actually spawning. A bundle conformed for a different
+     * base (e.g. the default mario-variant .osb injected onto samus) would
+     * otherwise blank this fighter's body, then bail out of every skin
+     * update on the missing joint — and since the deferred attach hides
+     * the GObj until the first successful fill, the fighter stayed
+     * INVISIBLE forever. Abort before touching anything: the fighter
+     * plays with its vanilla mesh and the log names the bad joint. */
+    for (i = 0; i < njoints; i++)
+    {
+        u32 jid = o->joint_ids[i];
+        if (jid >= FTPARTS_JOINT_NUM_MAX || fp->joints[jid] == NULL)
+        {
+            port_log("OSB5: bundle/skeleton mismatch — joint id %u absent on fkind=%d; injection aborted (vanilla mesh kept)\n",
+                     jid, (int)fp->fkind);
+            return;
+        }
+    }
 
     tex = (u8 *)malloc(tw * th * 2);
     fread(tex, 2, tw * th, f);
