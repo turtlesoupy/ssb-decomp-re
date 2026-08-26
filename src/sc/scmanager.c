@@ -1142,8 +1142,25 @@ void scManagerRunLoop(sb32 arg)
 			/* ---- deltas the commit functions do not own ---- */
 			gSCManagerTransferBattleState.game_type = nSCBattleGameTypeRoyal;
 			gSCManagerTransferBattleState.gkind = (u8)gk;
-			gSCManagerTransferBattleState.item_toggles = 0;
-			gSCManagerTransferBattleState.item_appearance_rate = nSCBattleItemSwitchNone;
+
+			/* Items are deliberately NOT set here. dSCManagerDefaultBattleState
+			 * is copied into TransferBattleState at the top of this function,
+			 * so leaving them alone inherits the vanilla defaults — every item
+			 * enabled (item_toggles ~0) at Middle appearance rate, exactly what
+			 * a fresh boot through the menus gives you. This preset is a play
+			 * path first; it should differ from booting normally only where it
+			 * has to (who fights, where, and the stock ruleset below). */
+			if (p2kind == 0)
+			{
+				/* Eval mode is the one exception. Both slots human means the
+				 * match is driven by a scripted SSB64_REPLAY_PLAY input file
+				 * for screenshot diffing, and item spawns are RNG-driven — a
+				 * crate drifting into frame makes frame-N captures differ run
+				 * to run and defeats the harness. Same condition that forces
+				 * the CP tag below, for the same reason. */
+				gSCManagerTransferBattleState.item_toggles = 0;
+				gSCManagerTransferBattleState.item_appearance_rate = nSCBattleItemSwitchNone;
+			}
 
 			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
 			{
