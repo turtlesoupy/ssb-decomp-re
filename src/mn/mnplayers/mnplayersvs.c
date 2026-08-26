@@ -5099,21 +5099,30 @@ static void mnPlayersVSPortMakeArrows(void)
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 35, GOBJ_PRIORITY_DEFAULT, ~0);
 	sMNPlayersVSPortArrowsGObj = gobj;
 
+	if (getenv("SSB64_DUMP_SPRITES") != NULL)
+	{
+		extern void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr);
+		port_ui_dump_sprite(getenv("SSB64_DUMP_SPRITES"), "pager_arrow_l",
+		                    lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowLSprite));
+		port_ui_dump_sprite(getenv("SSB64_DUMP_SPRITES"), "pager_arrow_r",
+		                    lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowRSprite));
+	}
+
 	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowLSprite));
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
-	/* CRT-margin thinking is obsolete on modern displays: the arrows
-	 * ride slightly OVER the bottom corner tiles' outer edges */
-	sobj->pos.x = 18.0F;
-	sobj->pos.y = 88.0F;
+	/* both arrow sprites are 7x11 chevrons drawn from pos.x — symmetry
+	 * is exact arithmetic. Bottom-left corner of the NESS tile (grid
+	 * x16..304, bottom row ends ~y117) */
+	sobj->pos.x = 17.0F;
+	sobj->pos.y = 104.0F;
 
 	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowRSprite));
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
-	/* the R sprite's chevron sits ~9px right of pos (L's ~3px left of
-	 * pos): 292 mirrors the left chevron's flush-outside placement */
-	sobj->pos.x = 292.0F;
-	sobj->pos.y = 88.0F;
+	/* bottom-right corner of the JIGGLYPUFF tile: 304 - 7 - 1 */
+	sobj->pos.x = 296.0F;
+	sobj->pos.y = 104.0F;
 }
 
 /* Cursor A-press hit test for the pager, called from the CSS cursor's
