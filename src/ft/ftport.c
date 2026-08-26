@@ -910,7 +910,9 @@ static PortChar sChars[PORT_CHAR_MAX];
 static s32 sNChars = 0;
 static s32 sRosterParsed = 0;
 static s32 sTileChar[OSB5_SLOTS] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
-static s32 sPlayerChar[4] = { -1, -1, -1, -1 };
+/* -2 = unbound (current tile binding decides), -1 = explicitly vanilla,
+ * >=0 = registry character index */
+static s32 sPlayerChar[4] = { -2, -2, -2, -2 };
 static s32 sRosterPage = 0;
 
 static void port_roster_field(char *dst, size_t cap, const char *src, size_t n)
@@ -1021,12 +1023,19 @@ s32 port_roster_char_count(void)
 }
 
 /* pages: 0 = vanilla/legacy bindings; 1.. = registry dozen per page */
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+EMSCRIPTEN_KEEPALIVE
+#endif
 s32 port_roster_page_count(void)
 {
     port_roster_parse();
     return 1 + (sNChars + OSB5_SLOTS - 1) / OSB5_SLOTS;
 }
 
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 s32 port_roster_page(void)
 {
     return sRosterPage;
@@ -1074,10 +1083,15 @@ static PortChar *port_char_for_player(s32 player, s32 fkind, s32 *out_idx)
     PortChar *c = NULL;
     s32 idx = -1;
     port_roster_parse();
-    if ((u32)player < 4 && sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
+    if ((u32)player < 4 && sPlayerChar[player] != -2)
     {
-        idx = sPlayerChar[player];
-        c = &sChars[idx];
+        /* explicit binding (CSS selection or SSB64_PLAYER_CHARS): -1 is a
+         * deliberate vanilla pick and must NOT fall through to the tile */
+        if (sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
+        {
+            idx = sPlayerChar[player];
+            c = &sChars[idx];
+        }
     }
     else if ((u32)fkind < OSB5_SLOTS && sTileChar[fkind] >= 0)
     {
@@ -1088,15 +1102,79 @@ static PortChar *port_char_for_player(s32 player, s32 fkind, s32 *out_idx)
     return c;
 }
 
-/* Record a fighter spawn as a selection: CSS preview spawns happen the
- * moment a token lands on a tile, so the tile's character sticks to that
- * player through page flips and into the match. */
-void port_roster_record_player(s32 player, s32 idx)
+/* Explicit selection binding, called by the CSS when a player's token
+ * lands on a tile (fkind chosen) or leaves it. Binds the CURRENT page's
+ * tile character (or explicit vanilla, -1) so the pick sticks through
+ * page flips and into the match. */
+void port_roster_bind_player(s32 player, s32 fkind)
+{
+    if ((u32)player >= 4)
+    {
+        return;
+    }
+    port_roster_parse();
+    if ((u32)fkind < OSB5_SLOTS && sTileChar[fkind] >= 0)
+    {
+        sPlayerChar[player] = sTileChar[fkind];
+        port_log("ROSTER: player %d bound to %s (tile fk%d)\n",
+                 (int)player, sChars[sTileChar[fkind]].slug, (int)fkind);
+    }
+    else
+    {
+        /* vanilla tile (or legacy env tile): explicit vanilla so a stale
+         * roster pick can't shadow it; legacy env bindings key off the
+         * fkind path and are unaffected */
+        sPlayerChar[player] = -1;
+    }
+}
+
+void port_roster_unbind_player(s32 player)
 {
     if ((u32)player < 4)
     {
-        sPlayerChar[player] = idx;
+        sPlayerChar[player] = -2;
     }
+}
+
+/* Does the player's bound character match what the CURRENT page shows on
+ * this tile? Drives the CSS chip visibility across page flips. */
+s32 port_roster_player_matches_tile(s32 player, s32 fkind)
+{
+    s32 tile;
+    port_roster_parse();
+    if ((u32)player >= 4 || (u32)fkind >= OSB5_SLOTS)
+    {
+        return 1;
+    }
+    tile = sTileChar[fkind];
+    if (sPlayerChar[player] == -2)
+    {
+        return 1;               /* nothing bound yet — leave the CSS alone */
+    }
+    if (sPlayerChar[player] < 0)
+    {
+        return tile < 0;        /* vanilla pick matches vanilla tile */
+    }
+    return sPlayerChar[player] == tile;
+}
+
+/* JS bridge: the shell's search dialog requests a page switch without a
+ * reload; the CSS polls and applies it on its own frame. */
+static volatile s32 sPageRequest = -1;
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+EMSCRIPTEN_KEEPALIVE
+#endif
+void port_roster_request_page(s32 page)
+{
+    sPageRequest = page;
+}
+
+s32 port_roster_take_page_request(void)
+{
+    s32 r = sPageRequest;
+    sPageRequest = -1;
+    return r;
 }
 
 /* UI pack for a spawning fighter: the player's bound character wins,
@@ -1742,8 +1820,8 @@ static void osb5_load(FTStruct *fp, FILE *f)
     }
     o->owner = fp->fighter_gobj;
     o->owner_fkind = (s32)fp->fkind;
-    port_log("OSB5: skinned mesh attached (%u verts, %u tris, %u joints)\n",
-             nverts, ntris, njoints);
+    port_log("OSB5: skinned mesh attached (%u verts, %u tris, %u joints) player=%d fkind=%d gobj=%p\n",
+             nverts, ntris, njoints, (int)fp->player, (int)fp->fkind, (void *)fp->fighter_gobj);
     port_osb5_skin_update(fp->fighter_gobj);
 }
 
@@ -2348,10 +2426,8 @@ s32 port_voice_announce_filter(u16 id)
 {
     s32 i;
 
-    if (!portVoiceInjectAvailable())
-    {
-        return 0;
-    }
+    /* no Available() gate: the roster provides per-tile clips without the
+     * legacy SSB64_INJECT_VOICE env being set */
     for (i = 0; i < 12; i++)
     {
         if (id == port_voice_announce_name_fgm(i))
@@ -2374,13 +2450,7 @@ s32 port_voice_announce_filter(u16 id)
  * Extra tics to wait so a longer generated name can finish first. */
 s32 port_voice_results_extra_wait_tics(void)
 {
-    s32 dur;
-
-    if (!portVoiceInjectAvailable())
-    {
-        return 0;
-    }
-    dur = portVoiceInjectDurationTics();
+    s32 dur = portVoiceInjectDurationTics();   /* 0 when no clip active */
     return (dur > 60) ? dur - 60 : 0;
 }
 
@@ -2462,6 +2532,13 @@ void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 
         port_ui_dump_sprite(dump, "css_name", name_text);
         port_ui_dump_sprite(dump, "css_firebg", fire_bg);
     }
+    if (dump != NULL)
+    {
+        /* full-roster name dump: pipeline glyph-atlas source material */
+        char nm[32];
+        snprintf(nm, sizeof nm, "css_name_fk%d", (int)fkind);
+        port_ui_dump_sprite(dump, nm, name_text);
+    }
     port_ui_snapshot(portrait);
     port_ui_snapshot(name_text);
     if (ui == NULL)
@@ -2501,6 +2578,11 @@ void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 
             port_ui_write_sprite(name_text, f, "css_name");
         }
         fclose(f);
+        if (dump != NULL && fkind == port_ui_target_fkind())
+        {
+            port_ui_dump_sprite(dump, "css_name_post", name_text);
+            port_ui_dump_sprite(dump, "css_portrait_post", portrait);
+        }
     }
 }
 
@@ -2560,27 +2642,17 @@ void port_inject_bundle(GObj *fighter_gobj)
         return;
     }
     {
-        s32 cidx = -1;
-        PortChar *c = port_char_for_player((s32)fp->player, (s32)fp->fkind, &cidx);
+        PortChar *c = port_char_for_player((s32)fp->player, (s32)fp->fkind, NULL);
         if (c != NULL)
         {
             /* registry character: only when its home skeleton matches the
-             * fighter actually spawning (a preset player char on a vanilla
-             * boot of a different fkind must not cross-skin). */
-            if (c->fkind == (s32)fp->fkind && c->bundle[0] != '\0')
-            {
-                path = c->bundle;
-                port_roster_record_player((s32)fp->player, cidx);
-            }
-            else
-            {
-                path = NULL;
-            }
+             * fighter actually spawning (transient CSS re-makes and preset
+             * players on foreign boots must not cross-skin). */
+            path = (c->fkind == (s32)fp->fkind && c->bundle[0] != '\0') ? c->bundle : NULL;
         }
         else
         {
             path = port_inject_bundle_path((s32)fp->fkind, &from_single);
-            port_roster_record_player((s32)fp->player, -1);
         }
     }
     if (path == NULL)

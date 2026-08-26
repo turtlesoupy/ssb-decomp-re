@@ -1881,6 +1881,17 @@ void mnPlayersVSMakeFighter(GObj *fighter_gobj, s32 player, s32 fkind, s32 costu
 
 	if (fkind != nFTKindNull)
 	{
+#ifdef PORT
+		/* OpenSmash roster: commit the CURRENT page's tile character to
+		 * this player BEFORE the preview spawns, so the injection hook
+		 * resolves the pick (and it sticks through page flips into the
+		 * match). Transient re-makes during a drag re-bind each time —
+		 * the final placement wins. */
+		{
+			extern void port_roster_bind_player(s32 player, s32 fkind);
+			port_roster_bind_player(player, fkind);
+		}
+#endif
 		if (fighter_gobj != NULL)
 		{
 			rot_y = DObjGetStruct(fighter_gobj)->rotate.vec.f.y;
@@ -2622,6 +2633,20 @@ void mnPlayersVSUpdatePuckDisplay(GObj *gobj, s32 player)
 		gobj->flags = GOBJ_FLAG_HIDDEN;
 		break;
 	}
+#ifdef PORT
+	/* OpenSmash roster: a placed chip belongs to the character it was
+	 * placed ON — hide it while the current page shows someone else on
+	 * that tile (the pick itself stays bound to the player). */
+	if (gobj->flags == GOBJ_FLAG_NONE &&
+	    sMNPlayersVSSlots[player].fkind != nFTKindNull)
+	{
+		extern s32 port_roster_player_matches_tile(s32 player, s32 fkind);
+		if (!port_roster_player_matches_tile(player, sMNPlayersVSSlots[player].fkind))
+		{
+			gobj->flags = GOBJ_FLAG_HIDDEN;
+		}
+	}
+#endif
 	return;
 }
 
@@ -5028,9 +5053,6 @@ extern s32 port_roster_page(void);
 extern s32 port_roster_page_count(void);
 extern void port_roster_set_page(s32 page);
 extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 fkind);
-extern Sprite *portCSSGetScrollArrowSprite(void);
-extern Sprite *portCSSGetScrollArrowLeftSprite(void);
-
 static GObj *sMNPlayersVSPortArrowsGObj = NULL;
 
 static const intptr_t sPortCSSPortraitOffs[] =
@@ -5063,8 +5085,6 @@ static void mnPlayersVSPortMakeArrows(void)
 {
 	GObj *gobj;
 	SObj *sobj;
-	Sprite *arrow_right = portCSSGetScrollArrowSprite();
-	Sprite *arrow_left = portCSSGetScrollArrowLeftSprite();
 	s32 page = port_roster_page();
 	s32 npages = port_roster_page_count();
 
@@ -5077,33 +5097,30 @@ static void mnPlayersVSPortMakeArrows(void)
 	{
 		return;
 	}
-	gobj = gcMakeGObjSPAfter(0, NULL, 4, GOBJ_PRIORITY_DEFAULT);
-	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 1, GOBJ_PRIORITY_DEFAULT, ~0);
+	gobj = gcMakeGObjSPAfter(0, NULL, 28, GOBJ_PRIORITY_DEFAULT);
+	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 35, GOBJ_PRIORITY_DEFAULT, ~0);
 	sMNPlayersVSPortArrowsGObj = gobj;
-	/* tiles span roughly x=16..304, rows centered near y=83 */
-	if (arrow_right != NULL)
-	{
-		sobj = lbCommonMakeSObjForGObj(gobj, arrow_right);
-		sobj->sprite.attr &= ~SP_FASTCOPY;
-		sobj->sprite.attr |= SP_TRANSPARENT;
-		sobj->pos.x = 310.0F;
-		sobj->pos.y = 61.0F;
-		if (page + 1 >= npages) sobj->sprite.attr |= SP_HIDDEN;
-	}
-	if (arrow_left != NULL)
-	{
-		sobj = lbCommonMakeSObjForGObj(gobj, arrow_left);
-		sobj->sprite.attr &= ~SP_FASTCOPY;
-		sobj->sprite.attr |= SP_TRANSPARENT;
-		sobj->pos.x = 4.0F;
-		sobj->pos.y = 61.0F;
-		if (page == 0) sobj->sprite.attr |= SP_HIDDEN;
-	}
+	/* the game's own menu chevrons (same sprites as the CPU-level UI),
+	 * flanking the roster grid; wrap-around, so both always show */
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowRSprite));
+	sobj->sprite.attr &= ~SP_FASTCOPY;
+	sobj->sprite.attr |= SP_TRANSPARENT;
+	sobj->sprite.red = 0xFF; sobj->sprite.green = 0xC8; sobj->sprite.blue = 0x28;
+	sobj->pos.x = 306.0F;
+	sobj->pos.y = 76.0F;
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowLSprite));
+	sobj->sprite.attr &= ~SP_FASTCOPY;
+	sobj->sprite.attr |= SP_TRANSPARENT;
+	sobj->sprite.red = 0xFF; sobj->sprite.green = 0xC8; sobj->sprite.blue = 0x28;
+	sobj->pos.x = 2.0F;
+	sobj->pos.y = 76.0F;
+	(void)page;
 }
 
 void mnPlayersVSPortApplyRosterPage(void)
 {
-	s32 fk;
+	extern s32 port_roster_player_matches_tile(s32 player, s32 fkind);
+	s32 fk, pl;
 	for (fk = 0; fk < 12; fk++)
 	{
 		port_ui_css_hook(
@@ -5112,12 +5129,28 @@ void mnPlayersVSPortApplyRosterPage(void)
 			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite),
 			fk);
 	}
+	/* placed chips: only show a player's puck when the CURRENT page's tile
+	 * still holds the character they picked (their card keeps the pick;
+	 * the chip belongs to the tile) */
+	for (pl = 0; pl < GMCOMMON_PLAYERS_MAX; pl++)
+	{
+		if (sMNPlayersVSSlots[pl].puck == NULL || sMNPlayersVSSlots[pl].is_selected == FALSE ||
+		    sMNPlayersVSSlots[pl].fkind == nFTKindNull)
+		{
+			continue;
+		}
+		sMNPlayersVSSlots[pl].puck->flags =
+			port_roster_player_matches_tile(pl, sMNPlayersVSSlots[pl].fkind)
+				? GOBJ_FLAG_NONE : GOBJ_FLAG_HIDDEN;
+	}
 	mnPlayersVSPortMakeArrows();
 }
 
 static void mnPlayersVSPortPageInput(void)
 {
+	extern s32 port_roster_take_page_request(void);
 	s32 i, dir = 0;
+	s32 req;
 	if (port_roster_page_count() <= 1)
 	{
 		return;
@@ -5126,6 +5159,29 @@ static void mnPlayersVSPortPageInput(void)
 	{
 		if (gSYControllerDevices[i].button_tap & R_TRIG) dir = 1;
 		if (gSYControllerDevices[i].button_tap & L_TRIG) dir = -1;
+		/* clickable arrows: A (mouse click) with the player's cursor in
+		 * the arrow strips at the roster's left/right edge */
+		if ((gSYControllerDevices[i].button_tap & A_BUTTON) &&
+		    sMNPlayersVSSlots[i].cursor != NULL)
+		{
+			SObj *cs = SObjGetStruct(sMNPlayersVSSlots[i].cursor);
+			if (cs != NULL)
+			{
+				f32 cx = cs->pos.x, cy = cs->pos.y;
+				if (cy >= 45.0F && cy <= 120.0F)
+				{
+					if (cx <= 26.0F) dir = -1;
+					else if (cx >= 292.0F) dir = 1;
+				}
+			}
+		}
+	}
+	req = port_roster_take_page_request();
+	if (req >= 0 && req != port_roster_page())
+	{
+		port_roster_set_page(req);
+		mnPlayersVSPortApplyRosterPage();
+		return;
 	}
 	if (dir != 0)
 	{
