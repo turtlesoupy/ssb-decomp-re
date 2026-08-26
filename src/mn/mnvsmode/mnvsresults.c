@@ -1494,6 +1494,37 @@ void mnVSResultMakeFighterName(void)
 	fkind = mnVSResultGetWinFighterKind();
 
 #ifdef PORT
+	/* OpenSmash roster: a winner bound to a roster character shows THAT
+	 * character's name (the base fighter's fkind would say e.g. MARIO).
+	 * Laid out right-aligned toward the vanilla name/WINS! boundary,
+	 * shrinking long names like vanilla does (C.FALCON 0.7). */
+	{
+		extern const char *port_roster_player_shortname(s32 player);
+		const char *nm = port_roster_player_shortname(mnVSResultsGetWinPlayer());
+		if (nm != NULL && sMNVSResultsIsTeamBattle == FALSE)
+		{
+			/* letter advance widths, mirroring mnVSResultsMakeString */
+			static const f32 lw[26] =
+			{
+				35.0F, 24.0F, 24.0F, 28.0F, 22.0F, 20.0F, 31.0F, 27.0F, 9.0F,
+				20.0F, 27.0F, 20.0F, 37.0F, 29.0F, 34.0F, 24.0F, 37.0F, 27.0F,
+				24.0F, 24.0F, 26.0F, 28.0F, 39.0F, 31.0F, 29.0F, 30.0F
+			};
+			char wins_str[/* */] = "W1I1N1S1!";
+			f32 w = 0.0F, s, x;
+			s32 i;
+			for (i = 0; nm[i] != '\0'; i++)
+			{
+				if (nm[i] >= 'A' && nm[i] <= 'Z') w += lw[nm[i] - 'A'];
+			}
+			s = (w > 135.0F) ? (135.0F / w) : 1.0F;
+			x = 160.0F - w * s;
+			if (x < 20.0F) x = 20.0F;
+			mnVSResultsMakeString((char *)nm, x, 180.0F, 0, s);
+			mnVSResultsMakeString(wins_str, x + w * s + 14.0F, 180.0F, 3, 1.0F);
+			return;
+		}
+	}
 	if (fkind >= (s32)nFTKindEnumCount) {
 		const char *nm = port_fighter_results_name(fkind);
 		if (nm != NULL) {

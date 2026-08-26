@@ -1199,6 +1199,30 @@ s32 port_roster_spawn_fkind(s32 player, s32 fkind)
     return fkind;
 }
 
+/* Winner name for the results screen ("<NAME> WINS!"): the bound roster
+ * character's shortname, filtered to the letters the announce sprite set
+ * covers (A-Z). NULL for vanilla/unbound players. */
+const char *port_roster_player_shortname(s32 player)
+{
+    static char buf[9];
+    port_roster_parse();
+    if ((u32)player < 4 && sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
+    {
+        PortChar *c = &sChars[sPlayerChar[player]];
+        const char *src = (c->shortname[0] != '\0') ? c->shortname : c->slug;
+        s32 i, n = 0;
+        for (i = 0; src[i] != '\0' && n < 8; i++)
+        {
+            char ch = src[i];
+            if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
+            if (ch >= 'A' && ch <= 'Z') buf[n++] = ch;
+        }
+        buf[n] = '\0';
+        if (n > 0) return buf;
+    }
+    return NULL;
+}
+
 /* JS bridge: the shell's search dialog requests a page switch without a
  * reload; the CSS polls and applies it on its own frame. */
 static volatile s32 sPageRequest = -1;
@@ -2026,6 +2050,100 @@ void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr)
  * to the port's linear texel state first and written linear, so repaints
  * (roster page flips) stay correct — see port_ui_write_canvas_fit. */
 extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+extern unsigned int portRelocRegisterPointer(void *ptr);
+extern void portMarkSyntheticSprite(void *sprite, void *bitmaps, unsigned int nbitmaps, void **bufs);
+
+/* Vanilla sizes each fighter's name sprite to its name (FOX 32 ... DK 72).
+ * When injected text is wider than the tile fighter's sprite, GROW the
+ * sprite (a wider synthetic bitmap clone) rather than nearest-resampling
+ * the canvas down — the resample is what shredded long injected names.
+ * The original geometry is remembered so the vanilla-restore path can
+ * revert before putting pristine texels back. */
+typedef struct
+{
+    Sprite *spr;
+    u32 orig_bitmap;
+    u16 orig_w;
+} UIWiden;
+static UIWiden sUIWidens[64];
+static s32 sNUIWidens = 0;
+
+static UIWiden *port_ui_widen_find(Sprite *spr)
+{
+    s32 i;
+    for (i = 0; i < sNUIWidens; i++)
+    {
+        if (sUIWidens[i].spr == spr) return &sUIWidens[i];
+    }
+    return NULL;
+}
+
+static void port_ui_unwiden(Sprite *spr)
+{
+    UIWiden *w = (spr != NULL) ? port_ui_widen_find(spr) : NULL;
+    if (w == NULL) return;
+    /* the synthetic clone + buffer are intentionally leaked: they may be
+     * referenced by a privatized card sprite that outlives the tile */
+    spr->bitmap = w->orig_bitmap;
+    spr->width = w->orig_w;
+    *w = sUIWidens[--sNUIWidens];
+}
+
+static Bitmap *port_ui_widen(Sprite *spr, Bitmap *bms, s32 want_w)
+{
+    Bitmap *clone;
+    u8 *src, *dst;
+    void *bufs[1];
+    s32 y, old_stride, h, stride;
+
+    if (spr->nbitmaps != 1 || spr->bmsiz != G_IM_SIZ_8b)
+    {
+        return bms;             /* only the single-bitmap IA8 name sprites */
+    }
+    if (want_w > 64) want_w = 64;
+    /* IA8 rows must stay 8-byte aligned for the TMEM row loads — every
+     * vanilla name sprite pads width_img to a multiple of 8 (47/48,
+     * 30/32, ...). An unpadded stride shears the whole bitmap into
+     * diagonal garbage (seen as a 50-stride widen on the 48-wide Mario
+     * sprite). Draw width stays exact; only the stride is padded. */
+    stride = (want_w + 7) & ~7;
+    if (stride > 64) stride = 64;
+    old_stride = bms[0].width_img;
+    h = bms[0].actualHeight;
+    if (stride <= old_stride || sNUIWidens >= (s32)(sizeof sUIWidens / sizeof sUIWidens[0]))
+    {
+        return bms;
+    }
+    src = (u8 *)PORT_RESOLVE(bms[0].buf);
+    if (src == NULL) return bms;
+    clone = (Bitmap *)malloc(sizeof(Bitmap));
+    dst = (u8 *)malloc((size_t)(stride * h));
+    if (clone == NULL || dst == NULL) return bms;
+    memset(dst, 0, (size_t)(stride * h));
+    for (y = 0; y < h; y++)
+    {
+        memcpy(dst + y * stride, src + y * old_stride, (size_t)old_stride);
+    }
+    clone[0] = bms[0];
+    clone[0].width = want_w;
+    clone[0].width_img = stride;
+    clone[0].buf = portRelocRegisterPointer(dst);
+    if (port_ui_widen_find(spr) == NULL)
+    {
+        sUIWidens[sNUIWidens].spr = spr;
+        sUIWidens[sNUIWidens].orig_bitmap = spr->bitmap;
+        sUIWidens[sNUIWidens].orig_w = spr->width;
+        sNUIWidens++;
+    }
+    spr->bitmap = portRelocRegisterPointer(clone);
+    spr->width = (u16)want_w;
+    bufs[0] = dst;
+    portMarkSyntheticSprite(spr, clone, 1, bufs);
+    port_log("OSBUI: widened name sprite %d -> %d (stride %d)\n",
+             (int)old_stride, (int)want_w, (int)stride);
+    return clone;
+}
+
 static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
                                  s32 canvas_h, const char *what)
 {
@@ -2055,6 +2173,18 @@ static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
     if (avail > bms[0].width_img)
     {
         avail = bms[0].width_img;
+    }
+    if (content_w > avail)
+    {
+        /* grow the sprite like vanilla sizes DK's 72-texel name; only if
+         * that fails does the nearest-resample below kick in */
+        portFixupSpriteBitmapData(spr, bms);
+        bms = port_ui_widen(spr, bms, content_w);
+        avail = (spr->width > 0 && spr->width < canvas_w) ? spr->width + 1 : canvas_w;
+        if (avail > bms[0].width_img)
+        {
+            avail = bms[0].width_img;
+        }
     }
     portFixupSpriteBitmapData(spr, bms);
     for (b = 0; b < spr->nbitmaps; b++)
@@ -2363,6 +2493,7 @@ void port_ui_snapshot(Sprite *spr)
 }
 
 /* Put the pristine texels back (tile unbound on this roster page). */
+static void port_ui_unwiden(Sprite *spr);
 void port_ui_restore(Sprite *spr)
 {
     Bitmap *bms;
@@ -2371,6 +2502,7 @@ void port_ui_restore(Sprite *spr)
     s32 b;
 
     if (spr == NULL) return;
+    port_ui_unwiden(spr);       /* revert any injected-name widening first */
     portFixupSprite(spr);
     bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
     if (bms == NULL) return;
