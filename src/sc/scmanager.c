@@ -826,6 +826,81 @@ char dSCManagerBuildDate[/* */] = { "Dec 23 1998 18:06:24" };
 //                               //
 // // // // // // // // // // // //
 
+#ifdef PORT
+/* PORT: range-check the battle state against each field's documented domain
+ * immediately before a match starts.
+ *
+ * Routing preset construction through the menus' own commit functions (see
+ * the SSB64_BOOT_BATTLE block in scManagerRunLoop) removes *derivation*
+ * drift, but it cannot catch a *unit* mistake in whatever is still assigned
+ * directly. This function exists because of one: SSB64_BOOT_BATTLE set
+ * damage_ratio to 2 — a perfectly legal u8, but the field is a literal
+ * percent with domain 50..200, so knockback ran at 2% and no move in the
+ * game could launch anyone at any percent. Nothing crashed, nothing looked
+ * wrong in a static read, and it survived three weeks of screenshot evals.
+ * A loud log line on the first boot would have ended it immediately.
+ *
+ * Reports only, with one exception: an out-of-range per-player handicap is
+ * clamped, because ftParamGetCommonKnockback() indexes
+ * dFTCommonDataHandicapTable[handicap - 1] with no bound check, making 0 an
+ * out-of-bounds read rather than merely a wrong multiplier. */
+static void portValidateBattleState(const char *where)
+{
+	SCBattleState *bs = &gSCManagerTransferBattleState;
+	s32 i;
+
+	if ((bs->damage_ratio < 50) || (bs->damage_ratio > 200))
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): damage_ratio=%d outside 50..200 — "
+		         "this field is a literal percent and scales ALL knockback\n",
+		         where, (int)bs->damage_ratio);
+	}
+	if (bs->stocks > 4)
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): stocks=%d outside 0..4 (value is 0-based)\n",
+		         where, (int)bs->stocks);
+	}
+	if (bs->handicap >= nSCBattleHandicapEnumCount)
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): handicap=%d outside 0..%d\n",
+		         where, (int)bs->handicap, (int)nSCBattleHandicapEnumCount - 1);
+	}
+	if (bs->item_appearance_rate >= nSCBattleItemSwitchEnumCount)
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): item_appearance_rate=%d outside 0..%d\n",
+		         where, (int)bs->item_appearance_rate, (int)nSCBattleItemSwitchEnumCount - 1);
+	}
+
+	for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+	{
+		SCPlayerData *pd = &bs->players[i];
+
+		if (pd->pkind == nFTPlayerKindNot)
+		{
+			continue;
+		}
+		if ((pd->level < 1) || (pd->level > 9))
+		{
+			port_log("SSB64: !!! BATTLESTATE (%s): p%d level=%d outside 1..9\n",
+			         where, (int)i, (int)pd->level);
+		}
+		if (pd->tag > GMCOMMON_PLAYERS_MAX)
+		{
+			port_log("SSB64: !!! BATTLESTATE (%s): p%d tag=%d outside 0..%d\n",
+			         where, (int)i, (int)pd->tag, (int)GMCOMMON_PLAYERS_MAX);
+		}
+		if ((pd->handicap < 1) || (pd->handicap > dFTCommonDataHandicapTableCount))
+		{
+			port_log("SSB64: !!! BATTLESTATE (%s): p%d handicap=%d outside 1..%d — "
+			         "clamping to %d to avoid an out-of-bounds knockback-table read\n",
+			         where, (int)i, (int)pd->handicap,
+			         (int)dFTCommonDataHandicapTableCount, (int)FTCOMMON_HANDICAP_DEFAULT);
+
+			pd->handicap = FTCOMMON_HANDICAP_DEFAULT;
+		}
+	}
+}
+#endif
 // 0x800A1980
 void scManagerRunLoop(sb32 arg)
 {
@@ -981,13 +1056,39 @@ void scManagerRunLoop(sb32 arg)
 	 * menus. Optional 4th field makes P2 human (0=HMN, 1=CPU) so a
 	 * scripted SSB64_REPLAY_PLAY input file can drive both fighters.
 	 * Optional fields 5/6 add CPU players 3/4 (fkind, -1 = absent) for
-	 * multi-injection demo matches. */
+	 * multi-injection demo matches.
+	 *
+	 * The preset is expressed as character-select and VS-options *inputs*,
+	 * then committed through the same two functions the menus use:
+	 * mnPlayersVSSetSceneData() and mnVSOptionsSetAllSettings(). Nothing
+	 * here derives a battle-state field by hand.
+	 *
+	 * That structure is load-bearing. The previous version hand-wrote the
+	 * whole struct and drifted from the menu path in two ways: it set
+	 * damage_ratio to 2 — a legal u8, but the field is a literal percent
+	 * with domain 50..200, so every hit in the game landed at 2% knockback
+	 * and nothing could ever be launched at any percent — and it never set
+	 * is_single_stockicon at all, leaving the time-mode default on a stock
+	 * match. Both classes vanish when the derivation has exactly one owner.
+	 * Fields the two commit functions do not own follow as an explicit,
+	 * commented delta list. */
 	{
 		extern char *getenv(const char *);
 		extern int sscanf(const char *, const char *, ...);
 		const char *bb = getenv("SSB64_BOOT_BATTLE");
 		if (bb != NULL)
 		{
+			/* CSS and VS-options input globals; no header exports these. */
+			extern MNPlayersSlotVS sMNPlayersVSSlots[GMCOMMON_PLAYERS_MAX];
+			extern s32 sMNPlayersVSTimeValue;
+			extern s32 sMNPlayersVSStockValue;
+			extern sb32 sMNPlayersVSIsTeamBattle;
+			extern sb32 sMNPlayersVSGameRule;
+			extern s32 sMNVSOptionsHandicapStatus;
+			extern s32 sMNVSOptionsTeamAttackStatus;
+			extern s32 sMNVSOptionsStageSelectStatus;
+			extern s32 sMNVSOptionsDamage;
+
 			int p1 = 0, p2 = 8, gk = 4; /* defaults: Mario vs Kirby, Dream Land */
 			int p2kind = 1;             /* default: CPU */
 			int p3 = -1, p4 = -1;       /* optional CPU players 3/4 */
@@ -996,40 +1097,78 @@ void scManagerRunLoop(sb32 arg)
 			sscanf(bb, "%d,%d,%d,%d,%d,%d", &p1, &p2, &gk, &p2kind, &p3, &p4);
 			fks[0] = p1; fks[1] = p2; fks[2] = p3; fks[3] = p4;
 
+			/* ---- character-select inputs ---- */
+			sMNPlayersVSGameRule     = SCBATTLE_GAMERULE_STOCK;
+			sMNPlayersVSStockValue   = 4;                          /* 0-based: 5 stocks */
+			sMNPlayersVSTimeValue    = SCBATTLE_TIMELIMIT_INFINITE;
+			sMNPlayersVSIsTeamBattle = FALSE;
+
+			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+			{
+				MNPlayersSlotVS *slot = &sMNPlayersVSSlots[i];
+
+				/* Only the fields mnPlayersVSSetSceneData() reads. The slot
+				 * struct also holds live GObj pointers owned by the CSS, so
+				 * this must stay a targeted fill, never a blanket clear. */
+				slot->pkind = (i == 0) ? nFTPlayerKindMan
+				            : (i == 1) ? ((p2kind == 0) ? nFTPlayerKindMan : nFTPlayerKindCom)
+				            : (fks[i] >= 0) ? nFTPlayerKindCom : nFTPlayerKindNot;
+				slot->fkind     = (fks[i] >= 0) ? fks[i] : nFTKindNull;
+				slot->costume   = 0;
+				slot->shade     = 0;
+				slot->team      = i;
+				slot->cpu_level = 1;
+				slot->handicap  = FTCOMMON_HANDICAP_DEFAULT;
+			}
+
+			/* ---- VS-options inputs ---- */
+			sMNVSOptionsHandicapStatus    = nSCBattleHandicapOff;
+			sMNVSOptionsTeamAttackStatus  = FALSE;
+			sMNVSOptionsStageSelectStatus = gSCManagerTransferBattleState.is_stage_select;
+			sMNVSOptionsDamage            = 100; /* literal percent; menu domain is 50..200 */
+
+			/* ---- commit through the real writers ----
+			 * Order matters: SetAllSettings() normalizes every player's
+			 * handicap to FTCOMMON_HANDICAP_DEFAULT when the handicap
+			 * setting is Off, which has to land after SetSceneData() has
+			 * written the per-player rows. */
+			mnPlayersVSSetSceneData();   /* rules, stocks, and all derived per-player
+			                              * fields: player, color, tag,
+			                              * is_single_stockicon, level, handicap,
+			                              * plus pl_count / cp_count */
+			mnVSOptionsSetAllSettings(); /* handicap mode, team attack, stage select,
+			                              * damage_ratio */
+
+			/* ---- deltas the commit functions do not own ---- */
 			gSCManagerTransferBattleState.game_type = nSCBattleGameTypeRoyal;
 			gSCManagerTransferBattleState.gkind = (u8)gk;
-			gSCManagerTransferBattleState.is_team_battle = FALSE;
-			gSCManagerTransferBattleState.game_rules = 0x2;   /* stock */
-			gSCManagerTransferBattleState.pl_count = (p2kind == 0) ? 2 : 1;
-			gSCManagerTransferBattleState.cp_count = ((p2kind == 0) ? 0 : 1) +
-			                                         ((p3 >= 0) ? 1 : 0) + ((p4 >= 0) ? 1 : 0);
-			gSCManagerTransferBattleState.time_limit = 99;
-			gSCManagerTransferBattleState.stocks = 4;         /* 0-based: 5 stocks */
-			gSCManagerTransferBattleState.handicap = 0;
-			gSCManagerTransferBattleState.is_team_attack = FALSE;
-			gSCManagerTransferBattleState.damage_ratio = 2;   /* 100% */
 			gSCManagerTransferBattleState.item_toggles = 0;
-			gSCManagerTransferBattleState.item_appearance_rate = 0;
+			gSCManagerTransferBattleState.item_appearance_rate = nSCBattleItemSwitchNone;
 
 			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
 			{
 				SCPlayerData *pd = &gSCManagerTransferBattleState.players[i];
-				pd->level = 1;
-				pd->handicap = 9;
-				/* 0=HMN,1=CPU,2=none */
-				pd->pkind = (i == 0) ? 0
-				          : (i == 1) ? (u8)((p2kind == 0) ? 0 : 1)
-				          : (fks[i] >= 0) ? 1 : 2;
-				pd->fkind = (fks[i] >= 0) ? (u8)fks[i] : (u8)nFTKindNull;
-				pd->team = (u8)i;
-				pd->player = (u8)i;
-				pd->costume = 0;
-				pd->shade = 0;
-				pd->color = (u8)i;
-				/* eval mode (both human): hide the 1P/2P floating tags so
-				 * screenshot comparisons stay clean. */
-				pd->tag = (p2kind == 0) ? (u8)GMCOMMON_PLAYERS_MAX : (u8)i;
+
+				/* Not written by the VS path at all (vanilla leaves the
+				 * default in place); -1 is the "slot has no stocks"
+				 * sentinel the HUD keys off in ifcommon.c. */
 				pd->stock_count = (i <= 1 || fks[i] >= 0) ? 4 : -1;
+
+				/* DELIBERATE demo deviation: vanilla gives every CPU the
+				 * shared grey CP color, which makes a four-way injection
+				 * demo unreadable. Keep one distinct HUD color per port. */
+				pd->color = (u8)i;
+			}
+
+			/* DELIBERATE eval deviation: with both slots human the real path
+			 * assigns the 1P/2P tags; force the CP tag on both so screenshot
+			 * baselines stay stable across runs. Note this shows "CP" rather
+			 * than hiding the tag — index GMCOMMON_PLAYERS_MAX is
+			 * nIFPlayerTagKindCP, not a blank sprite. */
+			if (p2kind == 0)
+			{
+				gSCManagerTransferBattleState.players[0].tag =
+				gSCManagerTransferBattleState.players[1].tag = (u8)GMCOMMON_PLAYERS_MAX;
 			}
 
 			gSCManagerSceneData.gkind = (u8)gk;
@@ -1047,8 +1186,9 @@ void scManagerRunLoop(sb32 arg)
 				 * fkind -1 for a slot the player should pick live. */
 				gSCManagerTransferBattleState.is_reset_players = FALSE;
 			}
-			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d\n",
-			         p1, p2, gk, p2kind, p3, p4);
+			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d damage_ratio=%d\n",
+			         p1, p2, gk, p2kind, p3, p4,
+			         (int)gSCManagerTransferBattleState.damage_ratio);
 		}
 	}
 	port_log("SSB64: scManagerRunLoop — controllers=%d scene=%d\n",
@@ -1363,6 +1503,11 @@ void scManagerRunLoop(sb32 arg)
 						}
 					}
 				}
+
+				/* Last point at which the battle state is still mutable —
+				 * after the boot-battle preset, the CSS handoff, and the
+				 * competitive-ruleset override have all had their say. */
+				portValidateBattleState("VSBattle");
 
 				scVSBattleStartScene();
 
