@@ -3706,6 +3706,9 @@ s32 mnPlayersVSCheckBackInRange(GObj *gobj)
 }
 
 // 0x801382E0
+#ifdef PORT
+sb32 mnPlayersVSPortCheckPageArrowPress(GObj *gobj);
+#endif
 void mnPlayersVSCursorProcUpdate(GObj *gobj)
 {
 	s32 unused[5];
@@ -3716,6 +3719,12 @@ void mnPlayersVSCursorProcUpdate(GObj *gobj)
 	if
 	(
 		(gSYControllerDevices[player].button_tap & A_BUTTON) &&
+#ifdef PORT
+		/* OpenSmash roster: the top-bar page selector fires FIRST so it
+		 * works while carrying a token too (its zone is the top bar only,
+		 * so tile placement and card presses are never shadowed) */
+		(mnPlayersVSPortCheckPageArrowPress(gobj) == FALSE) &&
+#endif
 		(mnPlayersVSCheckPlayerKindSelectAllPlayer(gobj, player) == FALSE) &&
 		(mnPlayersVSSelectFighter(gobj, player, sMNPlayersVSSlots[player].held_player, nMNPlayersSelectButtonA) == FALSE) &&
 		(mnPlayersVSCheckCursorPuckGrab(gobj, player) == FALSE)
@@ -5067,12 +5076,30 @@ GObj *sMNPlayersVSPortArrowsGObjReset(void)
 	return old;
 }
 
+/* Top-bar page selector: "< n >" in the gap between the Free-for-all
+ * title and the TIME selector, built from the same arrow + digit
+ * sprites as the game's own selectors. Wraps, so both arrows always
+ * make sense. */
+static f32 sPortPagerRightX = 132.0F;
+
 static void mnPlayersVSPortMakeArrows(void)
 {
 	GObj *gobj;
 	SObj *sobj;
 	s32 page = port_roster_page();
 	s32 npages = port_roster_page_count();
+	s32 shown = page + 1;
+	s32 digits[3];
+	s32 ndig = 0, i;
+	f32 x;
+
+	static const intptr_t digit_offs[] =
+	{
+		llMNCommonDigit0Sprite, llMNCommonDigit1Sprite, llMNCommonDigit2Sprite,
+		llMNCommonDigit3Sprite, llMNCommonDigit4Sprite, llMNCommonDigit5Sprite,
+		llMNCommonDigit6Sprite, llMNCommonDigit7Sprite, llMNCommonDigit8Sprite,
+		llMNCommonDigit9Sprite
+	};
 
 	if (sMNPlayersVSPortArrowsGObj != NULL)
 	{
@@ -5083,24 +5110,82 @@ static void mnPlayersVSPortMakeArrows(void)
 	{
 		return;
 	}
+	do
+	{
+		digits[ndig++] = shown % 10;
+		shown /= 10;
+	} while (shown > 0 && ndig < 3);
+
 	gobj = gcMakeGObjSPAfter(0, NULL, 28, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 35, GOBJ_PRIORITY_DEFAULT, ~0);
 	sMNPlayersVSPortArrowsGObj = gobj;
-	/* the game's own menu chevrons (same sprites as the CPU-level UI),
-	 * flanking the roster grid; wrap-around, so both always show */
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowRSprite));
-	sobj->sprite.attr &= ~SP_FASTCOPY;
-	sobj->sprite.attr |= SP_TRANSPARENT;
-	sobj->sprite.red = 0xFF; sobj->sprite.green = 0xC8; sobj->sprite.blue = 0x28;
-	sobj->pos.x = 306.0F;
-	sobj->pos.y = 76.0F;
+
 	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowLSprite));
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
-	sobj->sprite.red = 0xFF; sobj->sprite.green = 0xC8; sobj->sprite.blue = 0x28;
-	sobj->pos.x = 2.0F;
-	sobj->pos.y = 76.0F;
-	(void)page;
+	sobj->pos.x = 104.0F;
+	sobj->pos.y = 20.0F;
+
+	x = 116.0F;
+	for (i = ndig - 1; i >= 0; i--)
+	{
+		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[1], digit_offs[digits[i]]));
+		sobj->sprite.attr &= ~SP_FASTCOPY;
+		sobj->sprite.attr |= SP_TRANSPARENT;
+		sobj->sprite.red = 0xFF; sobj->sprite.green = 0xFF; sobj->sprite.blue = 0xFF;
+		sobj->pos.x = x;
+		sobj->pos.y = 20.0F;
+		x += 8.0F;
+	}
+
+	sPortPagerRightX = x + 2.0F;
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowRSprite));
+	sobj->sprite.attr &= ~SP_FASTCOPY;
+	sobj->sprite.attr |= SP_TRANSPARENT;
+	sobj->pos.x = sPortPagerRightX;
+	sobj->pos.y = 20.0F;
+}
+
+/* Cursor A-press hit test for the pager, called from the CSS cursor's
+ * own press chain (same convention as the TIME arrows: fingertip =
+ * cursor pos + (20, 3)). */
+void mnPlayersVSPortApplyRosterPage(void);
+sb32 mnPlayersVSPortCheckPageArrowPress(GObj *gobj)
+{
+	SObj *sobj = SObjGetStruct(gobj);
+	f32 pos_x, pos_y;
+	s32 dir = 0;
+
+	if (port_roster_page_count() <= 1 || sobj == NULL)
+	{
+		return FALSE;
+	}
+	pos_y = sobj->pos.y + 3.0F;
+	/* top bar only — the tile grid starts ~y25, and a tile press must
+	 * grab, never page */
+	if ((pos_y < 8.0F) || (pos_y > 24.0F))
+	{
+		return FALSE;
+	}
+	/* contiguous halves split at the page digit, capped short of the
+	 * TIME-left zone (fingertip 140+) */
+	pos_x = sobj->pos.x + 20.0F;
+	if (pos_x >= 88.0F && pos_x < 119.0F)
+	{
+		dir = -1;
+	}
+	else if (pos_x >= 119.0F && pos_x <= 138.0F)
+	{
+		dir = 1;
+	}
+	if (dir == 0)
+	{
+		return FALSE;
+	}
+	port_roster_set_page(port_roster_page() + dir);
+	mnPlayersVSPortApplyRosterPage();
+	func_800269C0_275C0(nSYAudioFGMMenuScroll2);
+	return TRUE;
 }
 
 void mnPlayersVSPortApplyRosterPage(void)
@@ -5164,25 +5249,6 @@ static void mnPlayersVSPortPageInput(void)
 	{
 		if (gSYControllerDevices[i].button_tap & R_TRIG) dir = 1;
 		if (gSYControllerDevices[i].button_tap & L_TRIG) dir = -1;
-		/* the hand cursor over an arrow + A pages, like everything else
-		 * on this screen */
-		if ((gSYControllerDevices[i].button_tap & A_BUTTON) &&
-		    sMNPlayersVSSlots[i].cursor != NULL)
-		{
-			SObj *cs = SObjGetStruct(sMNPlayersVSSlots[i].cursor);
-			if (cs != NULL)
-			{
-				/* fingertip = sprite pos + half the hand, so the visible
-				 * pointer decides; strips sit OUTSIDE the tile grid
-				 * (~16..304) so tile presses never double-fire */
-				f32 cx = cs->pos.x + 8.0F, cy = cs->pos.y + 8.0F;
-				if (cy >= 50.0F && cy <= 128.0F)
-				{
-					if (cx <= 15.0F) dir = -1;
-					else if (cx >= 305.0F) dir = 1;
-				}
-			}
-		}
 	}
 	req = port_roster_take_page_request();
 	if (req >= 0 && req != port_roster_page())
