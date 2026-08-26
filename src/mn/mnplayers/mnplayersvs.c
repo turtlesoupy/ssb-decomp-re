@@ -4294,6 +4294,26 @@ void mnPlayersVSPuckAdjustOverlap(s32 this_player, s32 other_player, f32 unused)
 // 0x80139460
 void mnPlayersVSPuckAdjustPortraitEdge(s32 player)
 {
+#ifdef PORT
+	/* OpenSmash roster: when the current page shows a different character
+	 * on this pick's tile, the chip rests by its player card instead of
+	 * springing back into the portrait bounds. */
+	{
+		extern s32 port_roster_player_matches_tile(s32 player, s32 fkind);
+		if (!port_roster_player_matches_tile(player, sMNPlayersVSSlots[player].fkind))
+		{
+			SObj *ps = SObjGetStruct(sMNPlayersVSSlots[player].puck);
+			f32 rx = (f32)(player * 69 + 44);
+			f32 ry = 161.0F;
+			if (ps != NULL)
+			{
+				sMNPlayersVSSlots[player].puck_vel_x = (rx - ps->pos.x) / 6.0F;
+				sMNPlayersVSSlots[player].puck_vel_y = (ry - ps->pos.y) / 6.0F;
+			}
+			return;
+		}
+	}
+#endif
 	s32 portrait = mnPlayersVSGetPortrait(sMNPlayersVSSlots[player].fkind);
 	f32 portrait_edge_x = ((portrait >= 6) ? portrait - 6 : portrait) * 45 + 25;
 	f32 portrait_edge_y = ((portrait >= 6) ? 1 : 0) * 43 + 36;
