@@ -754,6 +754,26 @@ typedef struct OSB5State
     f32 (*bind_local)[4][3];/* per vert, per influence: joint-local coords */
     f32 (*bind_nrm)[4][3];  /* per vert, per influence: joint-local normal */
     Vtx *vtx;               /* live Vtx array the DL renders */
+    /* Root-joint mesh DL, attached to fp->joints[0]->dl by the first skin
+     * update whose joint frames validate — NOT at load time. A freshly
+     * (re-)made fighter's cached part matrices (gmCollision transforms)
+     * are zeroed/stale until its first anim pass, and o->vtx starts as
+     * all-zeros; attaching immediately drew one frame of screen-filling
+     * garbage triangles from the origin — the CSS flash on custom tiles
+     * (the VS CSS re-makes the preview GObj every ~10 ticks, so it
+     * flashed continuously while a token sat on a custom character). */
+    Gfx *mesh_dl;
+    /* Successful skin fills since attach. The DL is attached at the SECOND
+     * fill, not the first: the attach-time fill runs inside
+     * ftManagerMakeFighter while the fighter still sits at its default
+     * rest TRS (root at the world origin, unrotated — verified via
+     * SSB64_OSB5_DEBUG); the CSS positions and poses it later that same
+     * tick, so a mesh attached on fill #1 draws once at the wrong spot in
+     * the rest pose. Waiting one fighter tick costs a single frame where
+     * the (already-blanked) preview is simply absent — invisible in
+     * practice, unlike the misplaced flash. */
+    s32 fills;
+    s32 dbg_ticks;          /* SSB64_OSB5_DEBUG frame-dump counter */
     GObj *owner;
     /* GObjs are pool-allocated: after the owner despawns (match end, CSS
      * chip move) the next fighter can reuse the same address, and a bare
@@ -1398,6 +1418,18 @@ Gfx *port_osb5_null_dl(void)
 
 static void osb5_dobj_frame(DObj *j, f32 o[3], f32 m[3][3]);
 
+/* A usable joint frame has a non-degenerate basis. Zeroed matrices (pool
+ * fresh) and near-singular stale ones fail the determinant test; any real
+ * pose (rotation, possibly scaled) passes with |det| ~ scale^3. */
+static s32 osb5_frame_valid(f32 m[3][3])
+{
+    f32 det = m[0][0] * (m[1][1]*m[2][2] - m[1][2]*m[2][1])
+            - m[0][1] * (m[1][0]*m[2][2] - m[1][2]*m[2][0])
+            + m[0][2] * (m[1][0]*m[2][1] - m[1][1]*m[2][0]);
+    if (det < 0.0f) det = -det;
+    return det > 1e-4f && det < 1e6f;
+}
+
 static void osb5_joint_frame(FTStruct *fp, s32 joint, f32 o[3], f32 m[3][3])
 {
     osb5_dobj_frame(fp->joints[joint], o, m);
@@ -1452,6 +1484,25 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     }
     if ((s32)fp->fkind != o->owner_fkind) return;
 
+    /* Invalidate the gmCollision per-part matrix memo for the whole
+     * skeleton before reading joint frames (same call the engine makes
+     * after transform mutations — see ftmain.c and the character
+     * specials). A freshly (re-)made fighter's pool-recycled FTParts can
+     * carry stale memo flags pointing at the PREVIOUS owner's matrices;
+     * skinning against those exploded the mesh into screen-filling
+     * garbage for one frame — the CSS custom-tile flash (the VS CSS
+     * re-makes the preview GObj every ~10 ticks, so it flashed
+     * continuously). After this, the queries below recompute from the
+     * live TRS state, which IS valid at attach time (figatree attach has
+     * already run inside ftManagerMakeFighter). */
+    {
+        extern void ftParamsUpdateFighterPartsTransformAll(DObj *root_dobj);
+        if (fp->joints[0] != NULL)
+        {
+            ftParamsUpdateFighterPartsTransformAll(fp->joints[0]);
+        }
+    }
+
     if (getenv("SSB64_NO_SELFHEAL") == NULL)
     {
     /* self-heal: modelpart/detail code has several sites that re-point a
@@ -1488,7 +1539,41 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     if (fp->joints[0] == NULL) return;
     if (getenv("SSB64_NO_ROOTFRAME") != NULL) return;
     osb5_joint_frame(fp, 0, t0o, t0m);
+    /* SSB64_OSB5_DEBUG=1: dump the frames the skinner actually reads for
+     * the first ticks after each attach — pin down WHICH values are
+     * garbage on the CSS-flash tick. */
+    if (getenv("SSB64_OSB5_DEBUG") != NULL && o->dbg_ticks < 3)
+    {
+        DObj *rj = fp->joints[0];
+        port_log("OSB5DBG: gobj=%p tick=%d root=(%.1f,%.1f,%.1f) rootTRS t=(%.1f,%.1f,%.1f) r=(%.2f,%.2f,%.2f) s=(%.2f,%.2f,%.2f) | j[0]=(%.1f,%.1f,%.1f) j[1]=(%.1f,%.1f,%.1f) j[2]=(%.1f,%.1f,%.1f)\n",
+                 (void*)fighter_gobj, (int)o->dbg_ticks,
+                 t0o[0], t0o[1], t0o[2],
+                 rj->translate.vec.f.x, rj->translate.vec.f.y, rj->translate.vec.f.z,
+                 rj->rotate.vec.f.x, rj->rotate.vec.f.y, rj->rotate.vec.f.z,
+                 rj->scale.vec.f.x, rj->scale.vec.f.y, rj->scale.vec.f.z,
+                 jo[0][0], jo[0][1], jo[0][2],
+                 jo[1][0], jo[1][1], jo[1][2],
+                 jo[2][0], jo[2][1], jo[2][2]);
+        o->dbg_ticks++;
+    }
+    if (!osb5_frame_valid(t0m))
+    {
+        /* safety net only — with the memo invalidation above the root
+         * frame recomputes from live TRS and should always validate. */
+        return;
+    }
     osb5_inv3(t0m, t0inv);
+    /* Attach from the second fill on (see OSB5State.fills); afterwards
+     * this doubles as the self-heal for root-DL swaps by modelpart /
+     * respawn code. */
+    o->fills++;
+    if (o->fills >= 2 && o->mesh_dl != NULL && fp->joints[0]->dl != o->mesh_dl)
+    {
+        fp->joints[0]->dl = o->mesh_dl;
+        /* mesh visible from this tick — reveal the fighter (see the
+         * GOBJ_FLAG_HIDDEN set at attach) */
+        fighter_gobj->flags &= ~(u32)GOBJ_FLAG_HIDDEN;
+    }
 
     /* re-seat kept accessories: pin each root to its pinned mesh vertex,
      * inset along the vertex's inward world normal. The vertex world
@@ -1820,7 +1905,15 @@ static void osb5_load(FTStruct *fp, FILE *f)
                 {
                     static Vtx *winptrs[512];
                     static u32 nwin = 0;
+                    /* Zero the window: the DL references it immediately,
+                     * but port_osb5_copy_windows only fills it on the next
+                     * fighter tick — raw malloc garbage here IS the CSS
+                     * one-frame "exploding mesh" flash on custom tiles
+                     * (giant triangles textured with the incoming
+                     * character's atlas). Zeroed verts degenerate to a
+                     * single invisible point instead. */
                     Vtx *wv = (Vtx *)malloc(sizeof(Vtx) * count);
+                    memset(wv, 0, sizeof(Vtx) * count);
                     (void)winptrs; (void)nwin;
                     /* record mapping so skin update can copy: simpler —
                      * keep per-window index list and copy in update. */
@@ -1880,14 +1973,35 @@ static void osb5_load(FTStruct *fp, FILE *f)
             {
                 rparts->flags &= ~0xF;
             }
-            fp->joints[0]->dl = dl;
+            /* deferred: the first VALID skin update attaches (see
+             * OSB5State.mesh_dl) — never draw the zero-initialized vtx. */
+            o->mesh_dl = dl;
         }
     }
     o->owner = fp->fighter_gobj;
     o->owner_fkind = (s32)fp->fkind;
+    o->dbg_ticks = 0;
+    o->fills = 0;
+    /* Hide the WHOLE fighter until the mesh attaches (fill #2): the mesh
+     * is deliberately unattached for the make tick, but every unblanked
+     * vanilla joint — Link's sword/shield, DK's tie, any kept accessory —
+     * would still draw, floating alone for one frame. GOBJ_FLAG_HIDDEN
+     * skips proc_display entirely (same mechanism sc1pintro uses for its
+     * staged fighter reveal); skin_update clears it when the mesh DL
+     * attaches, so the fighter pops in complete and correctly posed. */
+    fp->fighter_gobj->flags |= GOBJ_FLAG_HIDDEN;
+    /* Copy the attach-time skin fill into the windows NOW: the fighter can
+     * draw this same tick, before ftMainProcParams next runs copy_windows,
+     * and the DL renders the windows — not o->vtx. (The skin update below
+     * fills vtx with the rest pose; without this copy the first frame drew
+     * whatever the freshly allocated windows held.) */
+    port_osb5_skin_update(fp->fighter_gobj);
+    {
+        extern void port_osb5_copy_windows(void);
+        port_osb5_copy_windows();
+    }
     port_log("OSB5: skinned mesh attached (%u verts, %u tris, %u joints) player=%d fkind=%d gobj=%p\n",
              nverts, ntris, njoints, (int)fp->player, (int)fp->fkind, (void *)fp->fighter_gobj);
-    port_osb5_skin_update(fp->fighter_gobj);
 }
 
 /* window table: skin update copies skinned verts into window arrays.
