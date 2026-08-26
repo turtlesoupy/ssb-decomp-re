@@ -5076,30 +5076,15 @@ GObj *sMNPlayersVSPortArrowsGObjReset(void)
 	return old;
 }
 
-/* Top-bar page selector: "< n >" in the gap between the Free-for-all
- * title and the TIME selector, built from the same arrow + digit
- * sprites as the game's own selectors. Wraps, so both arrows always
- * make sense. */
-static f32 sPortPagerRightX = 132.0F;
-
+/* Page arrows flanking the character grid (the top bar collides with
+ * the classic co-op difficulty selector, so the sides it is — small,
+ * vertically centered on the tile rows). Pages wrap, so both arrows
+ * always show. */
 static void mnPlayersVSPortMakeArrows(void)
 {
 	GObj *gobj;
 	SObj *sobj;
-	s32 page = port_roster_page();
 	s32 npages = port_roster_page_count();
-	s32 shown = page + 1;
-	s32 digits[3];
-	s32 ndig = 0, i;
-	f32 x;
-
-	static const intptr_t digit_offs[] =
-	{
-		llMNCommonDigit0Sprite, llMNCommonDigit1Sprite, llMNCommonDigit2Sprite,
-		llMNCommonDigit3Sprite, llMNCommonDigit4Sprite, llMNCommonDigit5Sprite,
-		llMNCommonDigit6Sprite, llMNCommonDigit7Sprite, llMNCommonDigit8Sprite,
-		llMNCommonDigit9Sprite
-	};
 
 	if (sMNPlayersVSPortArrowsGObj != NULL)
 	{
@@ -5110,12 +5095,6 @@ static void mnPlayersVSPortMakeArrows(void)
 	{
 		return;
 	}
-	do
-	{
-		digits[ndig++] = shown % 10;
-		shown /= 10;
-	} while (shown > 0 && ndig < 3);
-
 	gobj = gcMakeGObjSPAfter(0, NULL, 28, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 35, GOBJ_PRIORITY_DEFAULT, ~0);
 	sMNPlayersVSPortArrowsGObj = gobj;
@@ -5123,27 +5102,18 @@ static void mnPlayersVSPortMakeArrows(void)
 	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowLSprite));
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
-	sobj->pos.x = 104.0F;
-	sobj->pos.y = 20.0F;
+	/* CRT-margin thinking is obsolete on modern displays: the arrows
+	 * ride slightly OVER the bottom corner tiles' outer edges */
+	sobj->pos.x = 18.0F;
+	sobj->pos.y = 88.0F;
 
-	x = 116.0F;
-	for (i = ndig - 1; i >= 0; i--)
-	{
-		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[1], digit_offs[digits[i]]));
-		sobj->sprite.attr &= ~SP_FASTCOPY;
-		sobj->sprite.attr |= SP_TRANSPARENT;
-		sobj->sprite.red = 0xFF; sobj->sprite.green = 0xFF; sobj->sprite.blue = 0xFF;
-		sobj->pos.x = x;
-		sobj->pos.y = 20.0F;
-		x += 8.0F;
-	}
-
-	sPortPagerRightX = x + 2.0F;
 	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], llMNPlayersCommonArrowRSprite));
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
-	sobj->pos.x = sPortPagerRightX;
-	sobj->pos.y = 20.0F;
+	/* the R sprite's chevron sits ~9px right of pos (L's ~3px left of
+	 * pos): 289 mirrors the left arrow's overlap onto its corner tile */
+	sobj->pos.x = 289.0F;
+	sobj->pos.y = 88.0F;
 }
 
 /* Cursor A-press hit test for the pager, called from the CSS cursor's
@@ -5161,20 +5131,19 @@ sb32 mnPlayersVSPortCheckPageArrowPress(GObj *gobj)
 		return FALSE;
 	}
 	pos_y = sobj->pos.y + 3.0F;
-	/* top bar only — the tile grid starts ~y25, and a tile press must
-	 * grab, never page */
-	if ((pos_y < 8.0F) || (pos_y > 24.0F))
+	if ((pos_y < 28.0F) || (pos_y > 112.0F))
 	{
 		return FALSE;
 	}
-	/* contiguous halves split at the page digit, capped short of the
-	 * TIME-left zone (fingertip 140+) */
+	/* zones centered on the drawn chevrons (left ~x2..10, right
+	 * ~x292..302); the few-pixel overlap with the outer tiles' border
+	 * slivers is intentional — the pager wins there */
 	pos_x = sobj->pos.x + 20.0F;
-	if (pos_x >= 88.0F && pos_x < 119.0F)
+	if (pos_x <= 26.0F || sobj->pos.x <= 2.0F)
 	{
 		dir = -1;
 	}
-	else if (pos_x >= 119.0F && pos_x <= 138.0F)
+	else if (pos_x >= 292.0F)
 	{
 		dir = 1;
 	}
