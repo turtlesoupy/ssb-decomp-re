@@ -764,11 +764,14 @@ typedef struct OSB5State
     s32 owner_fkind;
 } OSB5State;
 
-/* One slot per vanilla fighter kind: a match can field several injected
- * characters at once (demo mode: human + injected CPUs), each replacing
- * a DIFFERENT fkind. Slot k belongs to fkind k. */
+/* One mesh slot per PLAYER (0..3): a match fields at most four fighters,
+ * and keying by player (not fkind) lets several injected characters share
+ * the same base fighter — inevitable once the roster outgrows the twelve
+ * vanilla skeletons. OSB5_SLOTS stays 12 for the fkind-indexed tables
+ * (tiles, inject sets). */
 #define OSB5_SLOTS 12
-static OSB5State sOsb5Slots[OSB5_SLOTS];
+#define OSB5_PLAYER_SLOTS 4
+static OSB5State sOsb5Slots[OSB5_PLAYER_SLOTS];
 static Gfx sOsb5NullDL[2];
 /* Null for parts whose flags&0xF==1: those parts' union field is a
  * Gfx** token-pair array (two-list draw), NOT a plain DL. Writing a
@@ -776,9 +779,9 @@ static Gfx sOsb5NullDL[2];
  * 0xE7000000) dereferenced as a DL pointer — the Yoshi crash. */
 static u32 sOsb5NullDLPair[2] = { 0, 0 };
 
-static OSB5State *osb5_slot(s32 fkind)
+static OSB5State *osb5_slot(s32 player)
 {
-    return ((u32)fkind < OSB5_SLOTS) ? &sOsb5Slots[fkind] : NULL;
+    return ((u32)player < OSB5_PLAYER_SLOTS) ? &sOsb5Slots[player] : NULL;
 }
 
 /* -------------------------------------------------------------------- */
@@ -885,9 +888,238 @@ static const char *port_inject_bundle_path(s32 fkind, s32 *from_single)
     return sInjectSet[fkind].bundle;
 }
 
+/* -------------------------------------------------------------------- */
+/* Character registry: the scalable roster. The shell stages a line file  */
+/* (SSB64_ROSTER_FILE, default /roster.txt when present):                 */
+/*   slug|assigned_fkind|bundle|ui|voice|short                            */
+/* Entry i lives on CSS page 1 + i/12, on the tile of its assigned fkind  */
+/* (the shell lays pages out and fetches the matching skeleton variant).  */
+/* Page 0 keeps the legacy env-var bindings (vanilla + SSB64_INJECT_*).   */
+/* -------------------------------------------------------------------- */
+#define PORT_CHAR_MAX 2048
+typedef struct
+{
+    char slug[64];
+    char shortname[8];
+    s32  fkind;          /* home tile */
+    char bundle[256];
+    char ui[256];
+    char voice[256];
+} PortChar;
+static PortChar sChars[PORT_CHAR_MAX];
+static s32 sNChars = 0;
+static s32 sRosterParsed = 0;
+static s32 sTileChar[OSB5_SLOTS] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
+static s32 sPlayerChar[4] = { -1, -1, -1, -1 };
+static s32 sRosterPage = 0;
+
+static void port_roster_field(char *dst, size_t cap, const char *src, size_t n)
+{
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, src, n);
+    dst[n] = '\0';
+}
+
+static void port_roster_parse(void)
+{
+    const char *path;
+    FILE *f;
+    char line[1200];
+
+    if (sRosterParsed)
+    {
+        return;
+    }
+    sRosterParsed = 1;
+    path = getenv("SSB64_ROSTER_FILE");
+    if (path == NULL) path = "/roster.txt";
+    f = fopen(path, "r");
+    if (f == NULL)
+    {
+        return;
+    }
+    while (sNChars < PORT_CHAR_MAX && fgets(line, sizeof line, f) != NULL)
+    {
+        /* slug|fkind|bundle|ui|voice|short */
+        const char *fld[6];
+        size_t len[6];
+        s32 nf = 0;
+        const char *q = line, *start = line;
+        while (nf < 6)
+        {
+            if (*q == '|' || *q == '\n' || *q == '\r' || *q == '\0')
+            {
+                fld[nf] = start;
+                len[nf] = (size_t)(q - start);
+                nf++;
+                if (*q != '|') break;
+                start = ++q;
+            }
+            else q++;
+        }
+        if (nf < 3 || len[0] == 0)
+        {
+            continue;
+        }
+        {
+            PortChar *c = &sChars[sNChars];
+            memset(c, 0, sizeof *c);
+            port_roster_field(c->slug, sizeof c->slug, fld[0], len[0]);
+            c->fkind = atoi(fld[1]);
+            if ((u32)c->fkind >= OSB5_SLOTS) c->fkind = 0;
+            port_roster_field(c->bundle, sizeof c->bundle, fld[2], len[2]);
+            if (nf > 3) port_roster_field(c->ui, sizeof c->ui, fld[3], len[3]);
+            if (nf > 4) port_roster_field(c->voice, sizeof c->voice, fld[4], len[4]);
+            if (nf > 5) port_roster_field(c->shortname, sizeof c->shortname, fld[5], len[5]);
+            sNChars++;
+        }
+    }
+    fclose(f);
+    port_log("ROSTER: %d characters loaded from %s\n", (int)sNChars, path);
+    {
+        const char *pg = getenv("SSB64_ROSTER_PAGE");
+        void port_roster_set_page(s32 page);
+        if (pg != NULL)
+        {
+            port_roster_set_page(atoi(pg));
+        }
+    }
+    {
+        /* per-player presets: SSB64_PLAYER_CHARS="slug0,slug1,-,-" */
+        const char *pc = getenv("SSB64_PLAYER_CHARS");
+        s32 pl = 0;
+        while (pc != NULL && *pc != '\0' && pl < 4)
+        {
+            const char *comma = strchr(pc, ',');
+            size_t n = (comma != NULL) ? (size_t)(comma - pc) : strlen(pc);
+            s32 i;
+            for (i = 0; i < sNChars; i++)
+            {
+                size_t k;
+                s32 same = (strlen(sChars[i].slug) == n);
+                for (k = 0; same && k < n; k++)
+                {
+                    if (sChars[i].slug[k] != pc[k]) same = 0;
+                }
+                if (same)
+                {
+                    sPlayerChar[pl] = i;
+                    port_log("ROSTER: player %d preset to %s\n", (int)pl, sChars[i].slug);
+                    break;
+                }
+            }
+            pl++;
+            pc = (comma != NULL) ? comma + 1 : NULL;
+        }
+    }
+}
+
+s32 port_roster_char_count(void)
+{
+    port_roster_parse();
+    return sNChars;
+}
+
+/* pages: 0 = vanilla/legacy bindings; 1.. = registry dozen per page */
+s32 port_roster_page_count(void)
+{
+    port_roster_parse();
+    return 1 + (sNChars + OSB5_SLOTS - 1) / OSB5_SLOTS;
+}
+
+s32 port_roster_page(void)
+{
+    return sRosterPage;
+}
+
+void port_roster_set_page(s32 page)
+{
+    s32 fk, i, lo, hi;
+    port_roster_parse();
+    if (page < 0) page = port_roster_page_count() - 1;
+    if (page >= port_roster_page_count()) page = 0;
+    sRosterPage = page;
+    for (fk = 0; fk < OSB5_SLOTS; fk++)
+    {
+        sTileChar[fk] = -1;
+    }
+    if (page > 0)
+    {
+        lo = (page - 1) * OSB5_SLOTS;
+        hi = lo + OSB5_SLOTS;
+        if (hi > sNChars) hi = sNChars;
+        for (i = lo; i < hi; i++)
+        {
+            sTileChar[sChars[i].fkind] = i;
+        }
+    }
+    port_log("ROSTER: page %d/%d\n", (int)sRosterPage, (int)(port_roster_page_count() - 1));
+}
+
+static PortChar *port_char_at_tile(s32 fkind)
+{
+    port_roster_parse();
+    if ((u32)fkind < OSB5_SLOTS && sTileChar[fkind] >= 0)
+    {
+        return &sChars[sTileChar[fkind]];
+    }
+    return NULL;
+}
+
+/* The character a spawning fighter should wear: an explicit per-player
+ * binding wins (recorded at CSS selection or preset via env), else the
+ * character currently bound to this fkind's tile. */
+static PortChar *port_char_for_player(s32 player, s32 fkind, s32 *out_idx)
+{
+    PortChar *c = NULL;
+    s32 idx = -1;
+    port_roster_parse();
+    if ((u32)player < 4 && sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
+    {
+        idx = sPlayerChar[player];
+        c = &sChars[idx];
+    }
+    else if ((u32)fkind < OSB5_SLOTS && sTileChar[fkind] >= 0)
+    {
+        idx = sTileChar[fkind];
+        c = &sChars[idx];
+    }
+    if (out_idx != NULL) *out_idx = idx;
+    return c;
+}
+
+/* Record a fighter spawn as a selection: CSS preview spawns happen the
+ * moment a token lands on a tile, so the tile's character sticks to that
+ * player through page flips and into the match. */
+void port_roster_record_player(s32 player, s32 idx)
+{
+    if ((u32)player < 4)
+    {
+        sPlayerChar[player] = idx;
+    }
+}
+
+/* UI pack for a spawning fighter: the player's bound character wins,
+ * else the tile binding / legacy env. */
+static const char *port_ui_path_for_player(s32 player, s32 fkind)
+{
+    PortChar *c = port_char_for_player(player, fkind, NULL);
+    const char *port_ui_path_for_fkind(s32 fkind);
+    if (c != NULL)
+    {
+        return (c->ui[0] != '\0') ? c->ui : NULL;
+    }
+    return port_ui_path_for_fkind(fkind);
+}
+
 /* OSBV/OSBU path for a fighter kind (NULL when none). */
 const char *port_ui_path_for_fkind(s32 fkind)
 {
+    PortChar *c = port_char_at_tile(fkind);
+    if (c != NULL)
+    {
+        return (c->ui[0] != '\0') ? c->ui : NULL;
+    }
     port_inject_parse_set();
     return ((u32)fkind < OSB5_SLOTS && sInjectSet[fkind].has_ui) ? sInjectSet[fkind].ui : NULL;
 }
@@ -895,6 +1127,11 @@ const char *port_ui_path_for_fkind(s32 fkind)
 /* Announcer clip path for a fighter kind (NULL when none). */
 const char *port_voice_path_for_fkind(s32 fkind)
 {
+    PortChar *c = port_char_at_tile(fkind);
+    if (c != NULL)
+    {
+        return (c->voice[0] != '\0') ? c->voice : NULL;
+    }
     port_inject_parse_set();
     return ((u32)fkind < OSB5_SLOTS && sInjectSet[fkind].has_voice) ? sInjectSet[fkind].voice : NULL;
 }
@@ -966,7 +1203,7 @@ s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
     {
         return 0;
     }
-    o = osb5_slot((s32)fp->fkind);
+    o = osb5_slot((s32)fp->player);
     if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj ||
         (s32)fp->fkind != o->owner_fkind)
     {
@@ -1065,7 +1302,7 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     if (getenv("SSB64_NO_SKIN") != NULL) return;
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
-    o = osb5_slot((s32)fp->fkind);
+    o = osb5_slot((s32)fp->player);
     if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj)
     {
         return;
@@ -1234,7 +1471,7 @@ static OSB5State *sOsb5Loading = NULL;  /* slot whose DL is being built */
 
 static void osb5_load(FTStruct *fp, FILE *f)
 {
-    OSB5State *o = osb5_slot((s32)fp->fkind);
+    OSB5State *o = osb5_slot((s32)fp->player);
     u32 hdr[5];
     u32 njoints, nverts, ntris, tw, th;
     u8 *tex;
@@ -1665,10 +1902,11 @@ void port_ui_dump_sprite(const char *dir, const char *name, Sprite *spr)
 
 /* Write a LOGICAL pixel canvas into a sprite whose geometry varies per
  * fighter (the name sprites are 40/48/64 wide depending on character).
- * canvas is canvas_w wide, rows top-down; fmt 0 = one byte per texel
- * (IA8: value used as-is; I4: high nibble used). The DRAM state (blanket
- * u32 swap + odd-row group-half swizzle) is applied here per target row
- * width, so one pack serves every fighter. */
+ * canvas is canvas_w wide, rows top-down; one byte per texel (IA8: value
+ * used as-is; I4: high nibble used). The bitmap data is force-converted
+ * to the port's linear texel state first and written linear, so repaints
+ * (roster page flips) stay correct — see port_ui_write_canvas_fit. */
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
 static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
                                  s32 canvas_h, const char *what)
 {
@@ -1699,13 +1937,13 @@ static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
     {
         avail = bms[0].width_img;
     }
+    portFixupSpriteBitmapData(spr, bms);
     for (b = 0; b < spr->nbitmaps; b++)
     {
         u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
         s32 w = bms[b].width_img;
         s32 bpp8 = (spr->bmsiz == G_IM_SIZ_8b);
         s32 row_bytes = bpp8 ? w : (w / 2);
-        s32 grp = 8;
         u8 tmp[256];
         if (buf == NULL || row_bytes > (s32)sizeof(tmp)) continue;
         for (y = 0; y < bms[b].actualHeight; y++)
@@ -1729,26 +1967,10 @@ static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
                     tmp[x / 2] |= (v & 0xF0);
                 }
             }
-            /* odd rows: swap group halves (TMEM line swizzle) */
-            if (y & 1)
+            /* buffer is in the port's linear texel state — rows as-is */
+            for (x = 0; x < row_bytes; x++)
             {
-                for (x = 0; x + grp - 1 < row_bytes; x += grp)
-                {
-                    s32 k;
-                    for (k = 0; k < grp / 2; k++)
-                    {
-                        u8 t = tmp[x + k];
-                        tmp[x + k] = tmp[x + grp / 2 + k];
-                        tmp[x + grp / 2 + k] = t;
-                    }
-                }
-            }
-            /* blanket u32 byte reversal */
-            for (x = 0; x + 3 < row_bytes; x += 4)
-            {
-                u8 *dst = buf + y * row_bytes + x;
-                dst[0] = tmp[x + 3]; dst[1] = tmp[x + 2];
-                dst[2] = tmp[x + 1]; dst[3] = tmp[x];
+                buf[y * row_bytes + x] = tmp[x];
             }
         }
         yy += bms[b].actualHeight;
@@ -1940,6 +2162,113 @@ static void port_ui_apply_emblem(Sprite *spr, const char *ui, const char *what)
     fclose(f);
 }
 
+/* -------------------------------------------------------------------- */
+/* Pristine-texel snapshots: roster page flips repaint the CSS tiles, so */
+/* the first touch of each sprite stores its vanilla bytes and unbinding */
+/* a tile restores them. Snapshots are taken in the same state writes    */
+/* happen in (linear for 4/8-bit after the forced fixup; 32bpp raw).     */
+/* -------------------------------------------------------------------- */
+#define UI_SNAP_MAX 48
+typedef struct { u8 *key; u32 total; u8 *data; } UISnap;
+static UISnap sUISnaps[UI_SNAP_MAX];
+static s32 sNUISnaps = 0;
+static s32 sUISnapNext = 0;
+
+static u32 port_ui_sprite_bytes(Sprite *spr, Bitmap *bms, s32 b)
+{
+    s32 bpt = (spr->bmsiz == G_IM_SIZ_16b) ? 16 : (spr->bmsiz == G_IM_SIZ_8b) ? 8 :
+              (spr->bmsiz == G_IM_SIZ_32b) ? 32 : 4;
+    return (u32)((bms[b].width_img * bms[b].actualHeight * bpt) / 8);
+}
+
+static void port_ui_fix_for_snap(Sprite *spr, Bitmap *bms)
+{
+    /* the one-time draw fixup converts EVERY size (32bpp gets its BSWAP32
+     * restore too) — force it so snapshots/writes always see the
+     * converted state */
+    portFixupSpriteBitmapData(spr, bms);
+}
+
+static UISnap *port_ui_snap_find(u8 *key)
+{
+    s32 i;
+    for (i = 0; i < sNUISnaps; i++)
+    {
+        if (sUISnaps[i].key == key) return &sUISnaps[i];
+    }
+    return NULL;
+}
+
+/* Store the sprite's current texels if not seen before. Call BEFORE the
+ * first injection write of a scene. */
+void port_ui_snapshot(Sprite *spr)
+{
+    Bitmap *bms;
+    u8 *key;
+    u32 total = 0;
+    s32 b;
+    UISnap *sn;
+    u8 *dst;
+
+    if (spr == NULL) return;
+    portFixupSprite(spr);
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL) return;
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    port_ui_fix_for_snap(spr, bms);
+    key = (u8 *)PORT_RESOLVE(bms[0].buf);
+    if (key == NULL || port_ui_snap_find(key) != NULL) return;
+    for (b = 0; b < spr->nbitmaps; b++) total += port_ui_sprite_bytes(spr, bms, b);
+    if (total == 0 || total > 64 * 1024) return;
+    if (sNUISnaps < UI_SNAP_MAX)
+    {
+        sn = &sUISnaps[sNUISnaps++];
+    }
+    else
+    {
+        sn = &sUISnaps[sUISnapNext];
+        sUISnapNext = (sUISnapNext + 1) % UI_SNAP_MAX;
+        free(sn->data);
+    }
+    sn->key = key;
+    sn->total = total;
+    sn->data = (u8 *)malloc(total);
+    dst = sn->data;
+    for (b = 0; b < spr->nbitmaps; b++)
+    {
+        u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+        u32 n = port_ui_sprite_bytes(spr, bms, b);
+        if (buf != NULL) memcpy(dst, buf, n);
+        dst += n;
+    }
+}
+
+/* Put the pristine texels back (tile unbound on this roster page). */
+void port_ui_restore(Sprite *spr)
+{
+    Bitmap *bms;
+    UISnap *sn;
+    u8 *src;
+    s32 b;
+
+    if (spr == NULL) return;
+    portFixupSprite(spr);
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL) return;
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    port_ui_fix_for_snap(spr, bms);
+    sn = port_ui_snap_find((u8 *)PORT_RESOLVE(bms[0].buf));
+    if (sn == NULL) return;
+    src = sn->data;
+    for (b = 0; b < spr->nbitmaps; b++)
+    {
+        u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+        u32 n = port_ui_sprite_bytes(spr, bms, b);
+        if (buf != NULL) memcpy(buf, src, n);
+        src += n;
+    }
+}
+
 /* Series-emblem hook — called wherever a menu screen makes an SObj from
  * an llFTEmblemSprites entry (CSS card watermark, stage-select tags).
  * The emblem file data is shared per SERIES, so replacing the injection
@@ -1960,8 +2289,10 @@ void port_ui_emblem_hook(Sprite *emblem, s32 fkind)
         snprintf(nm, sizeof nm, "emblem_fk%d", (int)fkind);
         port_ui_dump_sprite(dump, nm, emblem);
     }
+    port_ui_snapshot(emblem);
     if (ui == NULL)
     {
+        port_ui_restore(emblem);
         return;
     }
     port_ui_apply_emblem(emblem, ui, "emblem");
@@ -2058,6 +2389,11 @@ s32 port_voice_results_extra_wait_tics(void)
  * pipeline/gen_ui_assets.py). Struct fixups are forced first so sizes
  * read true; the texel fixup that runs at first draw then applies to
  * our bytes exactly as it would to the originals. */
+/* File payloads are pre-encoded to the RAW post-load state (blanket u32
+ * swap + TMEM swizzle). The target buffer is force-converted to the
+ * port's draw state first, and the same conversion is applied to the
+ * file bytes (u32 byteswap; odd-row 8-byte-group half swap for sub-32bpp)
+ * — so writes are idempotent and roster-page repaints stay correct. */
 static void port_ui_write_sprite(Sprite *spr, FILE *f, const char *what)
 {
     Bitmap *bms;
@@ -2067,17 +2403,51 @@ static void port_ui_write_sprite(Sprite *spr, FILE *f, const char *what)
     bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
     if (bms == NULL) return;
     portFixupBitmapArray(bms, spr->nbitmaps);
+    portFixupSpriteBitmapData(spr, bms);
     for (b = 0; b < spr->nbitmaps; b++)
     {
         u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
         s32 bpt = (spr->bmsiz == G_IM_SIZ_16b) ? 16 : (spr->bmsiz == G_IM_SIZ_8b) ? 8 :
                   (spr->bmsiz == G_IM_SIZ_32b) ? 32 : 4;
         s32 nbytes = (bms[b].width_img * bms[b].actualHeight * bpt) / 8;
-        if (buf == NULL || fread(buf, 1, nbytes, f) != (size_t)nbytes)
+        s32 row_bytes = (bms[b].width_img * bpt) / 8;
+        s32 x, y;
+        static u8 tmp[16384];
+        if (buf == NULL || nbytes > (s32)sizeof(tmp) ||
+            fread(tmp, 1, nbytes, f) != (size_t)nbytes)
         {
             port_log("OSBUI: short read injecting %s bitmap %d\n", what, (int)b);
             return;
         }
+        /* undo the blanket u32 byte reversal */
+        for (x = 0; x + 3 < nbytes; x += 4)
+        {
+            u8 t0 = tmp[x], t1 = tmp[x + 1];
+            tmp[x] = tmp[x + 3]; tmp[x + 1] = tmp[x + 2];
+            tmp[x + 2] = t1; tmp[x + 3] = t0;
+        }
+        /* undo the odd-row TMEM line swizzle (16-byte groups for 32bpp,
+         * 8-byte groups otherwise — matches portFixupSpriteBitmapData) */
+        if (row_bytes > 0)
+        {
+            s32 grp = (spr->bmsiz == G_IM_SIZ_32b) ? 16 : 8;
+            s32 half = grp / 2;
+            for (y = 1; y * row_bytes < nbytes; y += 2)
+            {
+                u8 *row = tmp + y * row_bytes;
+                for (x = 0; x + grp - 1 < row_bytes; x += grp)
+                {
+                    s32 k;
+                    for (k = 0; k < half; k++)
+                    {
+                        u8 t = row[x + k];
+                        row[x + k] = row[x + half + k];
+                        row[x + half + k] = t;
+                    }
+                }
+            }
+        }
+        memcpy(buf, tmp, nbytes);
     }
     port_log("OSBUI: injected %s (%d bitmaps)\n", what, (int)spr->nbitmaps);
 }
@@ -2091,6 +2461,13 @@ void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 
         port_ui_dump_sprite(dump, "css_portrait", portrait);
         port_ui_dump_sprite(dump, "css_name", name_text);
         port_ui_dump_sprite(dump, "css_firebg", fire_bg);
+    }
+    port_ui_snapshot(portrait);
+    port_ui_snapshot(name_text);
+    if (ui == NULL)
+    {
+        port_ui_restore(portrait);
+        port_ui_restore(name_text);
     }
     if (ui != NULL)
     {
@@ -2182,7 +2559,30 @@ void port_inject_bundle(GObj *fighter_gobj)
     {
         return;
     }
-    path = port_inject_bundle_path((s32)fp->fkind, &from_single);
+    {
+        s32 cidx = -1;
+        PortChar *c = port_char_for_player((s32)fp->player, (s32)fp->fkind, &cidx);
+        if (c != NULL)
+        {
+            /* registry character: only when its home skeleton matches the
+             * fighter actually spawning (a preset player char on a vanilla
+             * boot of a different fkind must not cross-skin). */
+            if (c->fkind == (s32)fp->fkind && c->bundle[0] != '\0')
+            {
+                path = c->bundle;
+                port_roster_record_player((s32)fp->player, cidx);
+            }
+            else
+            {
+                path = NULL;
+            }
+        }
+        else
+        {
+            path = port_inject_bundle_path((s32)fp->fkind, &from_single);
+            port_roster_record_player((s32)fp->player, -1);
+        }
+    }
     if (path == NULL)
     {
         return;
@@ -2202,7 +2602,7 @@ void port_inject_bundle(GObj *fighter_gobj)
 
     {
         const char *dump = getenv("SSB64_DUMP_SPRITES");
-        const char *ui = port_ui_path_for_fkind((s32)fp->fkind);
+        const char *ui = port_ui_path_for_player((s32)fp->player, (s32)fp->fkind);
         if ((dump != NULL || ui != NULL) && fp->attr != NULL && fp->attr->sprites != NULL)
         {
             FTSprites *_spr = (FTSprites *)PORT_RESOLVE(fp->attr->sprites);

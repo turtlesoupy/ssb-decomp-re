@@ -5017,6 +5017,124 @@ void mnPlayersVSPauseSlotProcesses(void)
 }
 
 // 0x8013A920
+#ifdef PORT
+/* ------------------------------------------------------------------ */
+/* OpenSmash roster pagination: page 0 = vanilla tiles (+ legacy env   */
+/* bindings); pages 1.. show a dozen registry characters each. L/R     */
+/* triggers flip pages; the tiles repaint through the same injection   */
+/* hooks the initial load uses (pristine snapshots restore vanilla).   */
+/* ------------------------------------------------------------------ */
+extern s32 port_roster_page(void);
+extern s32 port_roster_page_count(void);
+extern void port_roster_set_page(s32 page);
+extern void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 fkind);
+extern Sprite *portCSSGetScrollArrowSprite(void);
+extern Sprite *portCSSGetScrollArrowLeftSprite(void);
+
+static GObj *sMNPlayersVSPortArrowsGObj = NULL;
+
+static const intptr_t sPortCSSPortraitOffs[] =
+{
+	llMNPlayersPortraitsMarioSprite,  llMNPlayersPortraitsFoxSprite,
+	llMNPlayersPortraitsDonkeySprite, llMNPlayersPortraitsSamusSprite,
+	llMNPlayersPortraitsLuigiSprite,  llMNPlayersPortraitsLinkSprite,
+	llMNPlayersPortraitsYoshiSprite,  llMNPlayersPortraitsCaptainSprite,
+	llMNPlayersPortraitsKirbySprite,  llMNPlayersPortraitsPikachuSprite,
+	llMNPlayersPortraitsPurinSprite,  llMNPlayersPortraitsNessSprite
+};
+static const intptr_t sPortCSSNameOffs[] =
+{
+	llMNPlayersCommonMarioTextSprite,      llMNPlayersCommonFoxTextSprite,
+	llMNPlayersCommonDKTextSprite,         llMNPlayersCommonSamusTextSprite,
+	llMNPlayersCommonLuigiTextSprite,      llMNPlayersCommonLinkTextSprite,
+	llMNPlayersCommonYoshiTextSprite,      llMNPlayersCommonCaptainFalconTextSprite,
+	llMNPlayersCommonKirbyTextSprite,      llMNPlayersCommonPikachuTextSprite,
+	llMNPlayersCommonJigglypuffTextSprite, llMNPlayersCommonNessTextSprite
+};
+
+GObj *sMNPlayersVSPortArrowsGObjReset(void)
+{
+	GObj *old = sMNPlayersVSPortArrowsGObj;
+	sMNPlayersVSPortArrowsGObj = NULL;
+	return old;
+}
+
+static void mnPlayersVSPortMakeArrows(void)
+{
+	GObj *gobj;
+	SObj *sobj;
+	Sprite *arrow_right = portCSSGetScrollArrowSprite();
+	Sprite *arrow_left = portCSSGetScrollArrowLeftSprite();
+	s32 page = port_roster_page();
+	s32 npages = port_roster_page_count();
+
+	if (sMNPlayersVSPortArrowsGObj != NULL)
+	{
+		gcEjectGObj(sMNPlayersVSPortArrowsGObj);
+		sMNPlayersVSPortArrowsGObj = NULL;
+	}
+	if (npages <= 1)
+	{
+		return;
+	}
+	gobj = gcMakeGObjSPAfter(0, NULL, 4, GOBJ_PRIORITY_DEFAULT);
+	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 1, GOBJ_PRIORITY_DEFAULT, ~0);
+	sMNPlayersVSPortArrowsGObj = gobj;
+	/* tiles span roughly x=16..304, rows centered near y=83 */
+	if (arrow_right != NULL)
+	{
+		sobj = lbCommonMakeSObjForGObj(gobj, arrow_right);
+		sobj->sprite.attr &= ~SP_FASTCOPY;
+		sobj->sprite.attr |= SP_TRANSPARENT;
+		sobj->pos.x = 310.0F;
+		sobj->pos.y = 61.0F;
+		if (page + 1 >= npages) sobj->sprite.attr |= SP_HIDDEN;
+	}
+	if (arrow_left != NULL)
+	{
+		sobj = lbCommonMakeSObjForGObj(gobj, arrow_left);
+		sobj->sprite.attr &= ~SP_FASTCOPY;
+		sobj->sprite.attr |= SP_TRANSPARENT;
+		sobj->pos.x = 4.0F;
+		sobj->pos.y = 61.0F;
+		if (page == 0) sobj->sprite.attr |= SP_HIDDEN;
+	}
+}
+
+void mnPlayersVSPortApplyRosterPage(void)
+{
+	s32 fk;
+	for (fk = 0; fk < 12; fk++)
+	{
+		port_ui_css_hook(
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], sPortCSSPortraitOffs[fk]),
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], sPortCSSNameOffs[fk]),
+			lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite),
+			fk);
+	}
+	mnPlayersVSPortMakeArrows();
+}
+
+static void mnPlayersVSPortPageInput(void)
+{
+	s32 i, dir = 0;
+	if (port_roster_page_count() <= 1)
+	{
+		return;
+	}
+	for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+	{
+		if (gSYControllerDevices[i].button_tap & R_TRIG) dir = 1;
+		if (gSYControllerDevices[i].button_tap & L_TRIG) dir = -1;
+	}
+	if (dir != 0)
+	{
+		port_roster_set_page(port_roster_page() + dir);
+		mnPlayersVSPortApplyRosterPage();
+	}
+}
+#endif
+
 void mnPlayersVSFuncRun(GObj *gobj)
 {
 	s32 gkinds_num;
@@ -5061,6 +5179,9 @@ void mnPlayersVSFuncRun(GObj *gobj)
 
 	sMNPlayersVSTotalTimeTics++;
 
+#ifdef PORT
+	mnPlayersVSPortPageInput();
+#endif
 	mnPlayersVSUpdateControllerOrders();
 
 	if (sMNPlayersVSTotalTimeTics == sMNPlayersVSReturnTic)
@@ -5487,19 +5608,13 @@ void mnPlayersVSFuncStart(void)
 			llMNPlayersCommonKirbyTextSprite,      llMNPlayersCommonPikachuTextSprite,
 			llMNPlayersCommonJigglypuffTextSprite, llMNPlayersCommonNessTextSprite
 		};
-		s32 tfk;
-		for (tfk = 0; tfk < 12; tfk++)
 		{
-			if (port_ui_path_for_fkind(tfk) == NULL &&
-			    (getenv("SSB64_DUMP_SPRITES") == NULL || tfk != port_ui_target_fkind()))
-			{
-				continue;
-			}
-			port_ui_css_hook(
-				lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], css_portrait_offs[tfk]),
-				lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[0], css_name_offs[tfk]),
-				lbRelocGetFileData(Sprite*, sMNPlayersVSFiles[5], llMNPlayersPortraitsPortraitFireBgSprite),
-				tfk);
+			extern void mnPlayersVSPortApplyRosterPage(void);
+			extern GObj *sMNPlayersVSPortArrowsGObjReset(void);
+			/* the previous CSS scene's arrows GObj died with its arena —
+			 * clear the pointer before ApplyRosterPage tries to eject it */
+			sMNPlayersVSPortArrowsGObjReset();
+			mnPlayersVSPortApplyRosterPage();
 		}
 		if (getenv("SSB64_DUMP_SPRITES") != NULL)
 		{
