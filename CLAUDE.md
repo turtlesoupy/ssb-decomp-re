@@ -2,7 +2,16 @@
 
 ## Project Overview
 
-N64 decompilation of Super Smash Bros. (US version). The goal is to produce C source code that compiles to a byte-identical ROM. Currently ~95.9% code matched with ~30 nonmatching functions remaining, mostly in ovl8 (debug menu overlay).
+N64 decompilation of Super Smash Bros. The goal is to produce C source code that compiles to a byte-identical ROM. **Upstream reached 100% on 2026-08-24** — code, data and functions are all 100% matched on both US and JP (7165/7165 functions; see `us_report.json` / `jp_report.json`), and no `#pragma GLOBAL_ASM` remains anywhere in upstream's `src/`.
+
+### This fork
+
+This is the SSB64 PC port's decomp submodule (`turtlesoupy/ssb-decomp-re`, branch `wasm`), not a plain upstream checkout. It carries upstream's tree plus the port delta — `#ifdef PORT` blocks throughout `src/` and `include/`.
+
+- **Upstream:** `VetriTheRetri/ssb-decomp-re` (remote `upstream`). JRickey's fork is remote `jrickey`; it still holds the `port-patches` and `armeabi-v7a-ilp32` branches. Do not point `upstream` at JRickey — it has been frozen since April and `git fetch` will report 0 new commits while hiding the real ones.
+- **Fork point:** `efe9b01b` (upstream's 100% commit), merged in 2026-08-26. The previous fork point was `977cf4780` (2026-05-03); branch `wasm-pre-rebase` preserves the tree from before that merge.
+- **Merging upstream:** `git merge upstream/main`. `rerere` is enabled and has the content resolutions cached. Four paths are deliberately absent and will conflict as modify/delete — `.gitmodules` and the `tools/{splat,asm-processor,asm-differ}` gitlinks — because the port's CI checks out with `submodules: recursive` and does not need them. Keep them deleted.
+- **The port does not build the matching ROM.** It compiles via clang/emscripten with `NON_MATCHING=1` and `PORT=1`. Behaviour, not bytes, is the contract — see the port's CLAUDE.md directive 5.
 
 ## Build Commands
 
