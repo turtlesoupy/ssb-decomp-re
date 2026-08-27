@@ -2723,13 +2723,21 @@ void mnPlayersVSUpdateFighter(s32 player)
 
 		{
 		extern s32 port_roster_tile_spawn_fkind(s32 fkind);
+		extern s32 port_roster_preview_char_matches(s32 player, void *fighter_gobj, s32 tile_fkind);
 		if (
 			(fighter_gobj != NULL) &&
 			/* the live preview spawns as the tile character's BASE fighter
 			 * — compare against that, not the raw tile, or the preview
 			 * would re-make every frame */
 			(ftGetStruct(fighter_gobj)->fkind ==
-			 port_roster_tile_spawn_fkind(sMNPlayersVSSlots[player].fkind)))
+			 port_roster_tile_spawn_fkind(sMNPlayersVSSlots[player].fkind)) &&
+			/* ...but matching fkinds do NOT mean matching characters: two
+			 * roster picks sharing a base fighter spawn as the same kind,
+			 * and reusing there kept the previous character's mesh (name
+			 * and emblem changed, mesh did not — and the stale mesh rode
+			 * into the match). Require the worn character to match too. */
+			port_roster_preview_char_matches(player, fighter_gobj,
+			                                 sMNPlayersVSSlots[player].fkind))
 		{
 			if (sMNPlayersVSSlots[player].costume != costume)
 			{

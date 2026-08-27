@@ -793,6 +793,12 @@ typedef struct OSB5State
      * to match; every spawn of the injected kind re-attaches and
      * refreshes both. */
     s32 owner_fkind;
+    /* Which registry character this slot is wearing (-1 = vanilla /
+     * legacy single-target inject). Two roster characters that declare
+     * the same BASE fighter spawn as the same fkind, so owner_fkind
+     * alone cannot tell them apart — the CSS reuse gate needs this to
+     * know a preview is showing the wrong character. */
+    s32 owner_char;
 } OSB5State;
 
 /* One mesh slot per PLAYER (0..3): a match fields at most four fighters,
@@ -815,6 +821,9 @@ static OSB5State *osb5_slot(s32 player)
     return ((u32)player < OSB5_PLAYER_SLOTS) ? &sOsb5Slots[player] : NULL;
 }
 
+/* Registry index resolved by the in-flight port_inject_bundle() call, read
+ * by osb5_load() when it claims the slot (-1 = vanilla / legacy inject). */
+static s32 sInjectCharIdx = -1;
 
 /* -------------------------------------------------------------------- */
 /* Injection roster: which bundle/ui/voice serves each fkind.            */
@@ -1212,6 +1221,38 @@ s32 port_roster_tile_spawn_fkind(s32 fkind)
         return c->base;
     }
     return fkind;
+}
+
+/* Does player's live CSS preview GObj already wear the character this tile
+ * resolves to? The menu's reuse gate compares spawn fkinds, which is not a
+ * sufficient identity: two roster characters that declare the same BASE
+ * fighter both spawn as that fighter's kind, so the gate saw "no change",
+ * skipped the destroy+remake, and left the previous character's mesh
+ * attached — the card name and emblem updated while the mesh did not, and
+ * the stale pick rode into the match. Comparing the WORN character closes
+ * that hole; it also covers vanilla<->custom swaps on one fkind (page 0
+ * Mario vs a page-1 character sitting on the Mario tile).
+ *
+ * Note this reads the TILE binding, not sPlayerChar[]: the menu calls this
+ * before mnPlayersVSMakeFighter re-binds the player, so the player binding
+ * still holds the OUTGOING pick at gate time. */
+s32 port_roster_preview_char_matches(s32 player, void *fighter_gobj, s32 tile_fkind)
+{
+    OSB5State *o = osb5_slot(player);
+    s32 want;
+    port_roster_parse();
+    want = ((u32)tile_fkind < OSB5_SLOTS) ? sTileChar[tile_fkind] : -1;
+    if (o == NULL)
+    {
+        return 1;                       /* no mesh slot: fkind gate decides */
+    }
+    if (o->owner != (GObj *)fighter_gobj)
+    {
+        /* preview is not wearing an injected mesh — reuse only if the tile
+         * does not want one either */
+        return want < 0;
+    }
+    return o->owner_char == want;
 }
 
 /* Same remap keyed by the player's recorded binding — used when the CSS
@@ -2096,6 +2137,7 @@ static void osb5_load(FTStruct *fp, FILE *f)
     }
     o->owner = fp->fighter_gobj;
     o->owner_fkind = (s32)fp->fkind;
+    o->owner_char = sInjectCharIdx;
     o->dbg_ticks = 0;
     o->fills = 0;
     /* Hide the WHOLE fighter until the mesh attaches (fill #2): the mesh
@@ -3177,7 +3219,9 @@ void port_inject_bundle(GObj *fighter_gobj)
         return;
     }
     {
-        PortChar *c = port_char_for_player((s32)fp->player, (s32)fp->fkind, NULL);
+        s32 cidx = -1;
+        PortChar *c = port_char_for_player((s32)fp->player, (s32)fp->fkind, &cidx);
+        sInjectCharIdx = (c != NULL) ? cidx : -1;
         if (c != NULL)
         {
             /* registry character: only when the skeleton its bundle targets
