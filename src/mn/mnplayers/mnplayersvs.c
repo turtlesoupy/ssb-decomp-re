@@ -1863,14 +1863,27 @@ void mnPlayersVSFighterProcUpdate(GObj *fighter_gobj)
 {
 	FTStruct *fp = ftGetStruct(fighter_gobj);
 	s32 player = fp->player;
+	s32 sel_fkind = sMNPlayersVSSlots[player].fkind;
 
+#ifdef PORT
+	/* OpenSmash: the Win pose set on selection is per-FIGHTER
+	 * (mnPlayersVSGetStatusSelected), but the preview spawned as the tile
+	 * character's BASE fighter — pick the pose for the fighter actually
+	 * standing there, or a base-remapped pick gets another kind's Win
+	 * variant and freezes mid-animation (Moritz on the Samus tile playing
+	 * as Mario was commanded Samus's Win4, which Mario never finishes). */
+	{
+		extern s32 port_roster_tile_spawn_fkind(s32 fkind);
+		sel_fkind = port_roster_tile_spawn_fkind(sel_fkind);
+	}
+#endif
 	if (sMNPlayersVSSlots[player].is_fighter_selected == TRUE)
 	{
 		if (DObjGetStruct(fighter_gobj)->rotate.vec.f.y < F_CLC_DTOR32(0.1F))
 		{
 			if (sMNPlayersVSSlots[player].is_status_selected == FALSE)
 			{
-				scSubsysFighterSetStatus(sMNPlayersVSSlots[player].player, mnPlayersVSGetStatusSelected(sMNPlayersVSSlots[player].fkind));
+				scSubsysFighterSetStatus(sMNPlayersVSSlots[player].player, mnPlayersVSGetStatusSelected(sel_fkind));
 
 				sMNPlayersVSSlots[player].is_status_selected = TRUE;
 			}
@@ -1883,7 +1896,7 @@ void mnPlayersVSFighterProcUpdate(GObj *fighter_gobj)
 			{
 				DObjGetStruct(fighter_gobj)->rotate.vec.f.y = 0.0F;
 
-				scSubsysFighterSetStatus(sMNPlayersVSSlots[player].player, mnPlayersVSGetStatusSelected(sMNPlayersVSSlots[player].fkind));
+				scSubsysFighterSetStatus(sMNPlayersVSSlots[player].player, mnPlayersVSGetStatusSelected(sel_fkind));
 
 				sMNPlayersVSSlots[player].is_status_selected = TRUE;
 			}
