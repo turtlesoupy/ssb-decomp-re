@@ -2444,22 +2444,42 @@ static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
 
 extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
 
+void port_ui_snapshot(Sprite *spr);
+/* pristine (pre-injection) texels for a sprite, bitmaps concatenated in the
+ * converted state — NULL if this sprite was never snapshotted. */
+static const u8 *port_ui_snap_texels(Sprite *spr);
+
 /* Write a coverage canvas into a sprite of ANY 4/8-bit intensity geometry,
- * nearest-resampling both axes so the glyph's content bbox fills the
- * sprite's drawn area (aspect preserved, centered). Canvas bytes are pure
- * 0-255 coverage, thresholded to a flat full-intensity silhouette with a
- * hard edge — the vanilla emblem look (the engine tints it at draw time).
- * The bitmap data is force-converted to the port's linear texel state
- * first (portFixupSpriteBitmapData is idempotent), and linear bytes are
- * written, so re-running on a later reselect stays correct — writing the
- * DRAM-swizzled state here corrupts on the second pass because the
- * one-time draw fixup will not run again. */
+ * nearest-resampling both axes so the glyph lands exactly where the VANILLA
+ * art sat (aspect preserved, centered on the vanilla ink box).
+ *
+ * Fitting to the sprite's full drawn area is wrong: the art inside these
+ * sprites is not centered in its own bitmap. Every CSS series emblem is a
+ * 64x48 I4 tile whose ink sits at x[12..25]..[59..63], y[1..8]..[40..44] —
+ * centered near x=39.5, not x=32 — because the card places the SObj at a
+ * fixed offset (mnPlayersVSMakeNameAndEmblem: pos.x = player*69 + 24) and
+ * the padding is baked into the texels. Centering our glyph on the tile
+ * therefore pushed it ~7px left (off the left edge of the card) and let it
+ * grow taller than any vanilla emblem. So measure the ink box of the
+ * pristine texels and fit into THAT — general across every target sprite
+ * (CSS card watermark, stage tags, in-match HUD backdrop), no per-target
+ * constants. Empty vanilla art falls back to the whole drawn area.
+ *
+ * Canvas bytes are pure 0-255 coverage, thresholded to a flat
+ * full-intensity silhouette with a hard edge — the vanilla emblem look (the
+ * engine tints it at draw time). The bitmap data is force-converted to the
+ * port's linear texel state first (portFixupSpriteBitmapData is
+ * idempotent), and linear bytes are written, so re-running on a later
+ * reselect stays correct — writing the DRAM-swizzled state here corrupts on
+ * the second pass because the one-time draw fixup will not run again. */
 static void port_ui_write_canvas_fit(Sprite *spr, const u8 *canvas, s32 cw,
                                      s32 ch, const char *what)
 {
     Bitmap *bms;
+    const u8 *snap;
     s32 b, x, y, yy = 0, total_h = 0;
     s32 x0 = cw, x1 = -1, y0 = ch, y1 = -1;
+    s32 vx0, vx1, vy0, vy1, vw, vh;
     s32 dw, dh, ow, oh, ox, oy;
     s32 peak_nib = 15;
     f32 s;
@@ -2480,6 +2500,11 @@ static void port_ui_write_canvas_fit(Sprite *spr, const u8 *canvas, s32 cw,
         return;
     }
     portFixupSpriteBitmapData(spr, bms);
+    /* keep a pristine copy so the vanilla ink box and peak intensity are
+     * measured from the ORIGINAL art even when this sprite has already been
+     * injected once this session (roster page flips, HUD re-inits) */
+    port_ui_snapshot(spr);
+    snap = port_ui_snap_texels(spr);
     for (y = 0; y < ch; y++)
     {
         for (x = 0; x < cw; x++)
@@ -2497,39 +2522,72 @@ static void port_ui_write_canvas_fit(Sprite *spr, const u8 *canvas, s32 cw,
     {
         x0 = 0; x1 = cw - 1; y0 = 0; y1 = ch - 1;
     }
-    /* match the vanilla art's peak intensity so the tinted overlay keeps
-     * its stock translucency (I doubles as alpha for I-format sprites).
-     * Scanning the current texels self-calibrates per target — the CSS
-     * emblems peak at 9/15, others may differ — and is stable across
-     * rewrites since our own output peaks at the same value. */
-    {
-        s32 peak = 0;
-        for (b = 0; b < spr->nbitmaps; b++)
-        {
-            u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
-            s32 n = bms[b].width_img * bms[b].actualHeight;
-            s32 i;
-            if (buf == NULL) continue;
-            if (spr->bmsiz == G_IM_SIZ_4b) n /= 2;
-            for (i = 0; i < n; i++)
-            {
-                if ((buf[i] >> 4) > peak) peak = buf[i] >> 4;
-                if (spr->bmsiz == G_IM_SIZ_4b && (buf[i] & 0xF) > peak) peak = buf[i] & 0xF;
-            }
-        }
-        if (peak > 0) peak_nib = peak;
-    }
     for (b = 0; b < spr->nbitmaps; b++) total_h += bms[b].actualHeight;
     dw = (spr->width > 0 && spr->width <= bms[0].width_img) ? spr->width : bms[0].width_img;
     dh = (spr->height > 0 && spr->height <= total_h) ? spr->height : total_h;
-    s = (f32)dw / (x1 - x0 + 1);
-    if ((f32)dh / (y1 - y0 + 1) < s) s = (f32)dh / (y1 - y0 + 1);
+    /* Scan the vanilla texels once for two things:
+     *   - peak intensity, so the tinted overlay keeps its stock translucency
+     *     (I doubles as alpha for I-format sprites; the CSS emblems peak at
+     *     9/15, others may differ), and
+     *   - the ink box, which is where the art is actually meant to sit
+     *     inside the tile (see the note above the function).
+     * Reads the pristine snapshot when there is one, so a re-injection
+     * measures the original art rather than our own previous write. */
+    vx0 = dw; vx1 = -1; vy0 = dh; vy1 = -1;
+    {
+        s32 peak = 0;
+        const u8 *sp = snap;
+        for (b = 0; b < spr->nbitmaps; b++)
+        {
+            const u8 *buf = (const u8 *)PORT_RESOLVE(bms[b].buf);
+            s32 w = bms[b].width_img;
+            s32 bpp8 = (spr->bmsiz == G_IM_SIZ_8b);
+            s32 row_bytes = bpp8 ? w : (w / 2);
+            if (sp != NULL) { buf = sp; sp += row_bytes * bms[b].actualHeight; }
+            if (buf == NULL) { yy += bms[b].actualHeight; continue; }
+            for (y = 0; y < bms[b].actualHeight; y++)
+            {
+                s32 cy = yy + y;
+                for (x = 0; x < w; x++)
+                {
+                    u8 byte = buf[y * row_bytes + (bpp8 ? x : x / 2)];
+                    s32 nib = (bpp8 || !(x & 1)) ? (byte >> 4) : (byte & 0xF);
+                    if (nib > peak) peak = nib;
+                    if (nib != 0 && x < dw && cy < dh)
+                    {
+                        if (x < vx0) vx0 = x;
+                        if (x > vx1) vx1 = x;
+                        if (cy < vy0) vy0 = cy;
+                        if (cy > vy1) vy1 = cy;
+                    }
+                }
+            }
+            yy += bms[b].actualHeight;
+        }
+        if (peak > 0) peak_nib = peak;
+        yy = 0;
+    }
+    if (vx1 < 0)
+    {
+        /* blank target — no ink box to match, use the whole drawn area */
+        vx0 = 0; vx1 = dw - 1; vy0 = 0; vy1 = dh - 1;
+    }
+    vw = vx1 - vx0 + 1;
+    vh = vy1 - vy0 + 1;
+    s = (f32)vw / (x1 - x0 + 1);
+    if ((f32)vh / (y1 - y0 + 1) < s) s = (f32)vh / (y1 - y0 + 1);
     ow = (s32)((x1 - x0 + 1) * s + 0.5F);
     oh = (s32)((y1 - y0 + 1) * s + 0.5F);
     if (ow < 1) ow = 1;
     if (oh < 1) oh = 1;
-    ox = (dw - ow) / 2;
-    oy = (dh - oh) / 2;
+    if (ow > dw) ow = dw;
+    if (oh > dh) oh = dh;
+    ox = vx0 + (vw - ow) / 2;
+    oy = vy0 + (vh - oh) / 2;
+    if (ox < 0) ox = 0;
+    if (oy < 0) oy = 0;
+    if (ox + ow > dw) ox = dw - ow;
+    if (oy + oh > dh) oy = dh - oh;
     for (b = 0; b < spr->nbitmaps; b++)
     {
         u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
@@ -2581,8 +2639,10 @@ static void port_ui_write_canvas_fit(Sprite *spr, const u8 *canvas, s32 cw,
         }
         yy += bms[b].actualHeight;
     }
-    port_log("OSBUI: injected %s (canvas %dx%d -> %dx%d in %dx%d)\n",
-             what, (int)cw, (int)ch, (int)ow, (int)oh, (int)dw, (int)dh);
+    port_log("OSBUI: injected %s (canvas %dx%d -> %dx%d at %d,%d; vanilla ink "
+             "%dx%d at %d,%d in %dx%d)\n",
+             what, (int)cw, (int)ch, (int)ow, (int)oh, (int)ox, (int)oy,
+             (int)vw, (int)vh, (int)vx0, (int)vy0, (int)dw, (int)dh);
 }
 
 s32 port_ui_target_fkind(void);
@@ -2693,6 +2753,21 @@ void port_ui_snapshot(Sprite *spr)
         if (buf != NULL) memcpy(dst, buf, n);
         dst += n;
     }
+}
+
+/* Pristine texels for a sprite (bitmaps concatenated, converted state), or
+ * NULL if it was never snapshotted. Lets a re-injection measure the ORIGINAL
+ * art's ink box and peak intensity instead of our own previous write. */
+static const u8 *port_ui_snap_texels(Sprite *spr)
+{
+    Bitmap *bms;
+    UISnap *sn;
+
+    if (spr == NULL) return NULL;
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL) return NULL;
+    sn = port_ui_snap_find((u8 *)PORT_RESOLVE(bms[0].buf));
+    return (sn != NULL) ? sn->data : NULL;
 }
 
 /* Put the pristine texels back (tile unbound on this roster page). */
