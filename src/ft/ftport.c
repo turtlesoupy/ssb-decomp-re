@@ -815,6 +815,7 @@ static OSB5State *osb5_slot(s32 player)
     return ((u32)player < OSB5_PLAYER_SLOTS) ? &sOsb5Slots[player] : NULL;
 }
 
+
 /* -------------------------------------------------------------------- */
 /* Injection roster: which bundle/ui/voice serves each fkind.            */
 /* SSB64_INJECT_SET      = "path:fkind,path:fkind,..."                   */
@@ -1391,6 +1392,32 @@ s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
         }
     }
     return 0;
+}
+
+/* Re-blank a replaced joint right after the engine re-points its part DL.
+ * The skin-update self-heal in port_osb5_skin_update covers these writes
+ * during play, but it only runs from ftMainProcParams — any window where
+ * fighter processes are suspended (the pause menu suspends all of them) has
+ * no tick to heal on. Blanking at the write site is tick-independent.
+ * Call it AFTER parts->flags is assigned so the plain-DL / two-list choice
+ * matches the part's new draw type. */
+void port_osb5_reblank_joint(void *fighter_gobj, s32 joint_id)
+{
+    FTStruct *fp;
+    if (getenv("SSB64_NO_MPGUARD") != NULL)
+    {
+        return;
+    }
+    if (!port_osb5_joint_replaced(fighter_gobj, joint_id))
+    {
+        return;
+    }
+    fp = ftGetStruct((GObj *)fighter_gobj);
+    if (fp == NULL || (u32)joint_id >= FTPARTS_JOINT_NUM_MAX)
+    {
+        return;
+    }
+    osb5_blank_joint(fp, joint_id);
 }
 
 /* SSB64_POSE_CAPTURE: mesh-eval capture mode. The display walk asks about

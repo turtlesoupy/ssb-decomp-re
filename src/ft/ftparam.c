@@ -866,20 +866,6 @@ void ftParamSetModelPartID(GObj *fighter_gobj, s32 joint_id, s32 modelpart_id)
                     modelpart = &FTMODELPARTCONTAINER_GET_DESC(modelparts_container, joint_id - nFTPartsJointCommonStart)->modelparts[modelpart_id][fp->detail_curr - nFTPartsDetailStart];
 
                     joint->dl = FTMODELPART_GET_DL(modelpart);
-#ifdef PORT
-                    /* OpenSmash: a skinned injected mesh replaces this
-                     * part — keep it blanked through modelpart swaps
-                     * (accessory joints pass through untouched). */
-                    {
-                        extern s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id);
-                        extern char *getenv(const char *);
-                        extern Gfx *port_osb5_null_dl(void);
-                        if (getenv("SSB64_NO_MPGUARD") == NULL && port_osb5_joint_replaced(fighter_gobj, joint_id))
-                        {
-                            joint->dl = port_osb5_null_dl();
-                        }
-                    }
-#endif
 
                     lbCommonAddMObjForFighterPartsDObj(joint, FTMODELPART_GET_MOBJSUBS(modelpart), FTMODELPART_GET_COSTUME_MATANIM_JOINTS(modelpart), FTMODELPART_GET_MAIN_MATANIM_JOINTS(modelpart), fp->costume);
 
@@ -929,6 +915,21 @@ void ftParamSetModelPartID(GObj *fighter_gobj, s32 joint_id, s32 modelpart_id)
                 }
             }
             else joint->dl = NULL;
+#ifdef PORT
+            /* OpenSmash: a skinned injected mesh replaces this part — keep
+             * it blanked through modelpart swaps AND detail (LOD) switches.
+             * The old guard sat on the modelparts branch only, so the
+             * commonparts fallback below it re-pointed replaced joints at the
+             * vanilla DL, and it always wrote a plain Gfx* even when the part
+             * had just become two-list (flags&0xF==1 — the Yoshi crash mode
+             * ftport.c documents). Placed here, after both DL writes and the
+             * parts->flags assignment, the blank matches the part's current
+             * draw type. Accessory joints pass through untouched. */
+            {
+                extern void port_osb5_reblank_joint(void *fighter_gobj, s32 joint_id);
+                port_osb5_reblank_joint(fighter_gobj, joint_id);
+            }
+#endif
 
             fp->is_modelpart_modify = TRUE;
         }
@@ -1042,6 +1043,14 @@ void ftParamResetModelPartAll(GObj *fighter_gobj)
                         parts->flags = commonparts_container->commonparts[detail_id].flags;
                     }
                 }
+#ifdef PORT
+                /* OpenSmash: same re-blank as ftParamSetModelPartID — this
+                 * reset path re-points replaced joints too. */
+                {
+                    extern void port_osb5_reblank_joint(void *fighter_gobj, s32 joint_id);
+                    port_osb5_reblank_joint(fighter_gobj, i + nFTPartsJointCommonStart);
+                }
+#endif
             }
         }
     }
