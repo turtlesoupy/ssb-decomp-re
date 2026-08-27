@@ -5,7 +5,7 @@
 FTMotionDesc dFTNPurinSubMotionDescs[] =
 {
 #ifdef PORT
-	ll_1492_FileID, 0x80000000, 0x00000000
+	llFTPurinAnimEggLayFileID, 0x80000000, 0x00000000
 #else
 	&llFTPurinAnimEggLayFileID, 0x80000000, 0x00000000
 #endif

@@ -5,7 +5,7 @@
 FTMotionDesc dFTGDonkeySubMotionDescs[] =
 {
 #ifdef PORT
-	ll_800_FileID, 0x80000000, 0x00000000
+	llFTDonkeyAnimEggLayFileID, 0x80000000, 0x00000000
 #else
 	&llFTDonkeyAnimEggLayFileID, 0x80000000, 0x00000000
 #endif

@@ -66,13 +66,22 @@ s32 D_ovl1_80392088[] =
 FTMotionDesc dFTKirbySubMotionDescs[] =
 {
 #ifdef PORT
-    ll_1259_FileID, (intptr_t)D_ovl1_80392020, 0x00000000,
-    ll_416_FileID,  (intptr_t)D_ovl1_8039205C, 0x80000000,
-    ll_417_FileID,  (intptr_t)D_ovl1_80392068, 0x80000000,
-    ll_418_FileID,  (intptr_t)D_ovl1_80392074, 0x00000000,
-    ll_418_FileID,  (intptr_t)D_ovl1_80392074, 0x00000000,
-    ll_419_FileID,  (intptr_t)D_ovl1_80392080, 0x00000000,
-    ll_423_FileID,  0x80000000,      0x00000000,
+    llFTKirbyAnimEggLayFileID, (intptr_t)D_ovl1_80392020, 0x00000000,
+    llFTKirbyAnimWin1FileID,  (intptr_t)D_ovl1_8039205C, 0x80000000,
+    llFTKirbyAnimWin2FileID,  (intptr_t)D_ovl1_80392068, 0x80000000,
+    llFTKirbyAnimSelectedFileID,  (intptr_t)D_ovl1_80392074, 0x00000000,
+    llFTKirbyAnimSelectedFileID,  (intptr_t)D_ovl1_80392074, 0x00000000,
+    llFTKirbyAnimClapsFileID,  (intptr_t)D_ovl1_80392080, 0x00000000,
+    llFTKirbyAnimUnknownFileID,  0x80000000,      0x00000000,
+    0x00000000,      0x80000000,      0x00000000,
+    llFTKirbyAnimDollPickUpFileID,  0x80000000,      0x80000000,
+    llFTKirbyAnimDollFallFileID,  0x80000000,      0x40000000,
+    llFTKirbyAnimDollRevivalFileID,  0x80000000,      0x40000000,
+    llFTKirbyAnimIntro2FileID,  0x80000000,      0x00000000,
+    llFTKirbyAnimIntroPoseFileID,  0x80000000,      0x00000000,
+    llFTKirbyAnimPoseFileID,  0x80000000,      0x00000000,
+    llFTKirbyAnimPose2FileID,  0x80000000,      0x00000000,
+    llFTKirbyAnimIntroFileID,  (intptr_t)D_ovl1_80392088, 0x00000000
 #else
     &llFTKirbyAnimEggLayFileID, D_ovl1_80392020, 0x00000000,
     &llFTKirbyAnimWin1FileID,  D_ovl1_8039205C, 0x80000000,
@@ -81,18 +90,7 @@ FTMotionDesc dFTKirbySubMotionDescs[] =
     &llFTKirbyAnimSelectedFileID,  D_ovl1_80392074, 0x00000000,
     &llFTKirbyAnimClapsFileID,  D_ovl1_80392080, 0x00000000,
     &llFTKirbyAnimUnknownFileID,  0x80000000,      0x00000000,
-#endif
     0x00000000,      0x80000000,      0x00000000,
-#ifdef PORT
-    ll_420_FileID,  0x80000000,      0x80000000,
-    ll_421_FileID,  0x80000000,      0x40000000,
-    ll_422_FileID,  0x80000000,      0x40000000,
-    ll_425_FileID,  0x80000000,      0x00000000,
-    ll_426_FileID,  0x80000000,      0x00000000,
-    ll_427_FileID,  0x80000000,      0x00000000,
-    ll_428_FileID,  0x80000000,      0x00000000,
-    ll_424_FileID,  (intptr_t)D_ovl1_80392088, 0x00000000
-#else
     &llFTKirbyAnimDollPickUpFileID,  0x80000000,      0x80000000,
     &llFTKirbyAnimDollFallFileID,  0x80000000,      0x40000000,
     &llFTKirbyAnimDollRevivalFileID,  0x80000000,      0x40000000,
