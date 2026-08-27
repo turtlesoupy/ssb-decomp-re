@@ -799,6 +799,17 @@ typedef struct OSB5State
      * alone cannot tell them apart — the CSS reuse gate needs this to
      * know a preview is showing the wrong character. */
     s32 owner_char;
+    /* Engine-authored draw state saved when we overwrite it (blank /
+     * mesh attach), per joint id. dl/dls/dv share one union in DObj, so
+     * a single void* captures either draw type. Lets a slot re-claim
+     * that happens while the owner still LIVES (the 1P intro spawns
+     * every lineup fighter with player 0, so a second injected fighter
+     * evicts the first mid-screen) restore the previous owner to its
+     * vanilla mesh instead of leaving it blanked + HIDDEN forever. */
+    void *saved_dv[FTPARTS_JOINT_NUM_MAX];
+    u8 saved_dv_valid[FTPARTS_JOINT_NUM_MAX];
+    u8 saved_root_nib;          /* root FTParts flags&0xF before we forced plain-DL */
+    u8 saved_root_nib_valid;
 } OSB5State;
 
 /* One mesh slot per PLAYER (0..3): a match fields at most four fighters,
@@ -1364,13 +1375,22 @@ static s32 osb5_blank_id(OSB5State *o, s32 k)
     return (o->nblank > 0) ? (s32)o->blank_ids[k] : (s32)o->joint_ids[k];
 }
 
-static void osb5_blank_joint(FTStruct *fp, s32 jid)
+static void osb5_blank_joint(OSB5State *o, FTStruct *fp, s32 jid)
 {
     DObj *j = fp->joints[jid];
     FTParts *parts;
     if (j == NULL)
     {
         return;
+    }
+    /* save the engine's draw pointer the first time we cover it (and
+     * again after any modelpart rewrite — the value is only fresh when
+     * it isn't one of our sentinels) so slot eviction can restore it */
+    if (o != NULL && (u32)jid < FTPARTS_JOINT_NUM_MAX &&
+        j->dv != (void *)sOsb5NullDL && j->dv != (void *)sOsb5NullDLPair)
+    {
+        o->saved_dv[jid] = j->dv;
+        o->saved_dv_valid[jid] = 1;
     }
     parts = (FTParts *)j->user_data.p;
     if (parts != NULL && (parts->flags & 0xF) == 1)
@@ -1458,7 +1478,7 @@ void port_osb5_reblank_joint(void *fighter_gobj, s32 joint_id)
     {
         return;
     }
-    osb5_blank_joint(fp, joint_id);
+    osb5_blank_joint(osb5_slot((s32)fp->player), fp, joint_id);
 }
 
 /* SSB64_POSE_CAPTURE: mesh-eval capture mode. The display walk asks about
@@ -1623,7 +1643,7 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         s32 jid = osb5_blank_id(o, k);
         if (jid != 0 && jid < FTPARTS_JOINT_NUM_MAX && !osb5_joint_is_blanked(fp, jid))
         {
-            osb5_blank_joint(fp, jid);
+            osb5_blank_joint(o, fp, jid);
         }
     }
     /* keep the root on the plain-DL path (modelpart swaps copy flags) */
@@ -1632,6 +1652,8 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         FTParts *rparts = (FTParts *)fp->joints[0]->user_data.p;
         if (rparts != NULL && (rparts->flags & 0xF) != 0)
         {
+            o->saved_root_nib = (u8)(rparts->flags & 0xF);
+            o->saved_root_nib_valid = 1;
             rparts->flags &= ~0xF;
         }
     }
@@ -1695,6 +1717,13 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     o->fills++;
     if (o->fills >= 2 && o->mesh_dl != NULL && fp->joints[0]->dl != o->mesh_dl)
     {
+        /* whatever the engine last put on the root (fresh from make, or a
+         * modelpart/respawn rewrite) is the value eviction must restore */
+        if (fp->joints[0]->dv != (void *)sOsb5NullDL)
+        {
+            o->saved_dv[0] = fp->joints[0]->dv;
+            o->saved_dv_valid[0] = 1;
+        }
         fp->joints[0]->dl = o->mesh_dl;
         /* mesh visible from this tick — reveal the fighter (see the
          * GOBJ_FLAG_HIDDEN set at attach) */
@@ -1823,6 +1852,67 @@ void port_osb5_skin_update(GObj *fighter_gobj)
 static void osb5_reset_windows(OSB5State *o);
 static OSB5State *sOsb5Loading = NULL;  /* slot whose DL is being built */
 
+/* Fail-open eviction: screens that field several fighters under ONE player
+ * index (the 1P intro spawns its whole lineup with desc.player = 0) make a
+ * second injected fighter re-claim the slot while the first still lives.
+ * Without this, the first fighter's joints stayed pointed at the null DL
+ * and its GOBJ_FLAG_HIDDEN was never cleared — skin updates bail on the
+ * owner check once the slot moves on — so it was invisible for good.
+ * Restore the engine's saved draw state and reveal it: worst case it shows
+ * its vanilla mesh, which beats not rendering at all. */
+static void osb5_release_owner(OSB5State *o)
+{
+    FTStruct *fp;
+    s32 k;
+    if (o->owner == NULL || o->vtx == NULL)
+    {
+        return;
+    }
+    /* same double-entry liveness test the ownership gates use: pool reuse
+     * means the bare pointer can name a NEW object, so the FTStruct must
+     * point back at the gobj AND still be the fkind we attached to. */
+    fp = ftGetStruct((GObj *)o->owner);
+    if (fp == NULL || fp->fighter_gobj != o->owner || (s32)fp->fkind != o->owner_fkind)
+    {
+        return;
+    }
+    for (k = 0; k < osb5_blank_count(o); k++)
+    {
+        s32 jid = osb5_blank_id(o, k);
+        DObj *j;
+        if (jid <= 0 || jid >= FTPARTS_JOINT_NUM_MAX)
+        {
+            continue;
+        }
+        j = fp->joints[jid];
+        /* only rewrite joints still holding OUR sentinels, with a saved
+         * engine value to put back */
+        if (j != NULL && o->saved_dv_valid[jid] &&
+            (j->dv == (void *)sOsb5NullDL || j->dv == (void *)sOsb5NullDLPair))
+        {
+            j->dv = o->saved_dv[jid];
+        }
+    }
+    if (fp->joints[0] != NULL)
+    {
+        if (o->mesh_dl != NULL && fp->joints[0]->dl == o->mesh_dl && o->saved_dv_valid[0])
+        {
+            fp->joints[0]->dv = o->saved_dv[0];
+        }
+        if (o->saved_root_nib_valid)
+        {
+            FTParts *rparts = (FTParts *)fp->joints[0]->user_data.p;
+            if (rparts != NULL && (rparts->flags & 0xF) == 0)
+            {
+                rparts->flags |= o->saved_root_nib;
+            }
+        }
+    }
+    ((GObj *)o->owner)->flags &= ~(u32)GOBJ_FLAG_HIDDEN;
+    port_log("OSB5: slot re-claimed while owner alive — restored vanilla mesh on fkind=%d player=%d\n",
+             (int)o->owner_fkind, (int)fp->player);
+}
+
 static void osb5_load(FTStruct *fp, FILE *f)
 {
     OSB5State *o = osb5_slot((s32)fp->player);
@@ -1838,6 +1928,13 @@ static void osb5_load(FTStruct *fp, FILE *f)
     {
         return;
     }
+    if (o->owner != NULL && o->owner != fp->fighter_gobj)
+    {
+        osb5_release_owner(o);
+    }
+    memset(o->saved_dv, 0, sizeof(o->saved_dv));
+    memset(o->saved_dv_valid, 0, sizeof(o->saved_dv_valid));
+    o->saved_root_nib_valid = 0;
     sOsb5Loading = o;
     /* a fighter is spawned many times per session (select screens,
      * respawns, results); each attach must start with a fresh window
@@ -2117,7 +2214,7 @@ static void osb5_load(FTStruct *fp, FILE *f)
             {
                 if (osb5_blank_id(o, (s32)k) == jj)
                 {
-                    osb5_blank_joint(fp, jj);
+                    osb5_blank_joint(o, fp, jj);
                     break;
                 }
             }
@@ -2128,6 +2225,8 @@ static void osb5_load(FTStruct *fp, FILE *f)
             FTParts *rparts = (FTParts *)fp->joints[0]->user_data.p;
             if (rparts != NULL && (rparts->flags & 0xF) != 0)
             {
+                o->saved_root_nib = (u8)(rparts->flags & 0xF);
+                o->saved_root_nib_valid = 1;
                 rparts->flags &= ~0xF;
             }
             /* deferred: the first VALID skin update attaches (see
