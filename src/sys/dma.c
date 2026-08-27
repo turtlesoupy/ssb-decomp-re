@@ -448,7 +448,13 @@ void syDmaReadVpk0(uintptr_t dev_addr, void *ram_dst)
 }
 #endif
 
-// 0x800036B4
+#ifndef PORT
+// 0x800036B4 — Unreferenced N64 VPK0 huffman decoder. Nothing calls it, and
+// upstream's newly-matched body encodes 32-bit pointer arithmetic that does
+// not survive LP64 (`bound = temp_value + out_buf` into a uintptr_t, and a
+// bit-field read assigned straight into a SYHuffmanNode*). Kept verbatim for
+// the decomp; excluded from the port build the same way the unreferenced
+// sprite path in objdisplay.c is.
 void unref_800036B4(u16 *data, u8 *out_buf)
 {
 
@@ -653,3 +659,4 @@ void unref_800036B4(u16 *data, u8 *out_buf)
         }
     }
 }
+#endif
