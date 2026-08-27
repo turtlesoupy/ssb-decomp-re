@@ -2,6 +2,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ ITDesc dITStarRodItemDesc =
 {
     nITKindStarRod,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataStarRodItemAttributes,   // Offset of item attributes in file?
+#else
     &llITCommonDataStarRodItemAttributes,   // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -101,7 +108,11 @@ WPDesc dITStarRodWeaponStarWeaponDesc =
     0x00,                                   // Render flags?
     nWPKindStarRodStar,                     // Weapon Kind
     &gITManagerCommonData,                  // Pointer to character's loaded files?
+#ifdef PORT
+    llITCommonDataStarRodWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llITCommonDataStarRodWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -371,7 +382,11 @@ GObj* itStarRodWeaponStarMakeWeapon(GObj *fighter_gobj, Vec3f *pos, ub8 is_smash
 
     if (is_smash == TRUE)
     {
+#ifdef PORT
+        dITStarRodWeaponStarWeaponDesc.o_attributes = (intptr_t)llITCommonDataStarRodSmashWeaponAttributes; // Set attribute data on smash input - Linker thing
+#else
         dITStarRodWeaponStarWeaponDesc.o_attributes = (intptr_t)&llITCommonDataStarRodSmashWeaponAttributes; // Set attribute data on smash input - Linker thing
+#endif
     }
     weapon_gobj = wpManagerMakeWeapon(fighter_gobj, &dITStarRodWeaponStarWeaponDesc, pos, (WEAPON_FLAG_COLLPROJECT | WEAPON_FLAG_PARENT_FIGHTER));
 

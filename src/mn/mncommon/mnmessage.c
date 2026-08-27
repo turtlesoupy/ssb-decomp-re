@@ -4,6 +4,10 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#ifdef PORT
+#include <sys/audio.h>
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -12,7 +16,11 @@
 // // // // // // // // // // // //
 
 // 0x80132500
+#ifdef PORT
+u32 dMNMessageFileIDs[/* */] = { llMNCommonFileID, llMNMessageFileID };
+#else
 u32 dMNMessageFileIDs[/* */] = { &llMNCommonFileID, &llMNMessageFileID };
+#endif
 
 // 0x80132508
 Lights1 dMNMessageLights1 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x3C, 0x3C, 0x3C);
@@ -73,7 +81,11 @@ void mnMessageMakeWallpaper(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 2, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 0, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNMessageFiles[0], llMNCommonSmashBrosCollageSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNMessageFiles[0], &llMNCommonSmashBrosCollageSprite));
+#endif
     
     sobj->pos.x = 10.0F;
     sobj->pos.y = 10.0F;
@@ -109,7 +121,11 @@ void mnMessageMakeExclaim(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 5, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 3, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNMessageFiles[1], llMNMessageDecalExclaimSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNMessageFiles[1], &llMNMessageDecalExclaimSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -127,6 +143,15 @@ void mnMessageMakeMessage(s32 message)
     // 0x80132548
     intptr_t message_offsets[/* */] =
     {
+#ifdef PORT
+        llMNMessageUnlockLuigiSprite,
+        llMNMessageUnlockNessSprite,
+        llMNMessageUnlockCaptainSprite,
+        llMNMessageUnlockPurinSprite,
+        llMNMessageUnlockInishieSprite,
+        llMNMessageUnlockSoundTestSprite,
+        llMNMessageUnlockItemSwitchSprite
+#else
         &llMNMessageUnlockLuigiSprite,
         &llMNMessageUnlockNessSprite,
         &llMNMessageUnlockCaptainSprite,
@@ -134,6 +159,7 @@ void mnMessageMakeMessage(s32 message)
         &llMNMessageUnlockInishieSprite,
         &llMNMessageUnlockSoundTestSprite,
         &llMNMessageUnlockItemSwitchSprite
+#endif
     };
 
     // 0x80132564
@@ -330,7 +356,11 @@ void mnMessageFuncStart(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
+#ifdef PORT
+    rl_setup.table_files_num = (u32)llRelocFileCount;
+#else
     rl_setup.table_files_num = (u32)&llRelocFileCount;
+#endif
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMNMessageStatusBuffer;

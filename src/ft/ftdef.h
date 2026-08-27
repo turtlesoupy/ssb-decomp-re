@@ -113,7 +113,14 @@
 #define FTCOMPUTER_EVENT_END()                  (FTCOMPUTER_COMMAND_END)
 
 #define FTKEY_EVENT_INSTRUCTION(k, t)       ( ((((k) << 12) & 0xF000) | ((t) & 0xFFF)) & U16_MAX )
+#if IS_BIG_ENDIAN
 #define FTKEY_EVENT_STICK(x, y, t)          FTKEY_EVENT_INSTRUCTION(nFTKeyEventStick, t), (((((x) << 8) & 0xFF00) | (((y) << 0) & 0x00FF)) & U16_MAX)
+#else
+// On LE, u16 bytes are stored low-first: Vec2b.x reads the low byte,
+// Vec2b.y reads the high byte. Pack x in the low byte and y in the high
+// byte so the FTKeyEvent union's stick_range reads correctly.
+#define FTKEY_EVENT_STICK(x, y, t)          FTKEY_EVENT_INSTRUCTION(nFTKeyEventStick, t), (((((y) << 8) & 0xFF00) | (((x) << 0) & 0x00FF)) & U16_MAX)
+#endif
 #define FTKEY_EVENT_BUTTON(b, t)            FTKEY_EVENT_INSTRUCTION(nFTKeyEventButton, t), ((b) & U16_MAX)
 #define FTKEY_EVENT_END()                   FTKEY_EVENT_INSTRUCTION(nFTKeyEventEnd, 0)
 
@@ -141,14 +148,25 @@ typedef u32 ftMotionCommand;
 #define ftMotionPlayInterruptableVoice(fgm_id) (GC_FIELDSET(nFTMotionEventPlayLoopVoiceStoreInfo, 26, 6) | GC_FIELDSET(fgm_id, 0, 26)) // stops playing on action change
 
 #define ftMotionCommandSubroutineS1() GC_FIELDSET(nFTMotionEventSubroutine, 26, 6)
+#ifdef PORT
+/* PORT: (uintptr_t)addr in an s32[] generates ADDR64 relocations that spill
+   into adjacent variables. Use 0 placeholder — motion scripts need full
+   rework for 64-bit anyway (they encode N64 overlay addresses). */
+#define ftMotionCommandSubroutineS2(addr) 0
+#else
 #define ftMotionCommandSubroutineS2(addr) ((uintptr_t)addr)
+#endif
 
 #define ftMotionCommandSubroutine(addr) ftMotionCommandSubroutineS1(), ftMotionCommandSubroutineS2(addr)
 
 #define ftMotionCommandReturn() GC_FIELDSET(nFTMotionEventReturn, 26, 6)
 
 #define ftMotionCommandGotoS1() GC_FIELDSET(nFTMotionEventGoto, 26, 6)
+#ifdef PORT
+#define ftMotionCommandGotoS2(addr) 0
+#else
 #define ftMotionCommandGotoS2(addr) ((uintptr_t)addr)
+#endif
 
 #define ftMotionCommandGoto(addr) ftMotionCommandGotoS1(), ftMotionCommandGotoS2(addr)
 

@@ -5,6 +5,11 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <sys/audio.h>
+
+#ifdef PORT
+extern void port_log(const char *fmt, ...);
+#endif
 
 
 // // // // // // // // // // // //
@@ -187,7 +192,7 @@ void mnStartupFuncStart(void)
 	sMNStartupIsProceedOpening = FALSE;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-	rl_setup.table_files_num = (u32)&llRelocFileCount;
+	rl_setup.table_files_num = (u32)llRelocFileCount;
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sMNStartupStatusBuffer;
@@ -231,17 +236,17 @@ void mnStartupFuncStart(void)
 		Sprite*,
 		lbRelocGetExternHeapFile
 		(
-			&llN64LogoFileID,
+			llN64LogoFileID,
 			syTaskmanMalloc
 			(
 				lbRelocGetFileSize
 				(
-					&llN64LogoFileID
+					llN64LogoFileID
 				),
 				0x10
 			)
 		),
-		&llN64LogoSprite
+		llN64LogoSprite
 	);
 	sobj = lbCommonMakeSObjForGObj(gobj, sprite);
 
@@ -264,11 +269,23 @@ void mnStartupFuncLights(Gfx **dls)
 // 0x80131EF0
 void mnStartupStartScene(void)
 {
+#ifdef PORT
+	port_log("SSB64: mnStartupStartScene — entered\n");
+#endif
 	syAudioStopBGMAll();
-	
+#ifdef PORT
+	port_log("SSB64: mnStartupStartScene — past syAudioStopBGMAll\n");
+#endif
+
 	dMNStartupVideoSetup.zbuffer = SYVIDEO_ZBUFFER_START(320, 240, 0, 10, u16);
 	syVideoInit(&dMNStartupVideoSetup);
+#ifdef PORT
+	port_log("SSB64: mnStartupStartScene — past syVideoInit\n");
+#endif
 
 	dMNStartupTaskmanSetup.scene_setup.arena_size = (size_t) ((uintptr_t)&ovl1_VRAM - (uintptr_t)&ovl58_BSS_END);
 	syTaskmanStartTask(&dMNStartupTaskmanSetup);
+#ifdef PORT
+	port_log("SSB64: mnStartupStartScene — past syTaskmanStartTask (should not reach here)\n");
+#endif
 }

@@ -1,4 +1,7 @@
 #include <ft/fighter.h>
+#include <ef/efmanager.h>
+#include <ft/ftcommon/ftcommonfunctions.h>
+extern void *func_800269C0_275C0(u16 id);
 
 // // // // // // // // // // // //
 //                               //
@@ -220,7 +223,17 @@ void ftCommonGuardUpdateJoints(GObj *fighter_gobj)
     DObj **p_joint = &fp->joints[nFTPartsJointXRotN];
     s32 joint_num;
     s32 i;
-    Vec3f *scale = &fp->attr->translate_scales[nFTPartsJointYRotN];
+    Vec3f *scale;
+#ifdef PORT
+    /* PORT: fighters whose active motion doesn't request a YRotN joint
+     * (is_use_yrotn_joint == 0 in anim_desc.word) never populate
+     * joints[YRotN] via ftMainUpdateHiddenPartID.  That's a legitimate
+     * no-op case — just return without running the shield joint update. */
+    if (yrotn_joint == NULL) {
+        return;
+    }
+#endif
+    scale = &((Vec3f*)PORT_RESOLVE(fp->attr->translate_scales))[nFTPartsJointYRotN];
 
     if (fp->is_shield)
     {
@@ -235,7 +248,24 @@ void ftCommonGuardUpdateJoints(GObj *fighter_gobj)
         }
         joint_num--;
 
-        gcAddDObjAnimJoint(yrotn_joint, fp->attr->shield_anim_joints[fp->status_vars.common.guard.angle_i][joint_num], fp->status_vars.common.guard.angle_f);
+#ifdef PORT
+        /* PORT: the resolved `shield_anim_joints[angle_i]` points at a file-data
+         * array of `AObjEvent32*` entries.  On N64 those entries are 4-byte
+         * pointers; on LP64 a plain `[joint_num]` cast would stride 8 bytes and
+         * read past the end (or concatenate two adjacent tokens into a garbage
+         * pointer — which is exactly what crashes `gcParseDObjAnimJoint` when
+         * the shield joint update reaches a real animation post-FTMotionFlags
+         * fix).  PORT_RESOLVE_ARRAY reads the correct u32 entry and resolves
+         * it. */
+        gcAddDObjAnimJoint(
+            yrotn_joint,
+            (AObjEvent32*)PORT_RESOLVE_ARRAY(
+                PORT_RESOLVE(fp->attr->shield_anim_joints[fp->status_vars.common.guard.angle_i]),
+                joint_num),
+            fp->status_vars.common.guard.angle_f);
+#else
+        gcAddDObjAnimJoint(yrotn_joint, ((AObjEvent32**)PORT_RESOLVE(fp->attr->shield_anim_joints[fp->status_vars.common.guard.angle_i]))[joint_num], fp->status_vars.common.guard.angle_f);
+#endif
         gcParseDObjAnimJoint(yrotn_joint);
 
         if (fp->is_have_translate_scale)
@@ -246,9 +276,9 @@ void ftCommonGuardUpdateJoints(GObj *fighter_gobj)
 
         if (fp->is_have_translate_scale)
         {
-            ftCommonGuardGetJointTransformScale(yrotn_joint, &fp->attr->dobj_lookup[joint_num], fp->status_vars.common.guard.shield_rotate_range, scale);
+            ftCommonGuardGetJointTransformScale(yrotn_joint, &((DObjDesc*)PORT_RESOLVE(fp->attr->dobj_lookup))[joint_num], fp->status_vars.common.guard.shield_rotate_range, scale);
         }
-        else ftCommonGuardGetJointTransform(yrotn_joint, &fp->attr->dobj_lookup[joint_num], fp->status_vars.common.guard.shield_rotate_range);
+        else ftCommonGuardGetJointTransform(yrotn_joint, &((DObjDesc*)PORT_RESOLVE(fp->attr->dobj_lookup))[joint_num], fp->status_vars.common.guard.shield_rotate_range);
 
         yrotn_joint->anim_wait = AOBJ_ANIM_NULL;
 
@@ -263,7 +293,7 @@ void ftCommonGuardInitJoints(GObj *fighter_gobj)
     FTStruct *fp = ftGetStruct(fighter_gobj);
     FTAttributes *attr = fp->attr;
     DObj **p_joint = &fp->joints[nFTPartsJointCommonStart];
-    DObjDesc *dobjdesc = &attr->dobj_lookup[1];
+    DObjDesc *dobjdesc = &((DObjDesc*)PORT_RESOLVE(attr->dobj_lookup))[1];
     DObj *joint;
     Vec3f *scale;
     s32 i;
@@ -274,17 +304,23 @@ void ftCommonGuardInitJoints(GObj *fighter_gobj)
     }
     fp->anim_desc.flags.is_anim_joint = TRUE;
 
+#ifdef PORT
+    if (fp->joints[nFTPartsJointXRotN] == NULL)
+    {
+        return;
+    }
+#endif
     lbCommonAddDObjAnimJointAll
     (
         fp->joints[nFTPartsJointXRotN],
-        attr->shield_anim_joints[fp->status_vars.common.guard.angle_i],
+        (AObjEvent32**)PORT_RESOLVE(attr->shield_anim_joints[fp->status_vars.common.guard.angle_i]),
         fp->status_vars.common.guard.angle_f
     );
     ftMainPlayAnimEventsAll(fighter_gobj);
 
     if (fp->is_have_translate_scale)
     {
-        scale = &fp->attr->translate_scales[nFTPartsJointCommonStart];
+        scale = &((Vec3f*)PORT_RESOLVE(fp->attr->translate_scales))[nFTPartsJointCommonStart];
 
         for (i = nFTPartsJointCommonStart; i < ARRAY_COUNT(fp->joints); i++, p_joint++, scale++)
         {
@@ -315,7 +351,7 @@ void ftCommonGuardInitJoints(GObj *fighter_gobj)
                 joint,
                 dobjdesc,
                 fp->status_vars.common.guard.shield_rotate_range,
-                &fp->attr->translate_scales[nFTPartsJointYRotN]
+                &((Vec3f*)PORT_RESOLVE(fp->attr->translate_scales))[nFTPartsJointYRotN]
             );
             joint->anim_wait = AOBJ_ANIM_NULL;
         }

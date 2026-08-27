@@ -4,7 +4,11 @@
 
 FTMotionDesc dFTNPikachuSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_1957_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTPikachuAnimIdleFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
@@ -18,6 +22,10 @@ FTMotionDesc dFTNPikachuSubMotionDescs[] =
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_497_FileID, 0x80000000, 0x00000000
+#else
 	&llFTNPikachuAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTNPikachuSubMotionDescsCount = sizeof(dFTNPikachuSubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

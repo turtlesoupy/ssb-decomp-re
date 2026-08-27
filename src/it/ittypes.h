@@ -11,6 +11,9 @@
 
 #include <it/itdef.h>
 #include <it/itvars.h>
+#ifdef PORT
+#include <stddef.h>
+#endif
 
 // Structs
 struct ITMonsterData
@@ -111,23 +114,74 @@ struct ITAttackColl
 
 struct ITAttackEvent 	// Miniature hitbox subaction event? Commonly Used by explosions.
 {
+#if IS_BIG_ENDIAN
 	u8 timer;
 	s32 angle : 10;
 	u32 damage : 8;
+	u32 : 14;
 	u16 size;
+#else
+	// IDO packs `u8 timer` into the top byte of the same u32 storage
+	// that holds the angle/damage/pad bitfields, giving sizeof=8 with
+	// size at offset 0x06. Replicate that physical layout on LE by
+	// promoting timer to a u32:8 bitfield and filling the remaining
+	// 2 bytes of BE ":14 pad" (plus alignment) with an explicit u16 pad.
+	// Callers use scalar reads (`ev->timer`), so promotion is safe.
+	// angle is read-as-unsigned; use BITFIELD_SEXT10() at read sites.
+	//
+	// IMPORTANT: do NOT call portFixupStructU16(&ev[i], 0x04, 1) on this
+	// struct. ROM data has size at struct offset 0x04 (high half of the BE
+	// u32 word at 0x04..0x07); after pass1 BSWAP32 those bytes physically
+	// land at offset 0x06 in LE memory, exactly where this struct's `size`
+	// field lives — so the read is already correct. Rotating the half-words
+	// at 0x04 actively breaks size by moving it back to offset 0x04 (where
+	// the struct expects pad). Bob-omb / capsule / Mr. Saturn / box etc.
+	// explosions all read size=0 if you do (see git 87c4fe8 leftover).
+	u32 : 6;
+	u32 damage : 8;
+	u32 angle : 10;
+	u32 timer : 8;
+	u16 _pad_0x04;
+	u16 size;
+#endif
 };
 
 struct ITMonsterEvent	// Full-scale hitbox subaction event? Used by Venusaur and Porygon.
 {
+#if IS_BIG_ENDIAN
 	u8 timer;
 	s32 angle : 10;
 	u32 damage : 8;
+	u32 : 14;
 	u16 size;
+#else
+	// IDO packs `u8 timer` into the top byte of the same u32 storage
+	// as the bitfield. sizeof is 36 (not 40). See ITAttackEvent above
+	// for the same pattern (and the same "do not portFixupStructU16
+	// on offset 0x04" warning — pass1 BSWAP32 leaves size correctly
+	// readable at struct offset 0x06).
+	// angle is read-as-unsigned; use BITFIELD_SEXT10() at read sites.
+	// Note: fgm_id at offset 0x20 IS at the low half of its u32 word, so
+	// it does need portFixupStructU16(&ev[i], 0x20, 1) at the read site
+	// (kept in itporygon.c / itfushigibana.c).
+	u32 : 6;
+	u32 damage : 8;
+	u32 angle : 10;
+	u32 timer : 8;
+	u16 _pad_0x04;
+	u16 size;
+#endif
 	u32 knockback_scale;
 	u32 knockback_weight;
 	u32 knockback_base;
 	s32 element;
+#if IS_BIG_ENDIAN
 	ub32 can_setoff : 1;
+	u32 : 31;
+#else
+	u32 : 31;
+	u32 can_setoff : 1;
+#endif
 	s32 shield_damage;
 	u16 fgm_id;
 };
@@ -140,56 +194,197 @@ struct ITDamageColl						// DamageColl struct
 	Vec3f size;		  					// DamageColl size
 };
 
+/*
+ * ITAttributes layout is IDO-packed on BE and 72 bytes (0x48) total — NOT the
+ * 0x50 the upstream decomp declaration would imply under a modern compiler.
+ * Ground truth: disassembly of itManagerMakeItem at VRAM 0x8016E174 in
+ * baserom.us.z64, cross-checked against reloc file 251 item data.
+ *
+ * ROM offsets and packing rules IDO produced:
+ *   0x00  4 × u32 reloc pointer tokens
+ *   0x10  u32 bitfield:
+ *           [31] is_display_xlu    [30] is_item_dobjs
+ *           [29] is_display_colanim [28] is_give_hitlag
+ *           [27] weight             [26..11] attack_offset0_x (signed 16)
+ *           [10..0] pad
+ *   0x14  attack_offset0_y (s16) + attack_offset0_z (s16)
+ *   0x18  attack_offset1_x (s16) + attack_offset1_y (s16)
+ *   0x1C  attack_offset1_z (s16) + damage_coll_offset.x (s16)
+ *   0x20  damage_coll_offset.y (s16) + damage_coll_offset.z (s16)
+ *   0x24  damage_coll_size.x (s16) + damage_coll_size.y (s16)
+ *   0x28  damage_coll_size.z (s16) + map_coll_top (s16)
+ *   0x2C  map_coll_center (s16) + map_coll_bottom (s16)
+ *   0x30  map_coll_width (s16) + size (u16)
+ *   0x34  u32 bitfield: angle:10 | kb_scale:10 | damage:8 | element:4
+ *   0x38  u32 bitfield: kb_weight:10 | shield_damage:8 | attack_count:2 |
+ *                       can_setoff:1 | hit_sfx:10 | :1 pad
+ *   0x3C  u32 bitfield: priority:3 | can_rehit_item:1 | can_rehit_fighter:1 |
+ *                       can_hop:1 | can_reflect:1 | can_shield:1 |
+ *                       kb_base:10 | type:4 | hitstatus:4 |
+ *                       unk_b6:1 | unk_b7:1 | :2 pad
+ *   0x40  u32 bitfield: drop_sfx:10 | throw_sfx:10 | smash_sfx:10 | :2 pad
+ *                       (identical across every item in file 251 — "default"
+ *                       sfx set; per-item overrides live in item C code)
+ *   0x44  u32 bitfield: vel_scale:9 | :7 pad | spin_speed:16
+ *                       (IDO packs the plain `u16 spin_speed` from the
+ *                       upstream decomp into the low 16 bits of the same u32
+ *                       that holds vel_scale's 9-bit bitfield — the canonical
+ *                       IDO pad-gap-packing rule)
+ *
+ * The upstream decomp declaration is missing the padding discipline required
+ * to make a modern LE compiler produce the same layout, so we diverge here.
+ * BE branch still matches upstream; LE branch places every bitfield at the
+ * numerically identical bit position IDO produced. After pass1 BSWAP32, LE
+ * reads of u32 values equal the ROM's original numeric u32, so bitfield
+ * extraction lands on the right bits.
+ *
+ * For the half-word plain fields at 0x14..0x33, each u32 word holds two u16
+ * halves whose bytes get swapped by pass1 BSWAP32. itmanager.c calls
+ * portFixupStructU16(attr, 0x14, 8) to rotate those eight u32 words, putting
+ * both halves back at the offsets the struct declares.
+ */
 struct ITAttributes
 {
-	void *data; 						// Either DObjDesc or displaylist?
-	MObjSub ***p_mobjsubs;				// Array of MObjSubs for each MObj on each DObj
-	AObjEvent32 **anim_joints;			// Array of AnimJoints for each DObj
-	AObjEvent32 ***p_matanim_joints;	// Array of MatAnimJoints for each MObj on each DObj
-	ub32 is_display_xlu : 1;			// If TRUE, use transparency renderer
-	ub32 is_item_dobjs : 1;				// If TRUE, set up special item DObj node tree; otherwise set up common DObj node tree
-	ub32 is_display_colanim : 1;		// If TRUE, use ColAnim renderer
-	ub32 is_give_hitlag : 1;			// If TRUE, deal hitlag on contact
-	ub32 weight : 1; 					// Heavy = 0, Light = 1
-	s32 attack_offset0_x : 16;			// Hitbox ID0 offset X
-	s32 attack_offset0_y : 16; 			// Hitbox ID0 offset Y
-	s32 attack_offset0_z : 16;			// Hitbox ID0 offset Z
-	s32 attack_offset1_x : 16;			// Hitbox ID1 offset X
-	s32 attack_offset1_y : 16;			// Hitbox ID1 offset Y
-	s32 attack_offset1_z : 16;			// Hitbox ID1 offset Z
-	Vec3h damage_coll_offset;			// Hurtbox offset
-	Vec3h damage_coll_size;				// Hurtbox size
-	s16 map_coll_top;					// Map Collision Box top
-	s16 map_coll_center;				// Map Collision Box center
-	s16 map_coll_bottom;				// Map Collision Box bottom
-	s16 map_coll_width;					// Map Collision Box width
-	u16 size;						    // Hitbox size (see WPAttributes: u32:16 forces clean packing with the following bitfield run)
-	s32 angle : 10;						// Hitbox launch angle
-	u32 knockback_scale : 10;			// Hitbox knockback scale
-	u32 damage : 8;						// Hitbox damage
-	u32 element : 4;					// Hitbox element
-	u32 knockback_weight : 10;			// Hitbox fixed knockback
-	s32 shield_damage : 8;				// Hitbox shield damage
-	u32 attack_count : 2;				// Number of hitboxes
-	ub32 can_setoff : 1;				// Whether hitbox can clang or not
-	u32 hit_sfx : 10;					// Hitbox FGM
-	u32 priority : 3;					// Hitbox priority
-	ub32 can_rehit_item : 1;			// Whether hitbox can rehit items
-	ub32 can_rehit_fighter : 1;			// Whether hitbox can rehit fighters
-	ub32 can_hop : 1;					// Whether item can deflect off shields
-	ub32 can_reflect : 1;				// Whether item can be reflected
-	ub32 can_shield : 1;				// Whether item can be shielded
-	u32 knockback_base : 10;			// Hitbox base knockback
-	u32 type : 4;						// Item's usage type
-	u32 hitstatus : 4;					// Item's base hurtbox collision state
-	ub32 unk_atca_0x3C_b6 : 1;			// Unused
-	ub32 unk_atca_0x3C_b7 : 1;			// Unused
-	u32 drop_sfx : 10;					// FGM to play when Item is dropped
-	u32 throw_sfx : 10;					// FGM to play when item is thrown lightly
-	u32 smash_sfx : 10;					// FGM to play when Item is smash-thrown
-	u32 vel_scale : 9;					// Item thrown velocity scale (percentage)
-	u16 spin_speed;						// Item model rotation speed (percentage)
+#ifdef PORT
+	u32 data;                           // Relocation token — use PORT_RESOLVE()
+	u32 p_mobjsubs;                     // Relocation token
+	u32 anim_joints;                    // Relocation token
+	u32 p_matanim_joints;               // Relocation token
+#else
+	void *data;
+	MObjSub ***p_mobjsubs;
+	AObjEvent32 **anim_joints;
+	AObjEvent32 ***p_matanim_joints;
+#endif
+
+	// 0x10 u32: flags + attack_offset0_x
+#if IS_BIG_ENDIAN
+	ub32 is_display_xlu : 1;
+	ub32 is_item_dobjs : 1;
+	ub32 is_display_colanim : 1;
+	ub32 is_give_hitlag : 1;
+	ub32 weight : 1;
+	s32 attack_offset0_x : 16;			// use BITFIELD_SEXT16() at read sites on LE
+	u32 : 11;
+#else
+	u32 : 11;
+	u32 attack_offset0_x : 16;
+	u32 weight : 1;
+	u32 is_give_hitlag : 1;
+	u32 is_display_colanim : 1;
+	u32 is_item_dobjs : 1;
+	u32 is_display_xlu : 1;
+#endif
+
+	// 0x14..0x33 plain half-words. After pass1 BSWAP32 every u32 word here has
+	// its two u16 halves swapped; itmanager.c:portFixupStructU16(attr, 0x14, 8)
+	// undoes that.
+	s16 attack_offset0_y;				// 0x14
+	s16 attack_offset0_z;				// 0x16
+	s16 attack_offset1_x;				// 0x18
+	s16 attack_offset1_y;				// 0x1A
+	s16 attack_offset1_z;				// 0x1C
+	Vec3h damage_coll_offset;			// 0x1E..0x23 (Hurtbox offset)
+	Vec3h damage_coll_size;				// 0x24..0x29 (Hurtbox size)
+	s16 map_coll_top;					// 0x2A
+	s16 map_coll_center;				// 0x2C
+	s16 map_coll_bottom;				// 0x2E
+	s16 map_coll_width;					// 0x30
+	u16 size;							// 0x32  (hitbox radius, use * 0.5F)
+
+	// 0x34 u32 bitfield: angle + kb_scale + damage + element
+#if IS_BIG_ENDIAN
+	s32 angle : 10;
+	u32 knockback_scale : 10;
+	u32 damage : 8;
+	u32 element : 4;
+#else
+	u32 element : 4;
+	u32 damage : 8;
+	u32 knockback_scale : 10;
+	u32 angle : 10;						// use BITFIELD_SEXT10() at read sites
+#endif
+
+	// 0x38 u32 bitfield: kb_weight + shield_damage + attack_count + can_setoff + hit_sfx + 1 pad
+#if IS_BIG_ENDIAN
+	u32 knockback_weight : 10;
+	s32 shield_damage : 8;
+	u32 attack_count : 2;
+	ub32 can_setoff : 1;
+	u32 hit_sfx : 10;
+	u32 : 1;
+#else
+	u32 : 1;
+	u32 hit_sfx : 10;
+	u32 can_setoff : 1;
+	u32 attack_count : 2;
+	u32 shield_damage : 8;				// use BITFIELD_SEXT8() at read sites
+	u32 knockback_weight : 10;
+#endif
+
+	// 0x3C u32 bitfield: priority + 5 flags + kb_base + type + hitstatus + 2 unk + 4 pad
+	// (Upstream fields sum to 28 bits; IDO auto-pads the u32 to 32 with 4 trailing pad bits.)
+#if IS_BIG_ENDIAN
+	u32 priority : 3;
+	ub32 can_rehit_item : 1;
+	ub32 can_rehit_fighter : 1;
+	ub32 can_hop : 1;
+	ub32 can_reflect : 1;
+	ub32 can_shield : 1;
+	u32 knockback_base : 10;
+	u32 type : 4;
+	u32 hitstatus : 4;
+	ub32 unk_atca_0x3C_b6 : 1;
+	ub32 unk_atca_0x3C_b7 : 1;
+	u32 : 4;
+#else
+	u32 : 4;
+	u32 unk_atca_0x3C_b7 : 1;
+	u32 unk_atca_0x3C_b6 : 1;
+	u32 hitstatus : 4;
+	u32 type : 4;
+	u32 knockback_base : 10;
+	u32 can_shield : 1;
+	u32 can_reflect : 1;
+	u32 can_hop : 1;
+	u32 can_rehit_fighter : 1;
+	u32 can_rehit_item : 1;
+	u32 priority : 3;
+#endif
+
+	// 0x40 u32 bitfield: drop_sfx + throw_sfx + smash_sfx + 2 pad
+#if IS_BIG_ENDIAN
+	u32 drop_sfx : 10;
+	u32 throw_sfx : 10;
+	u32 smash_sfx : 10;
+	u32 : 2;
+#else
+	u32 : 2;
+	u32 smash_sfx : 10;
+	u32 throw_sfx : 10;
+	u32 drop_sfx : 10;
+#endif
+
+	// 0x44 u32 bitfield: vel_scale + 7 pad + spin_speed
+	// (IDO packs the upstream's plain `u16 spin_speed` into this u32's low 16
+	// bits — see the comment at the top of this struct.)
+#if IS_BIG_ENDIAN
+	u32 vel_scale : 9;
+	u32 : 7;
+	u32 spin_speed : 16;
+#else
+	u32 spin_speed : 16;
+	u32 : 7;
+	u32 vel_scale : 9;
+#endif
 };
+
+#ifdef PORT
+_Static_assert(sizeof(ITAttributes) == 0x48, "ITAttributes must be 72 bytes to match ROM stride (reloc file 251)");
+_Static_assert(offsetof(ITAttributes, attack_offset0_y) == 0x14, "attack_offset0_y offset mismatch");
+_Static_assert(offsetof(ITAttributes, damage_coll_offset) == 0x1E, "damage_coll_offset offset mismatch");
+_Static_assert(offsetof(ITAttributes, size) == 0x32, "size offset mismatch");
+#endif
 
 struct ITStruct 						// Common items, stage hazards, fighter items and Pokémon
 {

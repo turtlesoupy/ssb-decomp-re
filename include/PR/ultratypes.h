@@ -32,22 +32,37 @@
 
 typedef unsigned char u8;		/* unsigned  8-bit */
 typedef unsigned short u16;		/* unsigned 16-bit */
-typedef unsigned long u32;		/* unsigned 32-bit */
 typedef unsigned long long u64; /* unsigned 64-bit */
 
 typedef signed char s8; /* signed  8-bit */
 typedef short s16;		/* signed 16-bit */
-typedef long s32;		/* signed 32-bit */
 typedef long long s64;	/* signed 64-bit */
+
+/*
+ * u32/s32: N64 SDK typedefs these as (unsigned) long, which is 4 bytes on
+ * LLP64 (MSVC) but 8 bytes on LP64 (GCC/Clang on macOS/Linux). Using 8-byte
+ * integers for u32 corrupts every struct that mirrors file-backed N64 data
+ * (Bitmap, Sprite, Mtx, reloc structs, ...), so under PORT mode we force
+ * fixed 32-bit width everywhere except MSVC.
+ */
+#if defined(PORT) && !defined(_MSC_VER)
+typedef unsigned int u32;		  /* unsigned 32-bit */
+typedef int s32;				  /* signed   32-bit */
+typedef volatile unsigned int vu32;
+typedef volatile int vs32;
+#else
+typedef unsigned long u32;		  /* unsigned 32-bit */
+typedef long s32;				  /* signed   32-bit */
+typedef volatile unsigned long vu32;
+typedef volatile long vs32;
+#endif
 
 typedef volatile unsigned char vu8;		  /* unsigned  8-bit */
 typedef volatile unsigned short vu16;	  /* unsigned 16-bit */
-typedef volatile unsigned long vu32;	  /* unsigned 32-bit */
 typedef volatile unsigned long long vu64; /* unsigned 64-bit */
 
 typedef volatile signed char vs8; /* signed  8-bit */
 typedef volatile short vs16;	  /* signed 16-bit */
-typedef volatile long vs32;		  /* signed 32-bit */
 typedef volatile long long vs64;  /* signed 64-bit */
 
 typedef float f32;	/* single prec floating point */
@@ -58,8 +73,14 @@ typedef double f64; /* double prec floating point */
 #define _SIZE_T_DEF /* exeGCC size_t define label */
 #if (_MIPS_SZLONG == 32)
 typedef unsigned int size_t;
-#endif
-#if (_MIPS_SZLONG == 64)
+#elif (_MIPS_SZLONG == 64)
+typedef unsigned long size_t;
+#elif defined(__SIZE_TYPE__)
+/* GCC/Clang builtin: matches whatever the host libc uses for size_t. */
+typedef __SIZE_TYPE__ size_t;
+#elif defined(_WIN64)
+typedef unsigned long long size_t;
+#else
 typedef unsigned long size_t;
 #endif
 #endif

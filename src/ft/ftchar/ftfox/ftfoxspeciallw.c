@@ -290,7 +290,11 @@ void ftFoxSpecialLwStartInitStatusVars(GObj *fighter_gobj)
     {
         fp->is_effect_attach = TRUE;
     }
+#ifdef PORT
+    fp->special_coll = (FTSpecialColl*) ((uintptr_t)gFTDataFoxMainMotion + (intptr_t)llFoxMainMotionLwReflectorFTSpecialColl);
+#else
     fp->special_coll = (FTSpecialColl*) ((uintptr_t)gFTDataFoxMainMotion + (intptr_t)&llFoxMainMotionLwReflectorFTSpecialColl);
+#endif
 }
 
 // 0x8015D250

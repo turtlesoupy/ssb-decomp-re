@@ -2,6 +2,12 @@
 #include <it/item.h>
 #include <ft/fighter.h>
 
+#ifdef PORT
+#include <config.h>
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+extern void port_log(const char *fmt, ...);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //   GLOBAL / STATIC VARIABLES   //
@@ -109,6 +115,9 @@ GObj* wpManagerMakeWeapon(GObj *parent_gobj, WPDesc *wp_desc, Vec3f *spawn_pos, 
         return NULL;
     }
     attr = lbRelocGetFileData(WPAttributes*, *wp_desc->p_weapon, wp_desc->o_attributes); // I hope this is correct?
+#ifdef PORT
+    portFixupStructU16(attr, 0x10, 6); // Rotate16 u16 fields: Vec3h[2] + s16[4] + u16 + pad
+#endif
     weapon_gobj->user_data.p = wp;
     wp->weapon_gobj = weapon_gobj;
     wp->kind = wp_desc->kind;
@@ -205,7 +214,13 @@ GObj* wpManagerMakeWeapon(GObj *parent_gobj, WPDesc *wp_desc, Vec3f *spawn_pos, 
 
     wp->attack_coll.size = attr->size * 0.5F;
 
+#ifdef PORT
+    // IDO BE stored `angle:10` at bits 15-6 of the u16 at offset 0x26.
+    // Extract via arithmetic shift on the signed interpretation of the raw u16.
+    wp->attack_coll.angle = ((s16)attr->_angle_raw) >> 6;
+#else
     wp->attack_coll.angle = attr->angle;
+#endif
 
     wp->attack_coll.knockback_scale = attr->knockback_scale;
     wp->attack_coll.knockback_weight = attr->knockback_weight;
@@ -213,7 +228,11 @@ GObj* wpManagerMakeWeapon(GObj *parent_gobj, WPDesc *wp_desc, Vec3f *spawn_pos, 
 
     wp->attack_coll.can_setoff = attr->can_setoff;
 
+#ifdef PORT
+    wp->attack_coll.shield_damage = BITFIELD_SEXT8(attr->shield_damage);
+#else
     wp->attack_coll.shield_damage = attr->shield_damage;
+#endif
 
     wp->attack_coll.fgm_id = attr->sfx;
 
@@ -259,25 +278,25 @@ GObj* wpManagerMakeWeapon(GObj *parent_gobj, WPDesc *wp_desc, Vec3f *spawn_pos, 
 
     if (wp_desc->flags & WEAPON_FLAG_DOBJDESC)
     {
-        gcSetupCustomDObjs(weapon_gobj, attr->data, NULL, wp_desc->transform_types.tk1, wp_desc->transform_types.tk2, wp_desc->transform_types.tk3);
+        gcSetupCustomDObjs(weapon_gobj, PORT_RESOLVE(attr->data), NULL, wp_desc->transform_types.tk1, wp_desc->transform_types.tk2, wp_desc->transform_types.tk3);
 
         proc_display = (wp_desc->flags & WEAPON_FLAG_DOBJLINKS) ? wpDisplayDObjTreeDLLinks : func_ovl3_80167618;
     }
     else
     {
-        lbCommonInitDObj3Transforms(gcAddDObjForGObj(weapon_gobj, attr->data), wp_desc->transform_types.tk1, wp_desc->transform_types.tk2, wp_desc->transform_types.tk3);
+        lbCommonInitDObj3Transforms(gcAddDObjForGObj(weapon_gobj, PORT_RESOLVE(attr->data)), wp_desc->transform_types.tk1, wp_desc->transform_types.tk2, wp_desc->transform_types.tk3);
 
         proc_display = (wp_desc->flags & WEAPON_FLAG_DOBJLINKS) ? wpDisplayDObjDLLinks : wpDisplayDLHead1;
     }
     gcAddGObjDisplay(weapon_gobj, proc_display, 14, GOBJ_PRIORITY_DEFAULT, ~0);
 
-    if (attr->p_mobjsubs != NULL)
+    if (PORT_RESOLVE(attr->p_mobjsubs) != NULL)
     {
-        gcAddMObjAll(weapon_gobj, attr->p_mobjsubs);
+        gcAddMObjAll(weapon_gobj, PORT_RESOLVE(attr->p_mobjsubs));
     }
-    if ((attr->anim_joints != NULL) || (attr->p_matanim_joints != NULL))
+    if ((PORT_RESOLVE(attr->anim_joints) != NULL) || (PORT_RESOLVE(attr->p_matanim_joints) != NULL))
     {
-        gcAddAnimAll(weapon_gobj, attr->anim_joints, attr->p_matanim_joints, 0.0F);
+        gcAddAnimAll(weapon_gobj, PORT_RESOLVE(attr->anim_joints), PORT_RESOLVE(attr->p_matanim_joints), 0.0F);
     }
     wp->coll_data.p_translate = &DObjGetStruct(weapon_gobj)->translate.vec.f;
     wp->coll_data.p_lr = &wp->lr;

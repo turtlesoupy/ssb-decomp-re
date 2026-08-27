@@ -69,28 +69,14 @@ struct LBInternBuffer
 struct LBScriptDesc
 {
     s32 scripts_num;        // Number of scripts in array?
+#ifdef PORT
+    u32 scripts[1];         // Token array — use PORT_RESOLVE(scripts[i])
+#else
     LBScript *scripts[1];   // Dynamic array
+#endif
 };
 
-// Fixed-size prefix of an LBScript (0x30 bytes). Particle bank source files
-// (src/particles/*.c) declare each script as { LBScriptHeader hdr; u8 bytecode[N]; }
-// because LBScript itself ends in a flexible bytecode[1] that can't take a sized
-// array initializer. The prefix layout matches LBScript byte-for-byte.
-typedef struct LBScriptHeader
-{
-    u16 kind;
-    u16 texture_id;
-    u16 generator_lifetime;
-    u16 particle_lifetime;
-    u32 flags;
-    f32 gravity;
-    f32 friction;
-    Vec3f vel;
-    f32 unk_script_0x20;
-    f32 unk_script_0x24;
-    f32 update_rate;
-    f32 size;
-} LBScriptHeader;
+_Static_assert(sizeof(LBScriptDesc) == 8, "LBScriptDesc size mismatch");
 
 struct LBScript
 {
@@ -112,20 +98,14 @@ struct LBScript
 struct LBTextureDesc
 {
     s32 textures_num;
+#ifdef PORT
+    u32 textures[1];        // Token array — use PORT_RESOLVE(textures[i])
+#else
     LBTexture *textures[1];
+#endif
 };
 
-// Fixed-size prefix of an LBTexture (0x18 bytes). Particle bank texture
-// source files (src/particles/*_txb.c) use it to declare the typed header
-// followed by a sized data[] / image / palette layout, since LBTexture
-// itself ends in a flexible data[1].
-typedef struct LBTextureHeader
-{
-    u32 count;
-    s32 fmt, siz;
-    s32 width, height;
-    u32 flags;
-} LBTextureHeader;
+_Static_assert(sizeof(LBTextureDesc) == 8, "LBTextureDesc size mismatch");
 
 struct LBTexture
 {
@@ -133,8 +113,14 @@ struct LBTexture
     s32 fmt, siz;
     s32 width, height;
     u32 flags;              // Palette flags; if (this value & 1), there is only one palette; otherwise each image has its own palette
+#ifdef PORT
+    u32 data[1];            // Token array — use PORT_RESOLVE(data[i])
+#else
     void *data[1];          // Offsets to image, then palette data
+#endif
 };
+
+_Static_assert(sizeof(LBTexture) == 28, "LBTexture size mismatch");
 
 struct LBGenerator
 {

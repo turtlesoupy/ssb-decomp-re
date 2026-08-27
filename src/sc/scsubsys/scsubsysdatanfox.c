@@ -4,7 +4,11 @@
 
 FTMotionDesc dFTNFoxSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_642_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTFoxAnimEggLayFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
@@ -18,6 +22,10 @@ FTMotionDesc dFTNFoxSubMotionDescs[] =
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_490_FileID, 0x80000000, 0x00000000
+#else
 	&llFTNFoxAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTNFoxSubMotionDescsCount = sizeof(dFTNFoxSubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

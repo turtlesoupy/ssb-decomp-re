@@ -1,6 +1,7 @@
 #include <ft/fighter.h>
 #include <if/interface.h>
 #include <sc/scene.h>
+#include <it/itmain.h>
 
 extern alSoundEffect* func_800269C0_275C0(u16);
 
@@ -47,6 +48,19 @@ void ftCommonDeadUpdateRumble(FTStruct *this_fp)
 // 0x8013BD64
 void ftCommonDeadUpdateScore(FTStruct *this_fp)
 {
+#ifdef PORT
+    /* Intro scenes allocate a battle state but never run the HUD setup
+     * (ifCommonBattleMakeInterface), so gIFCommonPlayerInterface.player_pos_x
+     * remains NULL.  Fighter physics can still spuriously push intro-scene
+     * fighters into the "dead" state due to wrong map bounds, and the dead
+     * handler walks deep into the HUD code for stock/score updates that
+     * would deref the null HUD pointer.  Bail on the whole score update
+     * path when the HUD isn't set up. */
+    if (gIFCommonPlayerInterface.player_pos_x == NULL)
+    {
+        return;
+    }
+#endif
     ifCommonPlayerDamageStartBreakAnim(this_fp);
     ifCommonPlayerStockMakeStockSnap(this_fp);
 
@@ -87,6 +101,24 @@ void ftCommonDeadUpdateScore(FTStruct *this_fp)
     }
     if (gSCManagerBattleState->game_rules & SCBATTLE_GAMERULE_BONUS)
     {
+#ifdef PORT
+        /* Classic Co-op bonus stage: one player falling doesn't fail the
+         * attempt while the partner is still in (the faller stays out —
+         * see ftCommonDeadCheckRebirth). The pkind guard keeps stale co-op
+         * handoff state from ever affecting solo bonus practice. */
+        if (sc1PManagerIsCoopActive())
+        {
+            s32 _other = (this_fp->player == gSCManagerSceneData.player) ? gSCManagerSceneData.coop_player2 : gSCManagerSceneData.player;
+
+            if ((gSCManagerBattleState->players[this_fp->player].pkind == nFTPlayerKindMan) &&
+                (gSCManagerBattleState->players[_other].pkind == nFTPlayerKindMan) &&
+                (gSCManagerBattleState->players[_other].stock_count != -1))
+            {
+                gSCManagerBattleState->players[this_fp->player].stock_count = -1;
+                return;
+            }
+        }
+#endif
         ifCommonAnnounceEndMessage();
     }
 }
@@ -117,6 +149,20 @@ void ftCommonDeadCheckRebirth(GObj *fighter_gobj)
             return;
         }
     }
+#ifdef PORT
+    /* Classic Co-op bonus stage: a fallen player stays out for the rest of
+     * the attempt (their slot was marked -1 in the defeat stats above);
+     * without this they would rebirth, since bonus rules are neither STOCK
+     * nor 1PGAME. */
+    else if ((gSCManagerBattleState->game_rules & SCBATTLE_GAMERULE_BONUS) &&
+             sc1PManagerIsCoopActive() &&
+             (gSCManagerBattleState->players[fp->player].pkind == nFTPlayerKindMan) &&
+             (gSCManagerBattleState->players[fp->player].stock_count == -1))
+    {
+        ftCommonSleepSetStatus(fighter_gobj);
+        return;
+    }
+#endif
     ftCommonRebirthDownSetStatus(fighter_gobj);
 }
 

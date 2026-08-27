@@ -1,6 +1,9 @@
 #include <gr/ground.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -9,7 +12,11 @@
 // // // // // // // // // // // //
 
 // 0x8012EB20
+#ifdef PORT
+intptr_t dGRYosterCloudMatAnimJoints[/* */] = { llGRYosterMapCloudSolidMatAnimJoint, llGRYosterMapCloudEvaporateMatAnimJoint };
+#else
 intptr_t dGRYosterCloudMatAnimJoints[/* */] = { &llGRYosterMapCloudSolidMatAnimJoint, &llGRYosterMapCloudEvaporateMatAnimJoint };
+#endif
 
 // 0x8012EB28
 u8 dGRYosterCloudLineIDs[/* */] = { 0x1, 0x2, 0x3 };
@@ -204,7 +211,11 @@ void grYosterInitAll(void)
     void *map_head;
     s32 i, j;
 
+#ifdef PORT
+    map_head = (void *)((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->map_nodes) - (intptr_t)llGRYosterMapMapHead);
+#else
     map_head = (uintptr_t)gMPCollisionGroundData->map_nodes - (intptr_t)&llGRYosterMapMapHead;
+#endif
     gGRCommonStruct.yoster.map_head = map_head;
 
     for (i = 0; i < ARRAY_COUNT(gGRCommonStruct.yoster.clouds); i++)
@@ -217,7 +228,11 @@ void grYosterInitAll(void)
         gcSetupCustomDObjs
         (
             map_gobj, 
+#ifdef PORT
+            (DObjDesc*) ((intptr_t)llGRYosterMapMapHead + (uintptr_t)map_head), 
+#else
             (DObjDesc*) ((intptr_t)&llGRYosterMapMapHead + (uintptr_t)map_head), 
+#endif
             NULL, 
             nGCMatrixKindTra,    // Make this nGCMatrixKindTraRotRpyRSca to see cloud scale animation
             nGCMatrixKindNull, 
@@ -225,7 +240,11 @@ void grYosterInitAll(void)
         );
         gcAddGObjProcess(map_gobj, gcPlayAnimAll, nGCProcessKindFunc, 5);
 
+#ifdef PORT
+        gcAddAnimJointAll(map_gobj, (AObjEvent32 **)((uintptr_t)map_head + (intptr_t)llGRYosterMap_1E0_AnimJoint), 0);
+#else
         gcAddAnimJointAll(map_gobj, (uintptr_t)map_head + (intptr_t)&llGRYosterMap_1E0_AnimJoint, 0);
+#endif
 
         coll_dobj = DObjGetStruct(map_gobj);
         coll_dobj->translate.vec.f = gMPCollisionYakumonoDObjs->dobjs[dGRYosterCloudLineIDs[i]]->translate.vec.f;
@@ -236,12 +255,20 @@ void grYosterInitAll(void)
 
         for (j = 0; j < ARRAY_COUNT(gGRCommonStruct.yoster.clouds[i].dobj); j++, coll_dobj = coll_dobj->sib_next)
         {
+#ifdef PORT
+            cloud_dobj = gcAddChildForDObj(coll_dobj, (void *)((uintptr_t)map_head + (intptr_t)llGRYosterMapCloudDisplayList));
+#else
             cloud_dobj = gcAddChildForDObj(coll_dobj, (uintptr_t)map_head + (intptr_t)&llGRYosterMapCloudDisplayList);
+#endif
             gGRCommonStruct.yoster.clouds[i].dobj[j] = cloud_dobj;
 
             gcAddXObjForDObjFixed(cloud_dobj, nGCMatrixKindTra, 0);
             gcAddXObjForDObjFixed(cloud_dobj, nGCMatrixKind48, 0);
+#ifdef PORT
+            lbCommonAddMObjForTreeDObjs(cloud_dobj, (MObjSub ***)((uintptr_t)map_head + (intptr_t)llGRYosterMap_4B8_MObjSub));
+#else
             lbCommonAddMObjForTreeDObjs(cloud_dobj, (uintptr_t)map_head + (intptr_t)&llGRYosterMap_4B8_MObjSub);
+#endif
         }
         gcPlayAnimAll(map_gobj);
 
@@ -253,7 +280,11 @@ void grYosterInitAll(void)
 
         mpCollisionSetYakumonoOnID(dGRYosterCloudLineIDs[i]);
     }
+#ifdef PORT
+    gGRCommonStruct.yoster.particle_bank_id = efParticleGetLoadBankID((uintptr_t)&lGRYosterParticleScriptBankLo, (uintptr_t)&lGRYosterParticleScriptBankHi, (uintptr_t)&lGRYosterParticleTextureBankLo, (uintptr_t)&lGRYosterParticleTextureBankHi);
+#else
     gGRCommonStruct.yoster.particle_bank_id = efParticleGetLoadBankID(&lGRYosterParticleScriptBankLo, &lGRYosterParticleScriptBankHi, &lGRYosterParticleTextureBankLo, &lGRYosterParticleTextureBankHi);
+#endif
 }
 
 // 0x80108C80
@@ -266,3 +297,21 @@ GObj* grYosterMakeGround(void)
 
     return ground_gobj;
 }
+
+#ifdef PORT
+// 0xPORT
+void grYosterStopCloudEvaporation(void)
+{
+    s32 i;
+
+    for (i = 0; i < ARRAY_COUNT(gGRCommonStruct.yoster.clouds); i++)
+    {
+        // If a player is standing on the cloud, lock the timer at 2.
+        // It will never hit 0, meaning it will never evaporate.
+        if (gGRCommonStruct.yoster.clouds[i].pressure_timer > 0)
+        {
+            gGRCommonStruct.yoster.clouds[i].pressure_timer = 2;
+        }
+    }
+}
+#endif

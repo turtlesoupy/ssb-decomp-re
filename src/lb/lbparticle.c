@@ -1,7 +1,11 @@
-#include "common.h"
+#include <string.h>
 #include <lb/library.h>
 #include <sys/matrix.h>
 #include <ef/efdef.h>
+
+#ifdef PORT
+extern float port_widescreen_clip_x_scale(void);
+#endif
 
 extern u16 gSYSinTable[0x800];
 
@@ -54,10 +58,18 @@ s32 sLBParticleScriptBanksNum[LBPARTICLE_BANKS_NUM_MAX];
 s32 sLBParticleTextureBanksNum[LBPARTICLE_BANKS_NUM_MAX];
 
 // 0x800D6400
+#ifdef PORT
+u32 *sLBParticleScriptBanks[LBPARTICLE_BANKS_NUM_MAX];
+#else
 LBScript **sLBParticleScriptBanks[LBPARTICLE_BANKS_NUM_MAX];
+#endif
 
 // 0x800D6420
+#ifdef PORT
+u32 *sLBParticleTextureBanks[LBPARTICLE_BANKS_NUM_MAX];
+#else
 LBTexture **sLBParticleTextureBanks[LBPARTICLE_BANKS_NUM_MAX];
+#endif
 
 // 0x800D6440
 void (*sLBParticleGeneratorFuncDefault)(LBGenerator*, Vec3f*);
@@ -199,15 +211,45 @@ void lbParticleSetupBankID(s32 bank_id, LBScriptDesc *script_desc, LBTextureDesc
          * By default, the scripts array is populated with the offsets of the scripts
 		 * in their respective file, so this is essentially making them into valid RAM pointers.
 		 */
+#ifdef PORT
+		script_desc->scripts[i - 1] = PORT_REGISTER(lbRelocGetFileData(LBScript*, script_desc, (intptr_t)script_desc->scripts[i - 1]));
+#else
 		script_desc->scripts[i - 1] = lbRelocGetFileData(LBScript*, script_desc, script_desc->scripts[i - 1]);
+#endif
 	}
 	for (i = 1; i <= sLBParticleTextureBanksNum[bank_id]; i++)
 	{
 		// Much like scripts, textures from the file are also being "pointerized" here.
+#ifdef PORT
+		texture_desc->textures[i - 1] = PORT_REGISTER(lbRelocGetFileData(LBTexture*, texture_desc, (intptr_t)texture_desc->textures[i - 1]));
+#else
 		texture_desc->textures[i - 1] = lbRelocGetFileData(LBTexture*, texture_desc, texture_desc->textures[i - 1]);
+#endif
 	}
 	for (i = 0; i < sLBParticleTextureBanksNum[bank_id]; i++)
 	{
+#ifdef PORT
+		LBTexture *tex = (LBTexture*)PORT_RESOLVE(sLBParticleTextureBanks[bank_id][i]);
+		for (j = 0; j < tex->count; j++)
+		{
+			tex->data[j] = PORT_REGISTER(lbRelocGetFileData(void*, texture_desc, (intptr_t)tex->data[j]));
+		}
+		if (tex->fmt == G_IM_FMT_CI)
+		{
+			if (tex->flags & 1)
+			{
+				// Single palette after the images
+				j = tex->count;
+
+				tex->data[j] = PORT_REGISTER(lbRelocGetFileData(void*, texture_desc, (intptr_t)tex->data[j]));
+			}
+			else for (j = tex->count; j < tex->count * 2; j++)
+			{
+				// One palette per image
+				tex->data[j] = PORT_REGISTER(lbRelocGetFileData(void*, texture_desc, (intptr_t)tex->data[j]));
+			}
+		}
+#else
 		for (j = 0; j < sLBParticleTextureBanks[bank_id][i]->count; j++)
 		{
 			sLBParticleTextureBanks[bank_id][i]->data[j] = lbRelocGetFileData(void*, texture_desc, sLBParticleTextureBanks[bank_id][i]->data[j]);
@@ -227,6 +269,7 @@ void lbParticleSetupBankID(s32 bank_id, LBScriptDesc *script_desc, LBTextureDesc
 				sLBParticleTextureBanks[bank_id][i]->data[j] = lbRelocGetFileData(void*, texture_desc, sLBParticleTextureBanks[bank_id][i]->data[j]);
 			}
 		}
+#endif
 	}
 }
 
@@ -382,7 +425,11 @@ LBParticle* lbParticleMakeChildScriptID(LBParticle *pc, s32 bank_id, s32 script_
 	{
 		return NULL;
 	}
+#ifdef PORT
+	script = (LBScript*)PORT_RESOLVE(sLBParticleScriptBanks[id][script_id]);
+#else
 	script = sLBParticleScriptBanks[id][script_id];
+#endif
 
 	return lbParticleMakeStruct
 	(
@@ -397,7 +444,11 @@ LBParticle* lbParticleMakeChildScriptID(LBParticle *pc, s32 bank_id, s32 script_
 		script->size,
 		script->gravity,
 		script->friction,
+#ifdef PORT
+		((LBTexture*)PORT_RESOLVE(sLBParticleTextureBanks[id][script->texture_id]))->flags,
+#else
 		sLBParticleTextureBanks[id][script->texture_id]->flags,
+#endif
 		NULL
 	);
 }
@@ -473,7 +524,11 @@ LBParticle* lbParticleMakePosVel(s32 bank_id, s32 script_id, f32 pos_x, f32 pos_
 	{
 		return NULL;
 	}
+#ifdef PORT
+	script = (LBScript*)PORT_RESOLVE(sLBParticleScriptBanks[id][script_id]);
+#else
 	script = sLBParticleScriptBanks[id][script_id];
+#endif
 
 	pc = lbParticleMakeStruct
 	(
@@ -488,7 +543,11 @@ LBParticle* lbParticleMakePosVel(s32 bank_id, s32 script_id, f32 pos_x, f32 pos_
 		script->size,
 		script->gravity,
 		script->friction,
+#ifdef PORT
+		((LBTexture*)PORT_RESOLVE(sLBParticleTextureBanks[id][script->texture_id]))->flags,
+#else
 		sLBParticleTextureBanks[id][script->texture_id]->flags,
+#endif
 		NULL
 	);
 	if (pc != NULL)
@@ -591,7 +650,14 @@ u8* lbParticleReadFloatBigEnd(u8 *csr, f32 *f)
 	bytes[2] = *csr++;
 	bytes[3] = *csr++;
 
+#ifdef PORT
+	{
+		u8 swapped[4] = { bytes[3], bytes[2], bytes[1], bytes[0] };
+		memcpy(f, swapped, sizeof(f32));
+	}
+#else
 	*f = *(f32*)bytes;
+#endif
 
 	return csr;
 }
@@ -1261,7 +1327,7 @@ LBParticle* lbParticleUpdateStruct(LBParticle *this_pc, LBParticle *other_pc, s3
             while (bytecode_timer == 0);
             
         loop_break:
-            bytecode_csr = (u8*) ((uintptr_t)csr - (uintptr_t)this_pc->bytecode);
+            bytecode_csr = (u16) ((uintptr_t)csr - (uintptr_t)this_pc->bytecode);
             
             this_pc->bytecode_csr = bytecode_csr;
             this_pc->bytecode_timer = bytecode_timer;
@@ -1447,17 +1513,30 @@ void lbParticleStructFuncRun(GObj *gobj)
 	}
 }
 
+#ifdef NON_MATCHING
+/* 
+ * NONMATCHING: xh, xl, yh, yl, pos_x, pos_y and pos_z float reg and/or order swaps
+ * This is likely related to control flow, because xl and yl are supposed to go into saved regs,
+ * but they are instead placed in fv0 and fv1 (f0 and f2 respectively). xh and yh are however
+ * correctly placed into the registers they belong in. The empty brackets are also suspicious.
+ */
+
+// 0x800D0D34
 void lbParticleDrawTextures(GObj *gobj)
 {
     LBParticle *pc;
     void *prev_image, *prev_palette;
-    u32 prev_ac, prev_alpha;
+    s32 prev_ac, prev_alpha;
     s32 tlut;
     Mtx44f look_at_f;
     Mtx44f projection_f;
     u8 ac, alpha;
     s32 bank_id;
+#ifdef PORT
+    u32 *p_palette;
+#else
     void **p_palette;
+#endif
     f32 pos_x, pos_y, pos_z;
     f32 tx, ty, tz;
     f32 pc0_magnitude;  // var_f14?
@@ -1494,7 +1573,7 @@ void lbParticleDrawTextures(GObj *gobj)
             case nGCMatrixKindPerspFastF:
                 syMatrixPerspFastF
                 (
-                    &projection_f,
+                    projection_f,
                     NULL,
                     cobj->projection.persp.fovy,
                     cobj->projection.persp.aspect,
@@ -1507,7 +1586,7 @@ void lbParticleDrawTextures(GObj *gobj)
             case nGCMatrixKindPerspF:
                 syMatrixPerspF
                 (
-                    &projection_f,
+                    projection_f,
                     NULL,
                     cobj->projection.persp.fovy,
                     cobj->projection.persp.aspect,
@@ -1593,7 +1672,7 @@ void lbParticleDrawTextures(GObj *gobj)
             default:
                 syMatrixPerspFastF
                 (
-                    &projection_f,
+                    projection_f,
                     NULL,
                     cobj->projection.persp.fovy,
                     cobj->projection.persp.aspect,
@@ -1650,8 +1729,7 @@ void lbParticleDrawTextures(GObj *gobj)
         projection_f[3][2] = vtrans2 / vscale2;
     }
     pc0_magnitude = sqrtf(SQUARE(projection_f[0][0]) + SQUARE(projection_f[1][0]) + SQUARE(projection_f[2][0]));
-    xl = SQUARE(projection_f[0][1]) + SQUARE(projection_f[1][1]) + SQUARE(projection_f[2][1]);
-    pc1_magnitude = sqrtf(xl);
+    pc1_magnitude = sqrtf(SQUARE(projection_f[0][1]) + SQUARE(projection_f[1][1]) + SQUARE(projection_f[2][1]));
     
     gDPPipeSync(gSYTaskmanDLHeads[0]++);
     gDPSetTexturePersp(gSYTaskmanDLHeads[0]++, G_TP_NONE);
@@ -1677,9 +1755,7 @@ void lbParticleDrawTextures(GObj *gobj)
                 if (pc->size != 0.0F)
                 {
                     pos_x = pc->pos.x;
-                    yl = pc->pos.y;
-                    pos_y = yl;
-                    if (pc->pos.z);
+                    pos_y = pc->pos.y;
                     pos_z = pc->pos.z;
                     
                     if (pc->xf != NULL)
@@ -1752,11 +1828,36 @@ void lbParticleDrawTextures(GObj *gobj)
                     else
                     {
                         tm = 1.0F / tm;
-                
+
                         tx *= tm;
                         ty *= tm;
                         tz *= tm;
-                        
+
+#ifdef PORT
+                        /* Widescreen: particles are projected on the CPU here
+                         * and drawn via gSPScisTextureRectangle (below),
+                         * which libultraship deliberately leaves at authored
+                         * 4:3 NDC — bypassing AdjXForAspectRatio. The 3D
+                         * pipeline meanwhile compresses character vertex
+                         * clip-X by (4/3)/window_aspect to widen the camera
+                         * frustum. Without compensation here, particles like
+                         * Ness's PSI double-jump sparkles drift away from
+                         * the character. Apply the same compression to clip-
+                         * space x (center) and mx (half-width) so the quad
+                         * matches AdjX's effect on a 3D vertex pair. Compress
+                         * before the bounds check so particles that the
+                         * widescreen frustum has brought into view (raw
+                         * |tx| > 1, compressed |tx| <= 1) render correctly. */
+                        {
+                            f32 ws_scale = port_widescreen_clip_x_scale();
+                            if (ws_scale > 0.0F && ws_scale < 1.0F)
+                            {
+                                tx *= ws_scale;
+                                mx *= ws_scale;
+                            }
+                        }
+#endif
+
                         if
                         (
                             (tx < -1.0F) || (tx > 1.0F) ||
@@ -1770,9 +1871,11 @@ void lbParticleDrawTextures(GObj *gobj)
                         {
                             tm *= pc->size;
 
-                            xh = (tm * mx) + tx;
-                            // if (tx);                          
-                            yh = (tm * my) + ty;
+                            mx = tm * mx;
+                            xh = mx + tx;
+                            
+                            my = tm * my;
+                            yh = my + ty;
 
                             tx = tx * vscale0 + vtrans0;
                             xh = xh * vscale0 + vtrans0;
@@ -1789,8 +1892,6 @@ void lbParticleDrawTextures(GObj *gobj)
                             }
                             ty = ty * vscale1 + vtrans1;
                             yh = yh * vscale1 + vtrans1;
-              
-                            if (mx);
                             
                             if (ty < yh)
                             {
@@ -1806,20 +1907,36 @@ void lbParticleDrawTextures(GObj *gobj)
                             
                             bank_id = pc->bank_id & 7;
 
+#ifdef PORT
+                            {
+                                LBTexture *tex = (LBTexture*)PORT_RESOLVE(sLBParticleTextureBanks[bank_id][pc->texture_id]);
+                                fmt = tex->fmt;
+                                siz = tex->siz;
+                                width = tex->width;
+                                height = tex->height;
+                                image = PORT_RESOLVE(tex->data[pc->frame_id]);
+                                if (fmt == G_IM_FMT_CI)
+                                {
+                                    p_palette = &tex->data[tex->count];
+                                    palette = PORT_RESOLVE((!(pc->flags & LBPARTICLE_FLAG_SHAREDPAL)) ? p_palette[pc->frame_id] : p_palette[0]);
+                                }
+                            }
+#else
                             fmt = sLBParticleTextureBanks[bank_id][pc->texture_id]->fmt;
                             siz = sLBParticleTextureBanks[bank_id][pc->texture_id]->siz;
-                            
+
                             width = sLBParticleTextureBanks[bank_id][pc->texture_id]->width;
                             height = sLBParticleTextureBanks[bank_id][pc->texture_id]->height;
-                            
+
                             image = sLBParticleTextureBanks[bank_id][pc->texture_id]->data[pc->frame_id];
-                            
+
                             if (fmt == G_IM_FMT_CI)
                             {
                                 p_palette = &sLBParticleTextureBanks[bank_id][pc->texture_id]->data[sLBParticleTextureBanks[bank_id][pc->texture_id]->count];
-                                
+
                                 palette = (!(pc->flags & LBPARTICLE_FLAG_SHAREDPAL)) ? p_palette[pc->frame_id] : p_palette[0];
                             }
+#endif
                             dsdx = (width * 4096.0F) / (xh - xl);
                             dtdy = (height * 4096.0F) / (yh - yl);
                 
@@ -2116,6 +2233,9 @@ void lbParticleDrawTextures(GObj *gobj)
         gDPSetTextureLUT(gSYTaskmanDLHeads[0]++, G_TT_NONE);
     }
 }
+#else
+#pragma GLOBAL_ASM("asm/nonmatchings/lb/lbparticle/lbParticleDrawTextures.s")
+#endif /* NON_MATCHING */
 
 // 0x800D2720
 void lbParticleAddAttachDObj(s32 bank_id, DObj *dobj)
@@ -2625,37 +2745,74 @@ LBGenerator* lbParticleMakeGenerator(s32 bank_id, s32 script_id)
 
     if (gn != NULL)
     {   
+#ifdef PORT
+        {
+            LBScript *script = (LBScript*)PORT_RESOLVE(sLBParticleScriptBanks[id][script_id]);
+            gn->kind = script->kind;
+            gn->bank_id = bank_id;
+            gn->flags = script->flags;
+            gn->texture_id = script->texture_id;
+            gn->particle_lifetime = script->particle_lifetime;
+            gn->generator_lifetime = script->generator_lifetime;
+
+            gn->pos.x = 0.0F;
+            gn->pos.y = 0.0F;
+            gn->pos.z = 0.0F;
+
+            gn->vel.x = script->vel.x;
+            gn->vel.y = script->vel.y;
+            gn->vel.z = script->vel.z;
+
+            gn->gravity = script->gravity;
+            gn->friction = script->friction;
+            gn->size = script->size;
+
+            gn->bytecode = script->bytecode;
+
+            gn->unk_gn_0x38 = script->unk_script_0x20;
+            gn->unk_gn_0x3C = script->unk_script_0x24;
+            gn->update_rate = script->update_rate;
+
+            gn->frame = 0.0F;
+
+            if (((LBTexture*)PORT_RESOLVE(sLBParticleTextureBanks[id][script->texture_id]))->flags != 0)
+            {
+                gn->flags |= LBPARTICLE_FLAG_SHAREDPAL;
+            }
+        }
+#else
         gn->kind = sLBParticleScriptBanks[id][script_id]->kind;
         gn->bank_id = bank_id;
         gn->flags = sLBParticleScriptBanks[id][script_id]->flags;
         gn->texture_id = sLBParticleScriptBanks[id][script_id]->texture_id;
         gn->particle_lifetime = sLBParticleScriptBanks[id][script_id]->particle_lifetime;
         gn->generator_lifetime = sLBParticleScriptBanks[id][script_id]->generator_lifetime;
-        
+
         gn->pos.x = 0.0F;
         gn->pos.y = 0.0F;
         gn->pos.z = 0.0F;
-        
+
         gn->vel.x = sLBParticleScriptBanks[id][script_id]->vel.x;
         gn->vel.y = sLBParticleScriptBanks[id][script_id]->vel.y;
         gn->vel.z = sLBParticleScriptBanks[id][script_id]->vel.z;
-        
+
         gn->gravity = sLBParticleScriptBanks[id][script_id]->gravity;
         gn->friction = sLBParticleScriptBanks[id][script_id]->friction;
         gn->size = sLBParticleScriptBanks[id][script_id]->size;
-        
+
         gn->bytecode = sLBParticleScriptBanks[id][script_id]->bytecode;
-        
+
         gn->unk_gn_0x38 = sLBParticleScriptBanks[id][script_id]->unk_script_0x20;
         gn->unk_gn_0x3C = sLBParticleScriptBanks[id][script_id]->unk_script_0x24;
         gn->update_rate = sLBParticleScriptBanks[id][script_id]->update_rate;
-        
+
         gn->frame = 0.0F;
-        
+
         if (sLBParticleTextureBanks[id][sLBParticleScriptBanks[id][script_id]->texture_id]->flags != 0)
         {
             gn->flags |= LBPARTICLE_FLAG_SHAREDPAL;
         }
+#endif
         gn->dobj = NULL;
         
         switch (gn->kind)

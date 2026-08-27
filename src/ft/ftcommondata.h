@@ -11,6 +11,13 @@
 // 0x8012C830
 extern f32 dFTCommonDataHandicapTable[/* */][2];
 
+#ifdef PORT
+/* Row count of the above, exported from its definition site because the
+ * bound is unspecified here and region-dependent. Valid handicap values
+ * are 1..dFTCommonDataHandicapTableCount (the readers index [handicap - 1]). */
+extern const s32 dFTCommonDataHandicapTableCount;
+#endif
+
 // 0x8012C970
 extern u16 dFTCommonDataDownBounceSFX[/* */];
 

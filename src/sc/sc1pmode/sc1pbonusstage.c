@@ -1,10 +1,19 @@
 #include <ft/fighter.h>
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 #include <it/item.h>
 #include <gr/ground.h>
 #include <if/interface.h>
 #include <sc/scene.h>
 #include <sys/video.h>
 #include <reloc_data.h>
+#include <sys/audio.h>
+#include <sys/debug.h>
+#include <wp/wpmanager.h>
+extern void sc1PBonusStageSetupFiles(void);
+extern void *func_800269C0_275C0(u16 id);
+extern void func_800266A0_272A0(void);
 
 // // // // // // // // // // // //
 //                               //
@@ -20,86 +29,86 @@ GRBonusTarget dSC1PBonusStageTargetDescs[/* */] =
 {
 	// Bonus1Mario
 	{ 
-		&llGRBonus1MarioMapTargetsStart,
-		&llGRBonus1MarioMapTargetsDObjDesc,
-		&llGRBonus1MarioMapTargetsAnimJoint
+		llGRBonus1MarioMapTargetsStart,
+		llGRBonus1MarioMapTargetsDObjDesc,
+		llGRBonus1MarioMapTargetsAnimJoint
 	},
 
 	// Bonus1Fox
 	{ 
-		&llGRBonus1FoxMapTargetsStart,
-		&llGRBonus1FoxMapTargetsDObjDesc,
-		&llGRBonus1FoxMapTargetsAnimJoint,
+		llGRBonus1FoxMapTargetsStart,
+		llGRBonus1FoxMapTargetsDObjDesc,
+		llGRBonus1FoxMapTargetsAnimJoint,
 	},
 
 	// Bonus1Donkey
 	{ 
-		&llGRBonus1DonkeyMapTargetsStart,
-		&llGRBonus1DonkeyMapTargetsDObjDesc,
-		&llGRBonus1DonkeyMapTargetsAnimJoint
+		llGRBonus1DonkeyMapTargetsStart,
+		llGRBonus1DonkeyMapTargetsDObjDesc,
+		llGRBonus1DonkeyMapTargetsAnimJoint
 	},
 
 	// Bonus1Samus
 	{ 
-		&llGRBonus1SamusMapTargetsStart,
-		&llGRBonus1SamusMapTargetsDObjDesc,
-		&llGRBonus1SamusMapTargetsAnimJoint
+		llGRBonus1SamusMapTargetsStart,
+		llGRBonus1SamusMapTargetsDObjDesc,
+		llGRBonus1SamusMapTargetsAnimJoint
 	},
 
 	// Bonus1Luigi
 	{ 
-		&llGRBonus1LuigiMapTargetsStart,
-		&llGRBonus1LuigiMapTargetsDObjDesc,
-		&llGRBonus1LuigiMapTargetsAnimJoint
+		llGRBonus1LuigiMapTargetsStart,
+		llGRBonus1LuigiMapTargetsDObjDesc,
+		llGRBonus1LuigiMapTargetsAnimJoint
 	},
 
 	// Bonus1Link
 	{ 
-		&llGRBonus1LinkMapTargetsStart,
-		&llGRBonus1LinkMapTargetsDObjDesc,
-		&llGRBonus1LinkMapTargetsAnimJoint
+		llGRBonus1LinkMapTargetsStart,
+		llGRBonus1LinkMapTargetsDObjDesc,
+		llGRBonus1LinkMapTargetsAnimJoint
 	},
 
 	// Bonus1Yoshi
 	{ 
-		&llGRBonus1YoshiMapTargetsStart,
-		&llGRBonus1YoshiMapTargetsDObjDesc,
-		&llGRBonus1YoshiMapTargetsAnimJoint
+		llGRBonus1YoshiMapTargetsStart,
+		llGRBonus1YoshiMapTargetsDObjDesc,
+		llGRBonus1YoshiMapTargetsAnimJoint
 	},
 
 	// Bonus1Captain
 	{ 
-		&llGRBonus1CaptainMapTargetsStart,
-		&llGRBonus1CaptainMapTargetsDObjDesc,
-		&llGRBonus1CaptainMapTargetsAnimJoint
+		llGRBonus1CaptainMapTargetsStart,
+		llGRBonus1CaptainMapTargetsDObjDesc,
+		llGRBonus1CaptainMapTargetsAnimJoint
 	},
 
 	// Bonus1Kirby
 	{ 
-		&llGRBonus1KirbyMapTargetsStart,
-		&llGRBonus1KirbyMapTargetsDObjDesc,
-		&llGRBonus1KirbyMapTargetsAnimJoint
+		llGRBonus1KirbyMapTargetsStart,
+		llGRBonus1KirbyMapTargetsDObjDesc,
+		llGRBonus1KirbyMapTargetsAnimJoint
 	},
 
 	// Bonus1Pikachu
 	{ 
-		&llGRBonus1PikachuMapTargetsStart,
-		&llGRBonus1PikachuMapTargetsDObjDesc,
-		&llGRBonus1PikachuMapTargetsAnimJoint
+		llGRBonus1PikachuMapTargetsStart,
+		llGRBonus1PikachuMapTargetsDObjDesc,
+		llGRBonus1PikachuMapTargetsAnimJoint
 	},
 
 	// Bonus1Purin
 	{ 
-		&llGRBonus1PurinMapTargetsStart,
-		&llGRBonus1PurinMapTargetsDObjDesc,
-		&llGRBonus1PurinMapTargetsAnimJoint
+		llGRBonus1PurinMapTargetsStart,
+		llGRBonus1PurinMapTargetsDObjDesc,
+		llGRBonus1PurinMapTargetsAnimJoint
 	},
 
 	// Bonus1Ness
 	{ 
-		&llGRBonus1NessMapTargetsStart,
-		&llGRBonus1NessMapTargetsDObjDesc,
-		&llGRBonus1NessMapTargetsAnimJoint
+		llGRBonus1NessMapTargetsStart,
+		llGRBonus1NessMapTargetsDObjDesc,
+		llGRBonus1NessMapTargetsAnimJoint
 	}
 };
 
@@ -114,8 +123,8 @@ intptr_t dSC1PBonusStageBumperDescs[/* */][2] =
 
 	// Fox
 	{
-		&llGRBonus2FoxMapBumpersDObjDesc,
-		&llGRBonus2FoxMapBumpersAnimJoint
+		llGRBonus2FoxMapBumpersDObjDesc,
+		llGRBonus2FoxMapBumpersAnimJoint
 	},
 
 	// Donkey
@@ -126,8 +135,8 @@ intptr_t dSC1PBonusStageBumperDescs[/* */][2] =
 
 	// Samus
 	{
-		&llGRBonus2SamusMapBumpersDObjDesc,
-		&llGRBonus2SamusMapBumpersAnimJoint
+		llGRBonus2SamusMapBumpersDObjDesc,
+		llGRBonus2SamusMapBumpersAnimJoint
 	},
 
 	// Luigi
@@ -156,8 +165,8 @@ intptr_t dSC1PBonusStageBumperDescs[/* */][2] =
 
 	// Kirby
 	{
-		&llGRBonus2KirbyMapBumpersDObjDesc,
-		&llGRBonus2KirbyMapBumpersAnimJoint
+		llGRBonus2KirbyMapBumpersDObjDesc,
+		llGRBonus2KirbyMapBumpersAnimJoint
 	},
 
 	// Pikachu
@@ -168,14 +177,14 @@ intptr_t dSC1PBonusStageBumperDescs[/* */][2] =
 
 	// Purin
 	{
-		&llGRBonus2PurinMapBumpersDObjDesc,
-		&llGRBonus2PurinMapBumpersAnimJoint
+		llGRBonus2PurinMapBumpersDObjDesc,
+		llGRBonus2PurinMapBumpersAnimJoint
 	},
 
 	// Ness
 	{
-		&llGRBonus2NessMapBumpersDObjDesc,
-		&llGRBonus2NessMapBumpersAnimJoint
+		llGRBonus2NessMapBumpersDObjDesc,
+		llGRBonus2NessMapBumpersAnimJoint
 	}
 };
 
@@ -184,26 +193,26 @@ intptr_t dSC1PBonusStagePlatformDescs[/* */][4] =
 {
 	// Small
 	{
-		&llBonus2CommonPlatformSmallDObjDesc,
-		&llBonus2CommonPlatformSmallAnimJoint,
-		&llBonus2CommonPlatformSmallMObjSub,
-		&llBonus2CommonPlatformSmallMatAnimJoint
+		llBonus2CommonPlatformSmallDObjDesc,
+		llBonus2CommonPlatformSmallAnimJoint,
+		llBonus2CommonPlatformSmallMObjSub,
+		llBonus2CommonPlatformSmallMatAnimJoint
 	},
 
 	// Medium
 	{
-		&llBonus2CommonPlatformMediumDObjDesc,
-		&llBonus2CommonPlatformMediumAnimJoint,
-		&llBonus2CommonPlatformMediumMObjSub,
-		&llBonus2CommonPlatformMediumMatAnimJoint
+		llBonus2CommonPlatformMediumDObjDesc,
+		llBonus2CommonPlatformMediumAnimJoint,
+		llBonus2CommonPlatformMediumMObjSub,
+		llBonus2CommonPlatformMediumMatAnimJoint
 	},
 
 	// Large
 	{
-		&llBonus2CommonPlatformLargeDObjDesc,
-		&llBonus2CommonPlatformLargeAnimJoint,
-		&llBonus2CommonPlatformLargeMObjSub,
-		&llBonus2CommonPlatformLargeMatAnimJoint
+		llBonus2CommonPlatformLargeDObjDesc,
+		llBonus2CommonPlatformLargeAnimJoint,
+		llBonus2CommonPlatformLargeMObjSub,
+		llBonus2CommonPlatformLargeMatAnimJoint
 	}
 };
 
@@ -212,20 +221,20 @@ intptr_t dSC1PBonusStageBoardedPlatformDescs[/* */][2] =
 {
 	// Small
 	{
-		&llBonus2CommonBoardedPlatformSmallDObjDesc,
-		&llBonus2CommonBoardedPlatformSmallAnimJoint
+		llBonus2CommonBoardedPlatformSmallDObjDesc,
+		llBonus2CommonBoardedPlatformSmallAnimJoint
 	},
 
 	// Medium
 	{
-		&llBonus2CommonBoardedPlatformMediumDObjDesc,
-		&llBonus2CommonBoardedPlatformMediumAnimJoint
+		llBonus2CommonBoardedPlatformMediumDObjDesc,
+		llBonus2CommonBoardedPlatformMediumAnimJoint
 	},
 
 	// Large
 	{
-		&llBonus2CommonBoardedPlatformLargeDObjDesc,
-		&llBonus2CommonBoardedPlatformLargeAnimJoint
+		llBonus2CommonBoardedPlatformLargeDObjDesc,
+		llBonus2CommonBoardedPlatformLargeAnimJoint
 	}
 };
 
@@ -359,6 +368,23 @@ void sc1PBonusStageInitVars(void)
 	s32 player;
 	s32 fkind;
 
+#ifdef PORT
+	/* Issue #128 follow-on: gGRCommonStruct.bonus1/2.interface_gobj are
+	 * BSS-resident GObj* fields written from a fresh GObj at the bottom of
+	 * sc1PBonusStageMakeTargets / sc1PBonusStageMakePlatforms (lines 864 /
+	 * 887) and read by sc1PBonusStageUpdateTargetInterface / ...Platform
+	 * (lines 502 / 639) via SObjGetStruct(). On N64, BSS re-DMA of overlay
+	 * 29 implicitly zeroed these between bonus-stage entries; on the port
+	 * the overlay is statically linked, so a previous bonus stage's GObj*
+	 * survives. taskman.c:1352 frees the prior 16 MiB arena under the old
+	 * GObj, leaving these fields as freed-heap pointers. The Make* writers
+	 * happen later in scene init — any read between entry to InitVars and
+	 * the Make* call dereferences freed memory. NULL them on every entry
+	 * so the Make* path is the only writer, matching N64 behavior. */
+	gGRCommonStruct.bonus1.interface_gobj = NULL;
+	gGRCommonStruct.bonus2.interface_gobj = NULL;
+#endif
+
 	gSCManagerSceneData.is_reset = FALSE;
 
 	sSC1PBonusStageBattleState = dSCManagerDefaultBattleState;
@@ -420,28 +446,77 @@ void sc1PBonusStageInitVars(void)
 
 			gSCManagerBattleState->players[player].color = player;
 		}
+#ifdef PORT
+		/* Co-op: P2 joins the bonus stage too — in P1's character's map
+		 * (gkind above stays keyed to P1's fkind), playing their own
+		 * character. Targets/platforms are stage-global, so completion is
+		 * naturally shared. Only on the mid-run path (scene_prev ==
+		 * nSCKind1PGame); bonus-practice entries stay solo. */
+		else if (sc1PManagerIsCoopActive() && (gSCManagerSceneData.scene_prev == nSCKind1PGame) && (player == gSCManagerSceneData.coop_player2))
+		{
+			// Pass the dynamic pkind
+			gSCManagerBattleState->players[player].pkind = gSCManagerSceneData.coop_pkind2;
+
+			// Ensure the AI level is set for the bonus stage
+			if (gSCManagerSceneData.coop_pkind2 == nFTPlayerKindCom) {
+				gSCManagerBattleState->players[player].level = gSCManagerSceneData.coop_level2;
+			}
+
+			gSCManagerBattleState->players[player].fkind = gSCManagerSceneData.coop_fkind2;
+			gSCManagerBattleState->players[player].costume = gSCManagerSceneData.coop_costume2;
+			gSCManagerBattleState->players[player].color = player;
+
+			gSCManagerBattleState->pl_count = 2;
+		}
+#endif
 		else gSCManagerBattleState->players[player].pkind = nFTPlayerKindNot;
 	}
+#ifdef PORT
+	/* Co-op: the default bonus battle state is free-for-all, which would
+	 * let the two players hit each other. Put both on team 0 with team
+	 * battle on so the friendly-fire setting governs here exactly like the
+	 * battle stages (is_not_teamshadows keeps the stock black shadows). */
+	if (sc1PManagerIsCoopActive() && (gSCManagerSceneData.scene_prev == nSCKind1PGame))
+	{
+		extern int port_classic_coop_friendly_fire(void);
+
+		gSCManagerBattleState->is_team_battle = TRUE;
+		gSCManagerBattleState->is_not_teamshadows = TRUE;
+		gSCManagerBattleState->is_team_attack = port_classic_coop_friendly_fire() ? TRUE : FALSE;
+		gSCManagerBattleState->players[gSCManagerSceneData.player].team = 0;
+		gSCManagerBattleState->players[gSCManagerSceneData.coop_player2].team = 0;
+	}
+#endif
 }
 
 // 0x8018D330
 void sc1PBonusStageBonus1LoadFile(void)
 {
-	gSC1PBonusStageItemFile = lbRelocGetExternHeapFile((u32)&llITBonus1ObjectHeaderFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)&llITBonus1ObjectHeaderFileID), 0x10));
+	gSC1PBonusStageItemFile = lbRelocGetExternHeapFile((u32)ll_253_FileID, syTaskmanMalloc(lbRelocGetFileSize((u32)ll_253_FileID), 0x10));
 }
 
 // 0x8018D374
 void sc1PBonusStageMakeTargets(void)
 {
 	GRBonusTarget *target = &dSC1PBonusStageTargetDescs[gSCManagerBattleState->gkind - nGRKindBonus1Start];
+#ifdef PORT
+	u32 *anim_joints;
+	uintptr_t file_base = (uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->gr_desc[1].dobjdesc) - target->start;
+#else
 	AObjEvent32 **anim_joints;
+#endif
 	DObjDesc *dobjdesc;
 	Vec3f vel;
 
 	vel.x = vel.y = vel.z = 0.0F;
 
+#ifdef PORT
+	dobjdesc = (DObjDesc*)(file_base + target->dobjdesc);
+	anim_joints = (u32*)(file_base + target->anim_joint);
+#else
 	dobjdesc = lbRelocGetFileData(DObjDesc*, ((uintptr_t)gMPCollisionGroundData->gr_desc[1].dobjdesc - target->start), target->dobjdesc);
 	anim_joints = lbRelocGetFileData(AObjEvent32**, ((uintptr_t)gMPCollisionGroundData->gr_desc[1].dobjdesc - target->start), target->anim_joint);
+#endif
 
 	gGRCommonStruct.bonus1.target_count = 0;
 
@@ -451,11 +526,22 @@ void sc1PBonusStageMakeTargets(void)
 	{
 		GObj *item_gobj = itManagerMakeItemSetupCommon(NULL, nITKindTarget, &dobjdesc->translate, &vel, ITEM_FLAG_PARENT_GROUND);
 
+#ifdef PORT
+		{
+			AObjEvent32 *aj = (AObjEvent32*)PORT_RESOLVE(*anim_joints);
+			if (aj != NULL)
+			{
+				gcAddDObjAnimJoint(DObjGetStruct(item_gobj), aj, 0.0F);
+				gcPlayAnimAll(item_gobj);
+			}
+		}
+#else
 		if (*anim_joints != NULL)
 		{
 			gcAddDObjAnimJoint(DObjGetStruct(item_gobj), *anim_joints, 0.0F);
 			gcPlayAnimAll(item_gobj);
 		}
+#endif
 		dobjdesc++, anim_joints++, gGRCommonStruct.bonus1.target_count++;
 	}
 	if (gGRCommonStruct.bonus1.target_count != SCBATTLE_BONUSGAME_TASK_MAX)
@@ -482,6 +568,12 @@ void sc1PBonusStageUpdateTargetInterface(void)
 // 0x8018D510
 void sc1PBonusStageUpdateTargetCount(void)
 {
+#ifdef PORT
+	if (gGRCommonStruct.bonus1.target_count == 0)
+	{
+		return;
+	}
+#endif
 	gGRCommonStruct.bonus1.target_count--;
 
 	sc1PBonusStageUpdateTargetInterface();
@@ -512,7 +604,7 @@ void sc1PBonusStageMakeBonus1Ground(void)
 // 0x8018D5E8
 void sc1PBonusStageBonus2LoadFile(void)
 {
-	gGRCommonStruct.bonus2.file = lbRelocGetExternHeapFile((u32)&llBonus2CommonFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)&llBonus2CommonFileID), 0x10));
+	gGRCommonStruct.bonus2.file = lbRelocGetExternHeapFile((u32)llBonus2CommonFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)llBonus2CommonFileID), 0x10));
 }
 
 // 0x8018D62C
@@ -615,6 +707,12 @@ void sc1PBonusStageUpdatePlatformCount(DObj *dobj)
 {
 	s32 id = dobj->child->user_data.s & ~0x8000;
 
+#ifdef PORT
+	if (gGRCommonStruct.bonus2.platform_count == 0)
+	{
+		return;
+	}
+#endif
 	gcEjectDObj(dobj->child);
 
 	lbCommonSetupTreeDObjs
@@ -701,17 +799,25 @@ void sc1PBonusStageMakeBumpers(void)
 {
 	void *file;
 	DObjDesc *dobjdesc;
+#ifdef PORT
+	u32 *anim_joints;
+#else
 	AObjEvent32 **anim_joints;
+#endif
 	Vec3f vel;
 
 	if (gMPCollisionGroundData->map_nodes != NULL)
 	{
-		file = (void*) ((uintptr_t)gMPCollisionGroundData->map_nodes - dSC1PBonusStageBumperDescs[gSCManagerBattleState->gkind - nGRKindBonus2Start][0]);
+		file = (void*) ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->map_nodes) - dSC1PBonusStageBumperDescs[gSCManagerBattleState->gkind - nGRKindBonus2Start][0]);
 
 		vel.x = vel.y = vel.z = 0.0F;
 
 		dobjdesc = lbRelocGetFileData(DObjDesc*, file, dSC1PBonusStageBumperDescs[gSCManagerBattleState->gkind - nGRKindBonus2Start][0]);
+#ifdef PORT
+		anim_joints = (u32*)((uintptr_t)file + (intptr_t)dSC1PBonusStageBumperDescs[gSCManagerBattleState->gkind - nGRKindBonus2Start][1]);
+#else
 		anim_joints = lbRelocGetFileData(AObjEvent32**, file, dSC1PBonusStageBumperDescs[gSCManagerBattleState->gkind - nGRKindBonus2Start][1]);
+#endif
 
 		dobjdesc++, anim_joints++;
 
@@ -719,11 +825,22 @@ void sc1PBonusStageMakeBumpers(void)
 		{
 			GObj *item_gobj = itManagerMakeItemSetupCommon(NULL, nITKindGBumper, &dobjdesc->translate, &vel, ITEM_FLAG_PARENT_GROUND);
 
+#ifdef PORT
+			{
+				AObjEvent32 *aj = (AObjEvent32*)PORT_RESOLVE(*anim_joints);
+				if (aj != NULL)
+				{
+					gcAddDObjAnimJoint(DObjGetStruct(item_gobj), aj, 0.0F);
+					gcPlayAnimAll(item_gobj);
+				}
+			}
+#else
 			if (*anim_joints != NULL)
 			{
 				gcAddDObjAnimJoint(DObjGetStruct(item_gobj), *anim_joints, 0.0F);
 				gcPlayAnimAll(item_gobj);
 			}
+#endif
 			dobjdesc++, anim_joints++;
 		}
 	}
@@ -798,14 +915,14 @@ void sc1PBonusStageMakeTargetSprites(void)
 	void *file;
 	s32 i;
 
-	file = lbRelocGetExternHeapFile(&llSC1PStageClear3FileID, syTaskmanMalloc(lbRelocGetFileSize(&llSC1PStageClear3FileID), 0x10));
+	file = lbRelocGetExternHeapFile(llSC1PStageClear3FileID, syTaskmanMalloc(lbRelocGetFileSize(llSC1PStageClear3FileID), 0x10));
 
 	gGRCommonStruct.bonus1.interface_gobj = interface_gobj = gcMakeGObjSPAfter(nGCCommonKindInterface, NULL, nGCCommonLinkIDInterface, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(interface_gobj, lbCommonDrawSObjAttr, 23, GOBJ_PRIORITY_DEFAULT, ~0);
 
 	for (i = 0; i < gGRCommonStruct.bonus1.target_count; i++)
 	{
-		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, file, &llSC1PStageClear3TargetSprite));
+		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, file, llSC1PStageClear3TargetSprite));
 		sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
 
 		sobj->pos.x = -(sobj->sprite.width / 2) + (((sobj->sprite.width + 3) * i) + 30);
@@ -821,14 +938,14 @@ void sc1PBonusStageMakePlatformSprites(void)
 	void *file;
 	s32 i;
 
-	file = lbRelocGetExternHeapFile(&llSC1PStageClear3FileID, syTaskmanMalloc(lbRelocGetFileSize(&llSC1PStageClear3FileID), 0x10));
+	file = lbRelocGetExternHeapFile(llSC1PStageClear3FileID, syTaskmanMalloc(lbRelocGetFileSize(llSC1PStageClear3FileID), 0x10));
 
 	gGRCommonStruct.bonus2.interface_gobj = interface_gobj = gcMakeGObjSPAfter(nGCCommonKindInterface, NULL, nGCCommonLinkIDInterface, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(interface_gobj, lbCommonDrawSObjAttr, 23, GOBJ_PRIORITY_DEFAULT, ~0);
 
 	for (i = 0; i < gGRCommonStruct.bonus2.platform_count; i++)
 	{
-		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, file, &llSC1PStageClear3PlatformSprite));
+		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, file, llSC1PStageClear3PlatformSprite));
 		sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
 
 		sobj->pos.x = -(sobj->sprite.width / 2) + (((sobj->sprite.width + 3) * i) + 30);
@@ -955,7 +1072,7 @@ void sc1PBonusStageMakeTimer(void)
 
 		for (i = 0; i < ARRAY_COUNT(sSC1PBonusStageTimerDigits); i++)
 		{
-			sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], &llIFCommonTimerDigit0Sprite));
+			sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], llIFCommonTimerDigit0Sprite));
 
 			sobj->pos.x = dSC1PBonusStageTimerDigitPositions[i] - (sobj->sprite.width * 0.5F);
 			sobj->pos.y = 30.0F - (sobj->sprite.height * 0.5F);
@@ -966,11 +1083,11 @@ void sc1PBonusStageMakeTimer(void)
 
 		sobj->sprite.attr |= SP_HIDDEN;
 
-		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], &llIFCommonTimerSymbolSecSprite));
+		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], llIFCommonTimerSymbolSecSprite));
 		sobj->pos.x = (s32) (231.0F - (sobj->sprite.width * 0.5F));
 		sobj->pos.y = (s32) (20.0F - (sobj->sprite.height * 0.5F));
 
-		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], &llIFCommonTimerSymbolCSecSprite));
+		sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], llIFCommonTimerSymbolCSecSprite));
 		sobj->pos.x = (s32) (264.0F - (sobj->sprite.width * 0.5F));
 		sobj->pos.y = (s32) (20.0F - (sobj->sprite.height * 0.5F));
 
@@ -991,6 +1108,25 @@ void sc1PBonusStageMakeTimer(void)
 // 0x8018E5D8
 void sc1PBonusStageSetPlayerInterfacePositions(void)
 {
+#ifdef PORT
+	/* Co-op: stock data parks every slot's damage meter at x=55 because a
+	 * bonus stage only ever has one player. Spread the two humans apart.
+	 * (Written each entry, so a later solo run sees all-55 again.) */
+	if (sc1PManagerIsCoopActive() && (gSCManagerSceneData.scene_prev == nSCKind1PGame))
+	{
+		dSC1PBonusStagePlayerInterfacePositions[gSCManagerSceneData.player] = 55;
+		dSC1PBonusStagePlayerInterfacePositions[gSCManagerSceneData.coop_player2] = 200;
+	}
+	else
+	{
+		s32 _p;
+
+		for (_p = 0; _p < GMCOMMON_PLAYERS_MAX; _p++)
+		{
+			dSC1PBonusStagePlayerInterfacePositions[_p] = 55;
+		}
+	}
+#endif
 	gIFCommonPlayerInterface.player_pos_x = dSC1PBonusStagePlayerInterfacePositions;
 	gIFCommonPlayerInterface.player_pos_y = 210;
 }
@@ -1036,6 +1172,14 @@ void sc1PBonusStageFuncStart(void)
 
 		sc1PBonusStageGetPlayerStartPosition(&desc.pos);
 
+#ifdef PORT
+		/* Co-op: bonus maps author exactly one player spawn point — nudge
+		 * P2 sideways off P1's spot so the fighters don't stack. */
+		if (sc1PManagerIsCoopActive() && (player == gSCManagerSceneData.coop_player2))
+		{
+			desc.pos.x += 30.0F;
+		}
+#endif
 		desc.lr = (desc.pos.x >= 0.0F) ? -1 : +1;
 
 		desc.team = 0;
@@ -1051,6 +1195,13 @@ void sc1PBonusStageFuncStart(void)
 
 		ftParamInitPlayerBattleStats(player, fighter_gobj);
 
+#ifdef PORT
+		/* Co-op: keep walking the slots so P2 spawns too. */
+		if (sc1PManagerIsCoopActive() && (gSCManagerSceneData.scene_prev == nSCKind1PGame))
+		{
+			continue;
+		}
+#endif
 		break;
 	}
 
@@ -1177,6 +1328,9 @@ void sc1PBonusStageStartScene(void)
 
 	while (syAudioCheckBGMPlaying(0) != FALSE)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 
@@ -1190,6 +1344,12 @@ void sc1PBonusStageStartScene(void)
 		gGRCommonStruct.bonus1.target_count :
 		gGRCommonStruct.bonus2.platform_count;
 
+#ifdef PORT
+		if (tasks_remain > SCBATTLE_BONUSGAME_TASK_MAX)
+		{
+			tasks_remain = 0;
+		}
+#endif
 		tasks_complete = SCBATTLE_BONUSGAME_TASK_MAX - tasks_remain;
 
 		if (tasks_remain > 0); // Bruh

@@ -8,8 +8,14 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <it/itmanager.h>
+#include <sys/debug.h>
+#include <wp/wpmanager.h>
 
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -35,7 +41,7 @@ FTKeyEvent dMVOpeningFoxKeyEvents[/* */] =
 };
 
 // 0x8018E0E0
-u32 dMVOpeningFoxFileIDs[/* */] = { &llIFCommonAnnounceCommonFileID, &llMVOpeningCommonFileID };
+u32 dMVOpeningFoxFileIDs[/* */] = { llIFCommonAnnounceCommonFileID, llMVOpeningCommonFileID };
 
 // // // // // // // // // // // //
 //                               //
@@ -100,7 +106,7 @@ void mvOpeningFoxSetupFiles(void)
 	LBRelocSetup rl_setup;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-	rl_setup.table_files_num = (u32)&llRelocFileCount;
+	rl_setup.table_files_num = (u32)llRelocFileCount;
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sMVOpeningFoxStatusBuffer;
@@ -135,9 +141,9 @@ void mvOpeningFoxMakeName(void)
 
 	intptr_t offsets[/* */] =
 	{
-		&llIFCommonAnnounceCommonLetterFSprite,
-		&llIFCommonAnnounceCommonLetterOSprite,
-		&llIFCommonAnnounceCommonLetterXSprite,
+		llIFCommonAnnounceCommonLetterFSprite,
+		llIFCommonAnnounceCommonLetterOSprite,
+		llIFCommonAnnounceCommonLetterXSprite,
 		0x0
 	};
 	Vec2f pos[/* */] =
@@ -417,7 +423,7 @@ void mvOpeningFoxMakePosedFighterCamera(void)
 	
 	cobj->projection.persp.aspect = 5.0F / 11.0F;
 
-	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningFoxFiles[1], &llMVOpeningCommonFoxCamAnimJoint), 0.0F);
+	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningFoxFiles[1], llMVOpeningCommonFoxCamAnimJoint), 0.0F);
 	gcAddGObjProcess(camera_gobj, gcPlayCamAnim, nGCProcessKindFunc, 1);
 }
 
@@ -518,6 +524,9 @@ void mvOpeningFoxFuncStart(void)
 
 	while (sySchedulerGetTicCount() < 2055)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 }

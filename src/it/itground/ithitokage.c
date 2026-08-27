@@ -3,6 +3,9 @@
 #include <ft/fighter.h>
 #include <gr/ground.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 extern s32 dGRYamabukiMonsterAttackKind;
 
@@ -16,7 +19,11 @@ ITDesc dITHitokageItemDesc =
 {
     nITKindHitokage,                        // Item Kind
     &gGRCommonStruct.yamabuki.item_head,    // Pointer to item file data?
+#ifdef PORT
+    llGRYamabukiMapHitokageItemAttributes, // Offset of item attributes in file?
+#else
     &llGRYamabukiMapHitokageItemAttributes, // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -56,7 +63,11 @@ WPDesc dITHitokageWeaponFlameWeaponDesc =
     0x00,                                   // Render flags?
     nWPKindHitokageFlame,                   // Weapon Kind
     &gGRCommonStruct.yamabuki.item_head,    // Pointer to character's loaded files?
+#ifdef PORT
+    llGRYamabukiMapHitokageFlameWeaponAttributes,// Offset of weapon attributes in loaded files
+#else
     &llGRYamabukiMapHitokageFlameWeaponAttributes,// Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

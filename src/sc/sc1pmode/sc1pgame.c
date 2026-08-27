@@ -1,10 +1,25 @@
 #include <ft/fighter.h>
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 #include <gr/ground.h>
 #include <if/interface.h>
 #include <sc/scene.h>
 #include <sys/video.h>
 #include <sys/dma.h>
 #include <reloc_data.h>
+#include <gm/gmcamera.h>
+#include <it/itmanager.h>
+#include <sys/audio.h>
+#include <sys/debug.h>
+#include <wp/wpmanager.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void func_800266A0_272A0(void);
+#ifdef PORT
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, unsigned int count);
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -776,7 +791,7 @@ void sc1PGameSetupFiles(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-    rl_setup.table_files_num = (u32)&llRelocFileCount;
+    rl_setup.table_files_num = (u32)llRelocFileCount;
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sSC1PGameStatusBuffer;
@@ -832,8 +847,63 @@ void sc1PGameFuncUpdate(void)
 // 0x8018D280
 s32 sc1PGameGetNextFreePlayerPort(s32 player)
 {
+#ifdef PORT
+    /* Co-op: in stock 1P mode every active slot sits on a consecutive port
+     * after .player, so "next port" doubles as "next free port" during
+     * enemy assignment. With P2 on an arbitrary port that breaks — skip
+     * both human ports so enemy setup can never clobber a human slot. The
+     * active-slot walkers use sc1PGameCoopNextActivePort instead. */
+    if (sc1PManagerIsCoopActive())
+    {
+        do
+        {
+            player = (player == (GMCOMMON_PLAYERS_MAX - 1)) ? 0 : player + 1;
+        }
+        while ((player == gSCManagerSceneData.player) || (player == gSCManagerSceneData.coop_player2));
+
+        return player;
+    }
+#endif
     return (player == (GMCOMMON_PLAYERS_MAX - 1)) ? 0 : player + 1;
 }
+
+#ifdef PORT
+/* Co-op: enemy-team shade dedup must consider both humans' costumes, not
+ * just P1's (stock checks read gSCManagerSceneData.fkind/.costume only). */
+sb32 sc1PGameCoopHumanCostumeMatch(s32 fkind, s32 costume)
+{
+    if ((gSCManagerSceneData.fkind == fkind) && (gSCManagerSceneData.costume == costume))
+    {
+        return TRUE;
+    }
+    if (sc1PManagerIsCoopActive() && (gSCManagerSceneData.coop_fkind2 == fkind) && (gSCManagerSceneData.coop_costume2 == costume))
+    {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* Co-op: cyclic walk to the next slot with a live player (pkind != Not).
+ * Replaces sc1PGameGetNextFreePlayerPort in the appear/interface walkers,
+ * which otherwise assume actives occupy consecutive ports from .player. */
+s32 sc1PGameCoopNextActivePort(s32 player)
+{
+    s32 i = player;
+
+    do
+    {
+        i = (i == (GMCOMMON_PLAYERS_MAX - 1)) ? 0 : i + 1;
+
+        if (gSCManagerBattleState->players[i].pkind != nFTPlayerKindNot)
+        {
+            return i;
+        }
+    }
+    while (i != player);
+
+    return player;
+}
+#endif
 
 // 0x8018D29C - Really weird match, gets next available costume for CPU player in 1P Game
 s32 sc1PGameGetNextFreeCostume(s32 com)
@@ -989,6 +1059,25 @@ void sc1PGameSetupStageAll(void)
 
     gSCManagerBattleState->gkind = stagesetup->gkind;
     gSCManagerBattleState->is_team_attack = comsetup->is_team_attack;
+#ifdef PORT
+    /* Co-op: the blanket clear above wiped P2's slot — re-activate it on
+     * every common stage and the Master Hand fight. */
+    if (sc1PManagerIsCoopActive() && (gSCManagerSceneData.spgame_stage <= nSC1PGameStageCommonEnd))
+    {
+        s32 p2_slot = gSCManagerSceneData.coop_player2;
+
+        // Pass the dynamic pkind instead of hardcoding nFTPlayerKindMan
+        gSCManagerBattleState->players[p2_slot].pkind = gSCManagerSceneData.coop_pkind2;
+
+        // Ensure the AI level persists through the stage clear
+        if (gSCManagerSceneData.coop_pkind2 == nFTPlayerKindCom) {
+            gSCManagerBattleState->players[p2_slot].level = gSCManagerSceneData.coop_level2;
+        }
+
+        gSCManagerBattleState->players[p2_slot].is_single_stockicon = FALSE;
+        sSC1PGamePlayerSetups[p2_slot].mapobj_kind = nMPMapObjKind1PGamePlayer;
+    }
+#endif
 
     switch (gSCManagerSceneData.spgame_stage)
     {
@@ -1029,6 +1118,53 @@ void sc1PGameSetupStageAll(void)
             gSCManagerBattleState->players[i].pkind = nFTPlayerKindNot;
         }
     }
+#ifdef PORT
+    /* Co-op: the blanket clear above wiped P2's slot — re-activate it on
+     * every stage P2 plays, which is now *all* of them: the common stages,
+     * the Master Hand fight, AND the challenger duels (Luigi/Ness/Jigglypuff/
+     * Falcon), which run 2-player rather than P1-solo. On a common stage P2
+     * shares P1's player spawn point; on a challenger duel it shares P1's
+     * challenger spawn point and single-stock-icon HUD — sc1PGameFuncStart
+     * offsets the second human off the shared point. fkind/costume/etc.
+     * persist from sc1PManagerUpdateScene. Stages with authored ally spawn
+     * points (Mario/Donkey) override P2's mapobj_kind in the ally loop below.
+     * (Never point P2 at an ally mapobj on a map without one —
+     * sc1PGameGetStartPosition hangs unless exactly one object of the kind
+     * exists; the player and challenger-player points are each authored
+     * exactly once on every stage, so sharing P1's is always safe.) */
+    if (sc1PManagerIsCoopActive())
+    {
+        s32 p2_slot = gSCManagerSceneData.coop_player2;
+        sb32 is_challenger = (gSCManagerSceneData.spgame_stage > nSC1PGameStageCommonEnd);
+
+        //gSCManagerBattleState->players[p2_slot].pkind = nFTPlayerKindMan;
+        // Replace nFTPlayerKindMan with the dynamic pkind
+        gSCManagerBattleState->players[p2_slot].pkind = gSCManagerSceneData.coop_pkind2;
+
+        // Ensure the level carries over here too, just in case
+        if (gSCManagerSceneData.coop_pkind2 == nFTPlayerKindCom) {
+            gSCManagerBattleState->players[p2_slot].level = gSCManagerSceneData.coop_level2;
+        }
+
+        gSCManagerBattleState->players[p2_slot].is_single_stockicon = is_challenger ? TRUE : FALSE;
+        sSC1PGamePlayerSetups[p2_slot].mapobj_kind = is_challenger ? nMPMapObjKind1PGameChallengerPlayer : nMPMapObjKind1PGamePlayer;
+
+        /* Co-op revive: a partner eliminated on the previous stage rejoins
+         * here on their last life. Within a stage, elimination still means
+         * sitting the rest of it out — but the counter must never be
+         * negative at spawn: a fighter spawned at -1 decrements to -2 on
+         * death and ftCommonDeadCheckRebirth's `== -1` elimination test
+         * never fires again, i.e. infinite stocks. */
+        if (gSCManagerBattleState->players[p2_slot].stock_count < 0)
+        {
+            gSCManagerBattleState->players[p2_slot].stock_count = 0;
+        }
+        if (gSCManagerBattleState->players[gSCManagerSceneData.player].stock_count < 0)
+        {
+            gSCManagerBattleState->players[gSCManagerSceneData.player].stock_count = 0;
+        }
+    }
+#endif
     if (gSCManagerSceneData.spgame_stage <= nSC1PGameStageCommonEnd)
     {
         gSCManager1PGameBattleState.players[gSCManagerSceneData.player].is_single_stockicon = FALSE;
@@ -1050,6 +1186,14 @@ void sc1PGameSetupStageAll(void)
         sSC1PGamePlayerSetups[gSCManagerSceneData.player].is_skip_entry = FALSE;
         break;
     }
+#ifdef PORT
+    /* Co-op: P2 enters the same way P1 does on every stage (challenger duels
+     * included — there P1's is_skip_entry is FALSE, so P2 matches). */
+    if (sc1PManagerIsCoopActive())
+    {
+        sSC1PGamePlayerSetups[gSCManagerSceneData.coop_player2].is_skip_entry = sSC1PGamePlayerSetups[gSCManagerSceneData.player].is_skip_entry;
+    }
+#endif
     player = gSCManagerSceneData.player;
 
     switch (gSCManagerSceneData.spgame_stage)
@@ -1068,6 +1212,18 @@ void sc1PGameSetupStageAll(void)
     case nSC1PGameStageCaptain:
         for (i = 0; i < stagesetup->ally_count; i++)
         {
+#ifdef PORT
+            /* Co-op: ally slot 0 is P2 (a human, already configured) — keep
+             * the authored ally spawn point and the port walker's
+             * progression, but skip all the CPU-ally configuration. */
+            if (sc1PManagerIsCoopActive() && (i == 0))
+            {
+                player = gSCManagerSceneData.ally_players[0];
+
+                sSC1PGamePlayerSetups[player].mapobj_kind = nMPMapObjKind1PGameAllyStart;
+                continue;
+            }
+#endif
             gSCManagerBattleState->players[gSCManagerSceneData.ally_players[i]].level = comsetup->ally_level[gSCManagerBackupData.spgame_difficulty];
             gSCManagerBattleState->players[gSCManagerSceneData.ally_players[i]].handicap = comsetup->ally_handicap[gSCManagerBackupData.spgame_difficulty];
             gSCManagerBattleState->players[gSCManagerSceneData.ally_players[i]].team = 0;
@@ -1136,13 +1292,25 @@ void sc1PGameSetupStageAll(void)
 
         for (i = 0; i < SC1PGAME_STAGE_MAX_OPPONENT_COUNT; i++)
         {
+#ifdef PORT
+            /* Co-op: two humans leave only two slots for the enemy team;
+             * the rest of the 18 Yoshis arrive through the respawn path. */
+            if (sc1PManagerIsCoopActive() && (i >= 2))
+            {
+                break;
+            }
+#endif
             player = sc1PGameGetNextFreePlayerPort(player);
 
             sc1PGameSetupEnemyPlayer(stagesetup, comsetup, player, 0);
 
             gSCManagerBattleState->players[player].costume = sSC1PGameEnemyVariations[sSC1PGameCurrentEnemyVariation];
 
+#ifdef PORT
+            if (sc1PGameCoopHumanCostumeMatch(nFTKindYoshi, gSCManagerBattleState->players[player].costume))
+#else
             if ((gSCManagerSceneData.fkind == nFTKindYoshi) && (gSCManagerSceneData.costume == gSCManagerBattleState->players[player].costume))
+#endif
             {
                 gSCManagerBattleState->players[player].shade = 1;
             }
@@ -1185,6 +1353,13 @@ void sc1PGameSetupStageAll(void)
 
         for (i = 0; i < SC1PGAME_STAGE_MAX_OPPONENT_COUNT; i++)
         {
+#ifdef PORT
+            /* Co-op: two slots for the Polygon team; respawns cover the rest. */
+            if (sc1PManagerIsCoopActive() && (i >= 2))
+            {
+                break;
+            }
+#endif
             player = sc1PGameGetNextFreePlayerPort(player);
 
             sc1PGameSetupEnemyPlayer(stagesetup, comsetup, player, 0);
@@ -1209,11 +1384,19 @@ void sc1PGameSetupStageAll(void)
 
             sc1PGameSetupEnemyPlayer(stagesetup, comsetup, player, 0);
 
+#ifdef PORT
             sSC1PGameEnemyKirbyCostume = gSCManagerBattleState->players[player].costume =
 
-            ((gSCManagerSceneData.fkind == nFTKindKirby) && (gSCManagerSceneData.costume == gSCManagerBattleState->players[player].costume)) ? 
-                                                                          ftParamGetCostumeCommonID(nFTKindKirby, 1) : 
+            sc1PGameCoopHumanCostumeMatch(nFTKindKirby, gSCManagerBattleState->players[player].costume) ?
+                                                                          ftParamGetCostumeCommonID(nFTKindKirby, 1) :
                                                                                                                   0 ;
+#else
+            sSC1PGameEnemyKirbyCostume = gSCManagerBattleState->players[player].costume =
+
+            ((gSCManagerSceneData.fkind == nFTKindKirby) && (gSCManagerSceneData.costume == gSCManagerBattleState->players[player].costume)) ?
+                                                                          ftParamGetCostumeCommonID(nFTKindKirby, 1) :
+                                                                                                                  0 ;
+#endif
 
             sSC1PGamePlayerSetups[player].team_order = sSC1PGameCurrentEnemyVariation;
             sSC1PGamePlayerSetups[player].copy_kind = dSC1PGameKirbyTeamCopyKinds[sSC1PGameCurrentEnemyVariation];
@@ -1244,6 +1427,13 @@ void sc1PGameSetupStageAll(void)
 
         for (i = 0; i < SC1PGAME_STAGE_MAX_OPPONENT_COUNT; i++)
         {
+#ifdef PORT
+            /* Co-op: two Polygon racers max — P1 + P2 + 2 fills the slots. */
+            if (sc1PManagerIsCoopActive() && (i >= 2))
+            {
+                break;
+            }
+#endif
             player = sc1PGameGetNextFreePlayerPort(player);
 
             sc1PGameSetupEnemyPlayer(stagesetup, comsetup, player, 0);
@@ -1344,7 +1534,11 @@ void sc1PGameSpawnEnemyTeamNext(GObj *player_gobj)
         case nSC1PGameStageYoshi:
             gSCManagerBattleState->players[player].costume = sSC1PGameEnemyVariations[sSC1PGameCurrentEnemyVariation];
 
+#ifdef PORT
+            gSCManagerBattleState->players[player].shade = sc1PGameCoopHumanCostumeMatch(nFTKindYoshi, gSCManagerBattleState->players[player].costume) ? 1 : 0;
+#else
             gSCManagerBattleState->players[player].shade = ((gSCManagerSceneData.fkind == nFTKindYoshi) && (gSCManagerSceneData.costume == gSCManagerBattleState->players[player].costume)) ? 1 : 0;
+#endif
 
             ifCommonPlayerStockSetLUT(player, gSCManagerBattleState->players[player].costume, attr);
             break;
@@ -1429,6 +1623,13 @@ void sc1PGameSetPlayerInterfacePositions(void)
     for (i = 0; i < (gSCManagerBattleState->pl_count + gSCManagerBattleState->cp_count); i++)
     {
         sSC1PGamePlayerInterfacePositionsX[player] = *pos;
+#ifdef PORT
+        if (sc1PManagerIsCoopActive())
+        {
+            player = sc1PGameCoopNextActivePort(player);
+        }
+        else
+#endif
         player = sc1PGameGetNextFreePlayerPort(player);
 
         pos++;
@@ -1479,6 +1680,13 @@ void sc1PGameWaitStageCommonUpdate(void)
         }
         else gcSleepCurrentGObjThread(sleep_tics);
 
+#ifdef PORT
+        if (sc1PManagerIsCoopActive())
+        {
+            player = sc1PGameCoopNextActivePort(player);
+        }
+        else
+#endif
         player = sc1PGameGetNextFreePlayerPort(player);
     }
     if (random == 2)
@@ -1510,10 +1718,25 @@ void sc1PGameWaitStageTeamUpdate(void)
         {
             ftCommonAppearSetStatus(fighter_gobj);
         }
+#ifdef PORT
+        /* Co-op: P2 gets the same entry animation as P1, not the enemy
+         * snap-into-place. */
+        else if (sc1PManagerIsCoopActive() && (player == gSCManagerSceneData.coop_player2))
+        {
+            ftCommonAppearSetStatus(fighter_gobj);
+        }
+#endif
         else ftCommonAppearSetPosition(fighter_gobj);
 
         gcSleepCurrentGObjThread(60);
 
+#ifdef PORT
+        if (sc1PManagerIsCoopActive())
+        {
+            player = sc1PGameCoopNextActivePort(player);
+        }
+        else
+#endif
         player = sc1PGameGetNextFreePlayerPort(player);
     }
 }
@@ -1557,7 +1780,11 @@ void sc1PGameWaitStageBossUpdate(void)
     sp20.y = 0.0F;
     sp20.z = 0.0F;
 
-    gmCameraSetStatusAnim(lbRelocGetFileData(AObjEvent32*, ((uintptr_t)gMPCollisionGroundData->gr_desc[1].dobjdesc - (intptr_t)&llGRLastMapFileHead), &D_NF_00006010), 0.0F, &sp20);
+#ifdef PORT
+    gmCameraSetStatusAnim(lbRelocGetFileData(AObjEvent32*, ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->gr_desc[1].dobjdesc) - (intptr_t)llGRLastMapFileHead), D_NF_00006010), 0.0F, &sp20);
+#else
+    gmCameraSetStatusAnim(lbRelocGetFileData(AObjEvent32*, ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->gr_desc[1].dobjdesc) - (intptr_t)llGRLastMapFileHead), &D_NF_00006010), 0.0F, &sp20);
+#endif
 
     for (player = 0; TRUE; player++) // Wut da haeiyll
     {
@@ -1587,6 +1814,29 @@ void sc1PGameWaitStageBossUpdate(void)
 
     player_fp->camera_mode = nFTCameraModeDefault;
     com_fp->camera_mode = nFTCameraModeDefault;
+
+#ifdef PORT
+    /* Co-op: the Master Hand intro locks every fighter's control
+     * (sc1PGameBossLockPlayerControl / the appear sequence), and this
+     * boss-only wait-update unlocks just P1 (gSCManagerSceneData.player) and
+     * the boss com_gobj — unlike the common/team wait-updates it never walks
+     * the active ports. Without unlocking P2 here the partner spawns with
+     * is_control_disable stuck TRUE: it can still pause (pause reads the pad
+     * directly) but its stick/buttons never reach the fighter — i.e. "can
+     * pause but can't move" on Master Hand only. Mirror P1: clear the lock
+     * and join the default camera framing so the boss cam frames both humans
+     * the way every common stage already does. */
+    if (sc1PManagerIsCoopActive())
+    {
+        GObj *p2_gobj = gSCManagerBattleState->players[gSCManagerSceneData.coop_player2].fighter_gobj;
+
+        if (p2_gobj != NULL)
+        {
+            ftParamUnlockPlayerControl(p2_gobj);
+            ftGetStruct(p2_gobj)->camera_mode = nFTCameraModeDefault;
+        }
+    }
+#endif
 
     gSCManagerBattleState->game_status = nSCBattleGameStatusGo;
 
@@ -1690,17 +1940,27 @@ void sc1PGameTeamStockDisplayProcDisplay(GObj *interface_gobj)
                     switch (gSCManagerSceneData.spgame_stage)
                     {
                     case nSC1PGameStageYoshi:
+#ifdef PORT
+                        sobj->sprite = *(Sprite*)PORT_RESOLVE(sSC1PGameEnemyTeamSprites->stock_sprite);
+                        sobj->sprite.LUT = ((u32*)PORT_RESOLVE(sSC1PGameEnemyTeamSprites->stock_luts))[sSC1PGameEnemyVariations[stock_num]];
+#else
                         sobj->sprite = *sSC1PGameEnemyTeamSprites->stock_sprite;
                         sobj->sprite.LUT = sSC1PGameEnemyTeamSprites->stock_luts[sSC1PGameEnemyVariations[stock_num]];
+#endif
                         break;
 
                     case nSC1PGameStageKirby:
+#ifdef PORT
+                        sobj->sprite = *(Sprite*)PORT_RESOLVE(sSC1PGameEnemyTeamSprites->stock_sprite);
+                        sobj->sprite.LUT = ((u32*)PORT_RESOLVE(sSC1PGameEnemyTeamSprites->stock_luts))[sSC1PGameEnemyKirbyCostume];
+#else
                         sobj->sprite = *sSC1PGameEnemyTeamSprites->stock_sprite;
                         sobj->sprite.LUT = sSC1PGameEnemyTeamSprites->stock_luts[sSC1PGameEnemyKirbyCostume];
+#endif
                         break;
 
                     case nSC1PGameStageZako:
-                        sobj->sprite = *lbRelocGetFileData(Sprite*, sSC1PGameZakoStockFile, &llFTStocksZakoSprite);
+                        sobj->sprite = *lbRelocGetFileData(Sprite*, sSC1PGameZakoStockFile, llFTStocksZakoSprite);
                         break;
                     }
                     sobj->sprite.attr &= ~SP_HIDDEN;
@@ -1740,9 +2000,17 @@ void sc1PGameInitTeamStockDisplay(void)
                 break;
             }
         }
+#ifdef PORT
+        sSC1PGameEnemyTeamSprites = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+#else
         sSC1PGameEnemyTeamSprites = fp->attr->sprites;
+#endif
 
+#ifdef PORT
+        sprite = (Sprite*)PORT_RESOLVE(sSC1PGameEnemyTeamSprites->stock_sprite);
+#else
         sprite = sSC1PGameEnemyTeamSprites->stock_sprite;
+#endif
         sprite->attr = SP_TEXSHUF | SP_TRANSPARENT;
 
         goto make_gobj;
@@ -1750,14 +2018,39 @@ void sc1PGameInitTeamStockDisplay(void)
     case nSC1PGameStageZako:
         sSC1PGameZakoStockFile = lbRelocGetExternHeapFile
         (
-            (u32)&llFTStocksZakoFileID,
+            (u32)llFTStocksZakoFileID,
             syTaskmanMalloc
             (
-                lbRelocGetFileSize((u32)&llFTStocksZakoFileID),
+                lbRelocGetFileSize((u32)llFTStocksZakoFileID),
                 0x10
             )
         );
-        sprite = lbRelocGetFileData(Sprite*, sSC1PGameZakoStockFile, &llFTStocksZakoSprite);
+        sprite = lbRelocGetFileData(Sprite*, sSC1PGameZakoStockFile, llFTStocksZakoSprite);
+
+#ifdef PORT
+        /* Sprite came straight out of the loaded file with only pass1
+         * BSWAP32 applied — every {s16,s16} pair still needs its halves
+         * swapped, and the Bitmap array + texel data need their own
+         * fixup before the renderer walks them.  Without this, the
+         * Zako stock sprite reads `nbitmaps = 36` (the original
+         * `ndisplist` value) and the per-frame draw at
+         * `sc1PGameTeamStockDisplayProcDisplay` walks 36 garbage Bitmap
+         * structs, producing the issue-#53 lag flood (~280k stale-token
+         * errors / run) and the visibly-broken stock icons.  Other
+         * sprite paths (lbCommonMakeSObjForGObj, FTSprites loaders) get
+         * this fixup automatically — only this raw `lbRelocGetFileData`
+         * sprite read needed it.  portFixupSprite is idempotent on
+         * pointer key so the per-frame copy at line 1727+ benefits. */
+        portFixupSprite(sprite);
+        {
+            Bitmap *bms = (Bitmap*)PORT_RESOLVE(sprite->bitmap);
+            if (bms != NULL)
+            {
+                portFixupBitmapArray(bms, sprite->nbitmaps);
+                portFixupSpriteBitmapData(sprite, bms);
+            }
+        }
+#endif
 
         sprite->attr = SP_TEXSHUF | SP_TRANSPARENT;
 
@@ -1768,7 +2061,7 @@ void sc1PGameInitTeamStockDisplay(void)
 
         for (i = 0; i < sSC1PGameEnemyStocksRemaining; i++)
         {
-            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], &llStagePupupuFile2FileID));
+            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], ll_104_FileID));
         }
         sSC1PGameEnemyStocksDisplay = sSC1PGameEnemyStocksRemaining + 1;
 
@@ -1783,15 +2076,36 @@ void sc1PGameSetPlayerDefeatStats(s32 player, s32 team_order)
     FTStruct *fp = ftGetStruct(fighter_gobj);
     SC1PGameStats *enemy_stats;
 
-    if 
+    if
     (
-        (player == gSCManagerSceneData.player) && 
-        (gSCManagerBattleState->players[player].stock_count == -1) && 
+        (player == gSCManagerSceneData.player) &&
+        (gSCManagerBattleState->players[player].stock_count == -1) &&
         (gSCManagerBattleState->game_status != nSCBattleGameStatusEnd)
     )
     {
+#ifdef PORT
+        /* Co-op: P1's elimination only ends the stage if P2 is already out. */
+        if (sc1PManagerIsCoopActive() &&
+            (gSCManagerBattleState->players[gSCManagerSceneData.coop_player2].stock_count != -1))
+        {
+            return;
+        }
+#endif
         ifCommonAnnounceEndMessage();
     }
+#ifdef PORT
+    /* Co-op: P2 running out last also ends the stage. */
+    else if (sc1PManagerIsCoopActive() &&
+             (player == gSCManagerSceneData.coop_player2) &&
+             (gSCManagerBattleState->players[player].stock_count == -1) &&
+             (gSCManagerBattleState->game_status != nSCBattleGameStatusEnd))
+    {
+        if (gSCManagerBattleState->players[gSCManagerSceneData.player].stock_count == -1)
+        {
+            ifCommonAnnounceEndMessage();
+        }
+    }
+#endif
     else if (gSCManagerBattleState->players[player].is_spgame_enemy != FALSE)
     {
         sSC1PGameEnemyStocksRemaining--;
@@ -1941,7 +2255,7 @@ void sc1PGameBossHidePlayerTagAll(void)
 }
 
 // 0x8018F574
-void sc1PGameBossAddBossInterface(GObj *fighter_gobj, u32 unused)
+void sc1PGameBossAddBossInterface(GObj *fighter_gobj, uintptr_t unused)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
 
@@ -1952,13 +2266,13 @@ void sc1PGameBossAddBossInterface(GObj *fighter_gobj, u32 unused)
 }
 
 // 0x8018F5AC
-void sc1PGameBossLockPlayerControl(GObj *fighter_gobj, u32 unused)
+void sc1PGameBossLockPlayerControl(GObj *fighter_gobj, uintptr_t unused)
 {
     ftParamLockPlayerControl(fighter_gobj);
 }
 
 // 0x8018F5CC
-void sc1PGameBossSetIgnorePlayerMapBounds(GObj *fighter_gobj, u32 unused)
+void sc1PGameBossSetIgnorePlayerMapBounds(GObj *fighter_gobj, uintptr_t unused)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
 
@@ -1991,14 +2305,29 @@ void sc1PGameBossDefeatInterfaceProcUpdate(void)
     func_800269C0_275C0(nSYAudioVoiceBossDead);
     func_800269C0_275C0(nSYAudioFGMBossDefeatL);
 
+#ifdef PORT
+    /* alSoundEffect.sfx_max ↔ ALWhatever8009EDD0.fgm_ucode_count on N64
+     * by struct overlap; LP64 layouts diverge and the alSoundEffect view
+     * lands on fgm_table_data instead, corrupting it.  See accessors in
+     * src/libultra/n_audio/n_env.c. */
+    extern void portAudioSaveAndBlockFGMs(u16 *out_saved);
+    portAudioSaveAndBlockFGMs(&sSC1PGameBossDefeatSoundTerminateTemp);
+#else
     sSC1PGameBossDefeatSoundTerminateTemp = D_8009EDD0_406D0.sfx_max;
     D_8009EDD0_406D0.sfx_max = 0;
+#endif
 }
 
 // 0x8018F6DC
 void func_ovl65_8018F6DC(void)
 {
+#ifdef PORT
+    /* See portAudioSaveAndBlockFGMs above. */
+    extern void portAudioRestoreFGMs(u16 saved);
+    portAudioRestoreFGMs(sSC1PGameBossDefeatSoundTerminateTemp);
+#else
     D_8009EDD0_406D0.sfx_max = sSC1PGameBossDefeatSoundTerminateTemp;
+#endif
 }
 
 // 0x8018F6F0
@@ -2006,7 +2335,11 @@ void sc1PGameBossDefeatInterfaceProcSet(void)
 {
     gcFuncGObjAll(ifCommonBattleInterfaceResumeGObj, 0);
     sc1PGameBossSetChangeWallpaper();
-    gmCameraSetStatusAnim((void*) (((uintptr_t)gMPCollisionGroundData->gr_desc[1].dobjdesc - (intptr_t)&llGRLastMapFileHead) + (intptr_t)&D_NF_00006450), 0.0F, &sSC1PGameBossDefeatZoomPosition);
+#ifdef PORT
+    gmCameraSetStatusAnim((void*) (((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->gr_desc[1].dobjdesc) - (intptr_t)llGRLastMapFileHead) + (intptr_t)D_NF_00006450), 0.0F, &sSC1PGameBossDefeatZoomPosition);
+#else
+    gmCameraSetStatusAnim((void*) (((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->gr_desc[1].dobjdesc) - (intptr_t)llGRLastMapFileHead) + (intptr_t)&D_NF_00006450), 0.0F, &sSC1PGameBossDefeatZoomPosition);
+#endif
     ifCommonBattleBossDefeatSetGameStatus();
 }
 
@@ -2030,9 +2363,11 @@ void sc1PGameFuncStart(void)
     FTData *plns;
     size_t largest_size;
     FTStruct *fp;
+#ifndef PORT
     sb32 (*func_sign)(void*);
     void *file;
     u8 signature[0x10];
+#endif
     s32 i;
     FTDesc desc;
     SYColorRGBA color;
@@ -2040,21 +2375,28 @@ void sc1PGameFuncStart(void)
     sc1PGameSetupStageAll();
     sc1PGameSetupFiles();
 
+#ifndef PORT
+    /* Vanilla anti-piracy: after 92 boots, validate a signature by loading a
+     * function out of a reloc file and CALLING it. That is N64 MIPS code -- the
+     * port can't execute it, so func_sign jumps to garbage and crashes. The check
+     * is meaningless on PC, so skip it. (The lower-boot checks, boot>21/42/68, only
+     * test gSYMainImem/DmemOK flags, which pass here, so they need no guard.) */
     if (!(gSCManagerBackupData.error_flags & LBBACKUP_ERROR_VSBATTLECASTLE) && (gSCManagerBackupData.boot > 92))
     {
         syDmaReadRom(0xF10, signature, ARRAY_COUNT(signature));
 
-        file = lbRelocGetExternHeapFile((u32)&llSYSignValidateFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)&llSYSignValidateFileID), 0x10));
-        func_sign = lbRelocGetFileData(sb32 (*)(void*), file, &llSYSignValidateFunc);
+        file = lbRelocGetExternHeapFile((u32)llSYSignValidateFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)llSYSignValidateFileID), 0x10));
+        func_sign = lbRelocGetFileData(sb32 (*)(void*), file, llSYSignValidateFunc);
 
-        osWritebackDCache(func_sign, *lbRelocGetFileData(s32*, file, &llSYSignValidateNBytes));
-        osInvalICache(func_sign, *lbRelocGetFileData(s32*, file, &llSYSignValidateNBytes));
+        osWritebackDCache(func_sign, *lbRelocGetFileData(s32*, file, llSYSignValidateNBytes));
+        osInvalICache(func_sign, *lbRelocGetFileData(s32*, file, llSYSignValidateNBytes));
 
         if (func_sign(signature) == FALSE)
         {
             gSCManagerBackupData.error_flags |= LBBACKUP_ERROR_VSBATTLECASTLE;
         }
     }
+#endif
     gcMakeDefaultCameraGObj(nGCCommonLinkIDCamera, GOBJ_PRIORITY_DEFAULT, 100, COBJ_FLAG_ZBUFFER, GPACK_RGBA8888(0x00, 0x00, 0x00, 0xFF));
     efParticleInitAll();
     ftParamInitGame();
@@ -2078,7 +2420,7 @@ void sc1PGameFuncStart(void)
         // Need to load PK Fire graphics from Ness' file
         plns = dFTManagerDataFiles[nFTKindNess];
 
-        lbRelocGetExternHeapFile((uintptr_t)&llKirbySpecial1FileID, syTaskmanMalloc(lbRelocGetFileSize((uintptr_t)&llKirbySpecial1FileID), 0x10));
+        lbRelocGetExternHeapFile((uintptr_t)ll_230_FileID, syTaskmanMalloc(lbRelocGetFileSize((uintptr_t)ll_230_FileID), 0x10));
         efParticleGetLoadBankID
         (
             plns->particles_script_lo, 
@@ -2130,6 +2472,17 @@ void sc1PGameFuncStart(void)
 
         sc1PGameGetStartPosition(&desc.pos, sSC1PGamePlayerSetups[i].mapobj_kind);
 
+#ifdef PORT
+        /* Co-op: on stages without an authored ally spawn point P2 shares
+         * P1's map point — offset by a good two fighter-widths so the pair
+         * spawns side by side rather than stacked. (The bonus-stage spawn
+         * keeps a smaller offset; its start platforms are narrow.) */
+        if (sc1PManagerIsCoopActive() && (i == gSCManagerSceneData.coop_player2) &&
+            (sSC1PGamePlayerSetups[i].mapobj_kind == sSC1PGamePlayerSetups[gSCManagerSceneData.player].mapobj_kind))
+        {
+            desc.pos.x += 750.0F;
+        }
+#endif
         desc.lr = sc1PGameGetEnemyStartLR(i);
 
         desc.team = gSCManagerBattleState->players[i].team;
@@ -2650,6 +3003,17 @@ check_heavy_damage:
         )
         ||
         (
+#ifdef PORT
+            /* Mirror the GBumper branch's guard: every other use of
+               sSC1PGameBonusStatEnemyStats[KOs-1] in this file checks
+               KOs != 0 first; this NBumper branch was missing it. ASan
+               caught a global-buffer-overflow at array index -1 when the
+               function ran with PlayerKOsNum=0 (any 1P scene start before
+               the player has scored a KO). On N64 the [-1] read landed in
+               adjacent BSS that never set damage_player to the live player
+               value, so the bumper-clear bonus silently never triggered. */
+            (sSC1PGameBonusStatPlayerKOsNum != 0) &&
+#endif
             (sSC1PGameBonusStatEnemyStats[sSC1PGameBonusStatPlayerKOsNum - 1].damage_player == gSCManagerSceneData.player) &&
             (sSC1PGameBonusStatEnemyStats[sSC1PGameBonusStatPlayerKOsNum - 1].damage_object_class == nFTHitLogObjectItem) &&
             (sSC1PGameBonusStatEnemyStats[sSC1PGameBonusStatPlayerKOsNum - 1].damage_object_kind == nITKindNBumper)
@@ -2735,7 +3099,11 @@ check_heavy_damage:
         {
             variation_order[i] = sSC1PGameEnemyVariations[sSC1PGameBonusStatEnemyStats[i].team_order];
         }
+#ifdef PORT
+        for (variation = 0; i < sSC1PGameBonusStatPlayerKOsNum; i++, variation = (variation + 1 >= SC1PGAME_STAGE_YOSHI_VARIATIONS_COUNT) ? 0 : variation + 1)
+#else
         for (variation = 0; i < sSC1PGameBonusStatPlayerKOsNum; i++, variation = (variation == (SC1PGAME_STAGE_YOSHI_VARIATIONS_COUNT - 1)) ? 0 : variation++)
+#endif
         {
             if (sSC1PGameEnemyVariations[sSC1PGameBonusStatEnemyStats[i].team_order] != variation_order[variation])
             {
@@ -2754,6 +3122,23 @@ check_heavy_damage:
 
         for (i = 0; i < SC1PGAME_STAGE_KIRBY_VARIATIONS_COUNT; i++)
         {
+#ifdef PORT
+            /* team_order is a u8 set from sSC1PGameCurrentEnemyVariation which is
+               post-incremented (sc1pgame.c:1378) and not clamped at the bookkeeping
+               site -- it can hold values >= SC1PGAME_STAGE_KIRBY_VARIATIONS_COUNT
+               when the bonus-stats array carries residue from a non-Kirby stage,
+               or when the player's KO ordering walks off the variation count.
+               Index dSC1PGameKirbyTeamCopyKinds[7] is a 1-byte OOB read on N64 it
+               grabbed a benign adjacent global byte (dSC1PGameZoomEyeX[0]'s LSB)
+               which never matched the canonical kind, so the bonus was silently
+               just-not-awarded. ASan traps the redzone byte. Treat OOB team_order
+               as "not the canonical ordering". */
+            if ((u32)sSC1PGameBonusStatEnemyStats[i].team_order >= ARRAY_COUNT(dSC1PGameKirbyTeamCopyKinds))
+            {
+                is_ordered_variation = FALSE;
+                continue;
+            }
+#endif
             if (dSC1PGameKirbyTeamCopyKinds[sSC1PGameBonusStatEnemyStats[i].team_order] != dSC1PGameKirbyTeamCopyKinds[i])
             {
                 is_ordered_variation = FALSE;
@@ -2767,6 +3152,14 @@ check_heavy_damage:
     }
     if (gSCManagerSceneData.spgame_stage == nSC1PGameStageMario)
     {
+#ifdef PORT
+        /* Co-op: ally slot 0 is the human partner, not a protected CPU —
+         * the protect-your-ally bonuses don't apply. */
+        if (sc1PManagerIsCoopActive())
+        {
+            goto skip_ally_friend_bonus;
+        }
+#endif
         if (gSCManagerBattleState->players[gSCManagerSceneData.ally_players[0]].falls == 0)
         {
             if (gSCManagerBattleState->players[gSCManagerSceneData.ally_players[0]].total_damage_all == 0)
@@ -2780,13 +3173,20 @@ check_heavy_damage:
                 gSCManagerSceneData.bonus_get_mask[1] |= SC1PGAME_BONUS_MASK1_GOODFRIEND;
             }
         }
+#ifdef PORT
+skip_ally_friend_bonus:
+#endif
         if (gSC1PGameBonusBrosCalamity != FALSE)
         {
             // Bros. Calamity
             gSCManagerSceneData.bonus_get_mask[1] |= SC1PGAME_BONUS_MASK1_BROSCALAMITY;
         }
     }
-    if ((gSCManagerSceneData.spgame_stage == nSC1PGameStageDonkey) && (gSCManagerBattleState->players[gSCManagerSceneData.ally_players[0]].falls == 0) && (gSCManagerBattleState->players[gSCManagerSceneData.ally_players[1]].falls == 0))
+    if ((gSCManagerSceneData.spgame_stage == nSC1PGameStageDonkey)
+#ifdef PORT
+        && (!sc1PManagerIsCoopActive())
+#endif
+        && (gSCManagerBattleState->players[gSCManagerSceneData.ally_players[0]].falls == 0) && (gSCManagerBattleState->players[gSCManagerSceneData.ally_players[1]].falls == 0))
     {
         if ((gSCManagerBattleState->players[gSCManagerSceneData.ally_players[0]].total_damage_all == 0) && (gSCManagerBattleState->players[gSCManagerSceneData.ally_players[1]].total_damage_all == 0))
         {
@@ -2881,6 +3281,13 @@ void sc1PGameInitBonusStats(void)
 
     default:
         gSCManagerSceneData.spgame_score += gSCManagerBattleState->players[gSCManagerSceneData.player].score * 1000;
+#ifdef PORT
+        /* Co-op: the run total counts both players' KO scores. */
+        if (sc1PManagerIsCoopActive())
+        {
+            gSCManagerSceneData.spgame_score += gSCManagerBattleState->players[gSCManagerSceneData.coop_player2].score * 1000;
+        }
+#endif
         sc1PGameAppendBonusStats();
         break;
     }
@@ -2912,6 +3319,9 @@ void sc1PGameStartScene(void)
 
     while (syAudioCheckBGMPlaying(0) != FALSE)
     {
+#ifdef PORT
+        port_coroutine_yield();
+#endif
         continue;
     }
     syAudioSetBGMVolume(0, 0x7800);

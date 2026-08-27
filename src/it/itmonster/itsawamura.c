@@ -2,6 +2,9 @@
 #include <ft/fighter.h>
 #include <gr/ground.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -14,7 +17,11 @@ ITDesc dITSawamuraItemDesc =
 {
     nITKindSawamura,                        // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataSawamuraItemAttributes,  // Offset of item attributes in file?
+#else
     &llITCommonDataSawamuraItemAttributes,  // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -270,7 +277,11 @@ void itSawamuraAttackInitVars(GObj *item_gobj)
 
     if (ip->kind == nITKindSawamura)
     {
+#ifdef PORT
+        Gfx *dl = (Gfx*) itGetPData(ip, llITCommonDataSawamuraDataStart, llITCommonDataSawamuraDisplayList);
+#else
         Gfx *dl = (Gfx*) itGetPData(ip, &llITCommonDataSawamuraDataStart, &llITCommonDataSawamuraDisplayList);
+#endif
 
         dobj->dl = dl;
 
@@ -339,7 +350,11 @@ GObj* itSawamuraMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataSawamuraDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataSawamuraDataStart), 0.0F);
+#endif
 
         func_800269C0_275C0(nSYAudioVoiceMBallSawamuraAppear);
 

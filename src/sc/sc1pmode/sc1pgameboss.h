@@ -28,5 +28,8 @@ extern GObj* sc1PGameBossMakeWallpaperEffect(s32 effect_id, s32 anim_id, s32 pla
 extern void sc1PGameBossAdvanceWallpaper(void);
 extern void sc1PGameBossWallpaperProcUpdate(GObj *gobj);
 extern void sc1PGameBossSetBossPlayer(void);
+#ifdef PORT
+extern void sc1PGameBossInitWallpaper(void);
+#endif
 
 #endif

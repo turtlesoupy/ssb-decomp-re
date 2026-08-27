@@ -2,6 +2,31 @@
 #include <ft/fighter.h>
 #include <sc/scene.h>
 #include <sys/dma.h>
+#ifdef PORT
+#include <mn/mncommon/mncongra.h>
+#include <mn/mncommon/mnmessage.h>
+#include <mn/mn1pmode/mn1pcontinue.h>
+#include <mv/mvending/mvending.h>
+
+/* Console reset (portSCManagerRequestReset in scmanager.c) fired inside a
+ * 1P sub-scene: bail out to scManagerRunLoop instead of chaining the next
+ * sub-scene against half-torn-down battle state (a mid-match reset crashed
+ * in ftManagerSetupFilesAllKind otherwise). The consume re-points
+ * scene_curr at the reset target, which this manager's own scene_curr
+ * writes would otherwise clobber. Checked after every sub-scene call in
+ * sc1PManagerUpdateScene. */
+extern sb32 portSCManagerConsumeReset(void);
+#define SC1P_PORT_RESET_BAIL()               \
+	do                                       \
+	{                                        \
+		if (portSCManagerConsumeReset())     \
+		{                                    \
+			return;                          \
+		}                                    \
+	} while (0)
+#else
+#define SC1P_PORT_RESET_BAIL() do { } while (0)
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -96,6 +121,19 @@ u8 gSC1PManagerKirbyTeamModelPartID;
 //           FUNCTIONS           //
 //                               //
 // // // // // // // // // // // //
+
+#ifdef PORT
+/* Classic Co-op: a co-op run is active when the latched port toggle is on
+ * and the classic-context CSS handed off a second human. Everything the
+ * feature touches keys off this one predicate so that with the toggle off
+ * (or a solo selection) every code path is byte-identical to stock. */
+sb32 sc1PManagerIsCoopActive(void)
+{
+	extern int port_enhancement_classic_coop(void);
+
+	return (port_enhancement_classic_coop() != 0) && (gSCManagerSceneData.coop_player2 != SCCOMMON_COOP_NO_PLAYER2);
+}
+#endif
 
 // 0x800D6490
 s32 sc1PManagerGetFighterKindsNum(u16 mask)
@@ -309,6 +347,55 @@ void sc1PManagerUpdateScene(void)
 
         gSCManagerSceneData.ally_players[i] = player;
     }
+#ifdef PORT
+    if (sc1PManagerIsCoopActive())
+    {
+        /* Classic Co-op: P2 takes the first ally slot. Input routing is by
+         * slot index (fighter descs bind &gSYControllerDevices[slot]), so
+         * ally_players[0] must be re-pointed at P2's real controller port;
+         * every downstream "ally slot" path then treats P2 as the ally.
+         * ally_players[1] becomes the next port that is neither human, so
+         * the Giant DK stage still gets its one CPU ally. */
+        s32 p2_slot = gSCManagerSceneData.coop_player2;
+        s32 free_port;
+
+        gSCManagerSceneData.ally_players[0] = p2_slot;
+
+        for (free_port = 0; free_port < GMCOMMON_PLAYERS_MAX; free_port++)
+        {
+            if ((free_port != gSCManagerSceneData.player) && (free_port != p2_slot))
+            {
+                gSCManagerSceneData.ally_players[1] = free_port;
+                break;
+            }
+        }
+        gSCManager1PGameBattleState.players[p2_slot].handicap = FTCOMMON_HANDICAP_DEFAULT;
+        //gSCManager1PGameBattleState.players[p2_slot].pkind = nFTPlayerKindMan;
+        // Remove the hardcoded nFTPlayerKindMan and replace it with our passed data:
+        gSCManager1PGameBattleState.players[p2_slot].pkind = gSCManagerSceneData.coop_pkind2;
+        // If it's a CPU, apply the difficulty level
+        if (gSCManagerSceneData.coop_pkind2 == nFTPlayerKindCom) {
+            gSCManager1PGameBattleState.players[p2_slot].level = gSCManagerSceneData.coop_level2;
+        }
+
+        gSCManager1PGameBattleState.players[p2_slot].team = 0;
+        gSCManager1PGameBattleState.players[p2_slot].shade = gSCManagerSceneData.coop_shade2;
+
+        // colors for teammate (human or CPU)
+        if (gSCManagerSceneData.coop_pkind2 == nFTPlayerKindCom) {
+            gSCManager1PGameBattleState.players[p2_slot].color = 4; // 4 = Grey CPU color
+            gSCManager1PGameBattleState.players[p2_slot].tag = 4;   // 4 = CP tag
+        } else {
+            gSCManager1PGameBattleState.players[p2_slot].color = p2_slot;
+            gSCManager1PGameBattleState.players[p2_slot].tag = p2_slot;
+        }
+
+        gSCManager1PGameBattleState.players[p2_slot].fkind = gSCManagerSceneData.coop_fkind2;
+        gSCManager1PGameBattleState.players[p2_slot].costume = gSCManagerSceneData.coop_costume2;
+        gSCManager1PGameBattleState.players[p2_slot].stock_count = gSCManagerBackupData.spgame_stock_count;
+        gSCManager1PGameBattleState.players[p2_slot].is_spgame_enemy = FALSE;
+    }
+#endif
     if (gSCManagerSceneData.spgame_stage >= nSC1PGameStageChallengerStart)
     {
         goto skip_main_stages;
@@ -317,7 +404,32 @@ void sc1PManagerUpdateScene(void)
     {
         while (gSCManagerSceneData.spgame_stage <= nSC1PGameStageCommonEnd)
         {
+#ifdef PORT
+            /* Issue #103/#128: sc1pmanager dispatches scenes (sc1PIntro,
+             * sc1PGame, sc1PStageClear, mn1pcontinue, ...) directly via
+             * StartScene calls inside this loop, never returning to
+             * scManagerRunLoop. That bypasses the cross-scene fighter_gobj
+             * scrub at scmanager.c:943-958, so a stale gobj from the prior
+             * round survives into the next round's spawn logic. Repeat the
+             * same scrub here, once per round-iteration. */
+            for (s32 _p = 0; _p < GMCOMMON_PLAYERS_MAX; _p++) {
+                gSCManager1PGameBattleState.players[_p].fighter_gobj = NULL;
+                gSCManagerVSBattleState.players[_p].fighter_gobj = NULL;
+                gSCManagerTransferBattleState.players[_p].fighter_gobj = NULL;
+            }
+#endif
+#ifdef PORT
+            /* a synth fkind >= 32 makes this shift UB (wraps mod 32 on x86 and
+             * wrongly excludes a vanilla ally); a synth is never in the u16 mask */
+            this_mask = (gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER);
+
+            if (gSCManagerSceneData.fkind < GMCOMMON_FIGHTERS_PLAYABLE_NUM)
+            {
+                this_mask &= ~(1 << gSCManagerSceneData.fkind);
+            }
+#else
             this_mask = (gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER) & ~(1 << gSCManagerSceneData.fkind);
+#endif
 
             is_player_lose = FALSE;
 
@@ -326,6 +438,14 @@ void sc1PManagerUpdateScene(void)
             case nSC1PGameStageMario:
                 this_mask &= ~1;
 
+#ifdef PORT
+                /* Co-op: P2 *is* the partner on the Mario Bros. stage —
+                 * don't overwrite their slot with a random CPU ally. */
+                if (sc1PManagerIsCoopActive())
+                {
+                    break;
+                }
+#endif
                 gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[0]].fkind = sc1PManagerGetShuffledFighterKind(this_mask, 0, syUtilsRandIntRange(sc1PManagerGetFighterKindsNum(this_mask)));
 
                 if (gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[0]].fkind == nFTKindLuigi)
@@ -340,6 +460,21 @@ void sc1PManagerUpdateScene(void)
             case nSC1PGameStageDonkey:
                 random = sc1PManagerGetFighterKindsNum(this_mask);
 
+#ifdef PORT
+                /* Co-op: P2 holds ally slot 0; only the second (CPU) ally
+                 * is randomized. The dup-exclusion mask reads slot 0's
+                 * fkind, which is P2's character — exactly what we want. */
+                if (sc1PManagerIsCoopActive())
+                {
+                    this_mask &= ~(1 << gSCManagerSceneData.coop_fkind2);
+                    random = sc1PManagerGetFighterKindsNum(this_mask);
+
+                    gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[1]].fkind = sc1PManagerGetShuffledFighterKind(this_mask, 0, syUtilsRandIntRange(random));
+                    gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[1]].costume = 0;
+                    gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[1]].shade = 0;
+                    break;
+                }
+#endif
                 gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[0]].fkind = sc1PManagerGetShuffledFighterKind(this_mask, 0, syUtilsRandIntRange(random));
                 gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[0]].costume = 0;
                 gSCManager1PGameBattleState.players[gSCManagerSceneData.ally_players[0]].shade = 0;
@@ -364,6 +499,7 @@ void sc1PManagerUpdateScene(void)
             gSCManagerSceneData.scene_curr = nSCKind1PIntro;
 
             sc1PIntroStartScene();
+            SC1P_PORT_RESET_BAIL();
 
             switch (gSCManagerSceneData.spgame_stage)
             {
@@ -376,16 +512,43 @@ void sc1PManagerUpdateScene(void)
                 gSCManagerSceneData.scene_curr = nSCKind1PBonusStage;
 
                 sc1PBonusStageStartScene();
+                SC1P_PORT_RESET_BAIL();
                 break;
 
             default:
                 syDmaLoadOverlay(&dSC1PManagerObjectsOverlay);
                 syDmaLoadOverlay(&dSC1PManager1PGameOverlay);
 
+#ifdef PORT
+                /* sc1PIntro on exit (sc1pintro.c:2035, 2053) clobbers
+                 * scene_curr to nSCKindTitle before returning, so without
+                 * this assignment the fight runs with scene_curr=1. The
+                 * decomp's later code at sc1pmanager.c:489/546/606 writes
+                 * `scene_prev = nSCKind1PGame` as if scene_curr had been
+                 * nSCKind1PGame during the round — making scene_curr match
+                 * that intent. Required for the C-Stick Smash / D-Pad Jump
+                 * gameplay gate in controller.c (issue #97). */
+                gSCManagerSceneData.scene_curr = nSCKind1PGame;
+#endif
                 sc1PGameStartScene();
+                SC1P_PORT_RESET_BAIL();
 
                 if (gSCManagerSceneData.spgame_stage != nSC1PGameStageBonus3)
                 {
+#ifdef PORT
+                    /* Co-op: the run continues while either human still has
+                     * stocks; only both-eliminated (or time out) loses. */
+                    if (sc1PManagerIsCoopActive())
+                    {
+                        if (((gSCManager1PGameBattleState.players[gSCManagerSceneData.player].stock_count == -1) &&
+                             (gSCManager1PGameBattleState.players[gSCManagerSceneData.coop_player2].stock_count == -1)) ||
+                            (gSCManager1PGameBattleState.time_remain == 0))
+                        {
+                            is_player_lose = TRUE;
+                        }
+                    }
+                    else
+#endif
                     if ((gSCManager1PGameBattleState.players[gSCManagerSceneData.player].stock_count == -1) || (gSCManager1PGameBattleState.time_remain == 0))
                     {
                         is_player_lose = TRUE;
@@ -406,13 +569,20 @@ void sc1PManagerUpdateScene(void)
                 syDmaLoadOverlay(&dSC1PManager1PContinueOverlay);
 
                 mnPlayers1PGameContinueStartScene();
+                SC1P_PORT_RESET_BAIL();
 
                 if (gSCManagerSceneData.is_continue != FALSE)
                 {
                     gSCManagerSceneData.continues_used++;
 
                     gSCManager1PGameBattleState.players[gSCManagerSceneData.player].stock_count = gSCManagerBackupData.spgame_stock_count;
-
+#ifdef PORT
+                    /* Co-op: a continue revives both players. */
+                    if (sc1PManagerIsCoopActive())
+                    {
+                        gSCManager1PGameBattleState.players[gSCManagerSceneData.coop_player2].stock_count = gSCManagerBackupData.spgame_stock_count;
+                    }
+#endif
                     gSCManagerSceneData.spgame_stage--;
 
                     if (--sSC1PManagerLevelGuard == 0)
@@ -469,6 +639,7 @@ void sc1PManagerUpdateScene(void)
                 gSCManagerSceneData.scene_curr = nSCKind1PStageClear;
 
                 sc1PStageClearStartScene();
+                SC1P_PORT_RESET_BAIL();
             }
             gSCManagerSceneData.spgame_stage++;
         }
@@ -481,6 +652,7 @@ void sc1PManagerUpdateScene(void)
         gSCManagerSceneData.scene_curr = nSCKindEnding;
 
         mvEndingStartScene();
+        SC1P_PORT_RESET_BAIL();
 
         syDmaLoadOverlay(&dSC1PManagerStaffrollOverlay);
 
@@ -488,6 +660,7 @@ void sc1PManagerUpdateScene(void)
         gSCManagerSceneData.scene_curr = nSCKindStaffroll;
 
         scStaffrollStartScene();
+        SC1P_PORT_RESET_BAIL();
 
 #if defined(REGION_US)
         syDmaLoadOverlay(&dSC1PManagerCongraOverlay);
@@ -496,6 +669,7 @@ void sc1PManagerUpdateScene(void)
         gSCManagerSceneData.scene_curr = nSCKindCongra;
 
         mnCongraStartScene();
+        SC1P_PORT_RESET_BAIL();
 #endif
 
         gSCManagerSceneData.spgame_stage--;
@@ -503,6 +677,18 @@ void sc1PManagerUpdateScene(void)
         sc1PManagerTrySetChallengers();
     }
 skip_main_stages:
+#ifdef PORT
+    /* Issue #103/#128: same per-iteration scrub as in the main-stages while
+     * loop above. The challenger flow (Luigi → Ness → Purin → Captain Falcon)
+     * dispatches sc1PChallenger and sc1PGame directly without returning to
+     * scManagerRunLoop, so without this each challenger battle inherits the
+     * prior battle's stale fighter_gobj pointers. */
+    for (s32 _p = 0; _p < GMCOMMON_PLAYERS_MAX; _p++) {
+        gSCManager1PGameBattleState.players[_p].fighter_gobj = NULL;
+        gSCManagerVSBattleState.players[_p].fighter_gobj = NULL;
+        gSCManagerTransferBattleState.players[_p].fighter_gobj = NULL;
+    }
+#endif
     if (gSCManagerSceneData.spgame_stage >= nSC1PGameStageChallengerStart)
     {
         gSCManagerSceneData.challenger_fkind = dSC1PManagerChallangerFighterKinds[gSCManagerSceneData.spgame_stage - nSC1PGameStageChallengerStart];
@@ -514,13 +700,32 @@ skip_main_stages:
         gSCManagerSceneData.scene_curr = nSCKind1PChallenger;
 
         sc1PChallengerStartScene();
+        SC1P_PORT_RESET_BAIL();
 
         gSCManager1PGameBattleState.players[gSCManagerSceneData.player].stock_count = 0;
+#ifdef PORT
+        /* Co-op: the challenger duel is a single-life fight — P1 is reset to
+         * one stock above. P2 plays it too (2-player challenger duels), so it
+         * needs the identical reset; otherwise P2 keeps the run's full stock
+         * count and, with the single-stock-icon challenger HUD hiding the
+         * number, reads as "never loses a stock / infinite lives". */
+        if (sc1PManagerIsCoopActive())
+        {
+            gSCManager1PGameBattleState.players[gSCManagerSceneData.coop_player2].stock_count = 0;
+        }
+#endif
 
         syDmaLoadOverlay(&dSC1PManagerObjectsOverlay);
         syDmaLoadOverlay(&dSC1PManager1PGameOverlay);
 
+#ifdef PORT
+        /* sc1PChallenger on exit (sc1pchallenger.c:353) sets scene_curr to
+         * nSCKindTitle; restore the 1P-Game scene so the controller-input
+         * gameplay gate fires during challenger battles too. */
+        gSCManagerSceneData.scene_curr = nSCKind1PGame;
+#endif
         sc1PGameStartScene();
+        SC1P_PORT_RESET_BAIL();
 
         if (gSCManagerSceneData.is_reset != FALSE)
         {
@@ -529,7 +734,18 @@ skip_main_stages:
 
             return;
         }
+#ifdef PORT
+        /* Co-op: the duel is won (challenger unlocked) if EITHER human is
+         * still alive. The fight only ends on challenger-KO or both humans
+         * eliminated, so any survivor means the challenger fell — even if P2
+         * landed the KO while P1 was already out. The P1-only solo test below
+         * would mislabel that as a loss. */
+        if (((gSCManager1PGameBattleState.players[gSCManagerSceneData.player].stock_count != -1) ||
+             (sc1PManagerIsCoopActive() && (gSCManager1PGameBattleState.players[gSCManagerSceneData.coop_player2].stock_count != -1))) &&
+            (gSCManager1PGameBattleState.time_remain != 0))
+#else
         if ((gSCManager1PGameBattleState.players[gSCManagerSceneData.player].stock_count != -1) && (gSCManager1PGameBattleState.time_remain != 0))
+#endif
         {
             gSCManagerSceneData.challenger_level_drop = dSCManagerDefaultSceneData.challenger_level_drop;
             gSCManagerSceneData.unlock_messages[0] = dSC1PManagerUnlockNewcomerKinds[gSCManagerSceneData.spgame_stage - nSC1PGameStageChallengerStart];
@@ -541,6 +757,7 @@ skip_main_stages:
             gSCManagerSceneData.scene_curr = nSCKindMessage;
 
             mnMessageStartScene();
+            SC1P_PORT_RESET_BAIL();
         }
         else if (gSCManagerSceneData.challenger_level_drop < 9)
         {
@@ -575,6 +792,7 @@ skip_main_stages:
                 gSCManagerSceneData.scene_curr = nSCKindMessage;
 
                 mnMessageStartScene();
+                SC1P_PORT_RESET_BAIL();
             }
         }
     }

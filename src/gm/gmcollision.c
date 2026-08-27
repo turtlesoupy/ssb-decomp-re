@@ -1,6 +1,11 @@
 #include <ft/fighter.h>
 #include <wp/weapon.h>
 #include <it/item.h>
+#ifdef PORT
+#include <sc/scmanager.h>
+#include <sys/debug.h>
+#include <port_log.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -297,9 +302,28 @@ void func_ovl2_800EDA0C(Mtx44f mtx, Vec3f *rotate)
         dst[i][1] = mtx[i][1] * scale;
         dst[i][2] = mtx[i][2] * scale;
     }
+#ifdef PORT
+    /* Port: the original exact-equality gimbal-lock check (dst[0][2] == ±1.0F)
+     * is fragile under modern toolchain rounding. A matrix that is rotation-wise
+     * "axis-aligned" (typical end of a joint chain like the heavy-item hand for
+     * a grab) builds via clang/x86-64/arm64 float multiplies to dst[0][2] ≈
+     * 0.99999... rather than exactly 1.0, so the gimbal-lock branch never fires
+     * and the general branch's `atan2(dst[0][1], dst[0][0])` reads garbage roll
+     * from quantization noise (~0.003-scale components → ~50° spurious roll).
+     * IDO/MIPS rounding apparently lands on exact 1.0 often enough that the
+     * vanilla code visually works. Threshold 0.9999F == within ~0.8° of ±90°
+     * yaw — narrow gimbal-lock band, doesn't fire for genuine rotations.
+     * See docs/bugs/grab_pose_eulerextract_gimbal_2026-05-23.md. */
+    if ((dst[0][2] <= -0.9999F) || (dst[0][2] >= 0.9999F))
+#else
     if ((dst[0][2] == -1.0F) || (dst[0][2] == 1.0F))
+#endif
     {
+#ifdef PORT
+        if (dst[0][2] <= -0.9999F)
+#else
         if (dst[0][2] == -1.0F)
+#endif
         {
             rotate->y = F_CLC_DTOR32(90.0F);
             rotate->x = syUtilsArcTan2(dst[1][0], dst[1][1]);
@@ -565,7 +589,22 @@ void func_ovl2_800EE050(s32 arg0, Vec3f *arg1, Vec3f *arg2, sb32 *arg3, Mtx44f m
             // JUST BARELY matches; otherwise 1.0F and square are swapped in the c.eq.s instruction operands; if(TRUE) necessary (for now)
             square = SQUARE(dist.x);
 
+#ifdef PORT
+            /* Port: same float-equality fragility as func_ovl2_800EDA0C —
+             * dist.x is built from a normalize step (division by sqrtf) and
+             * its square composes to ~0.99999 rather than exact 1.0 on
+             * modern toolchains. The else branch below divides by
+             * (1.0F - SQUARE(temp)) and (1.0F + dist.x); both denominators
+             * collapse to 0 as dist.x approaches ±1, producing inf/nan in
+             * the collision capsule rotation matrix. Tolerance keeps the
+             * axis-aligned branch firing in the near-singular band before
+             * the else branch's divisors blow up. Same 0.9999 threshold as
+             * other gimbal-lock fixes; see
+             * docs/bugs/grab_pose_eulerextract_gimbal_2026-05-23.md. */
+            if (square >= 0.9999F)
+#else
             if (TRUE && square == 1.0F)
+#endif
             {
                 if (dist.x >= 0.0F)
                 {
@@ -1725,6 +1764,12 @@ sb32 gmCollisionCheckItemAttackFighterDamageCollide(ITAttackColl *attack_coll, s
     FTParts *parts;
     DObj *dobj;
 
+#ifdef PORT
+    port_log("SSB64: gmCollItemFighterDmg damage_coll=%p joint=%p joint_id=%d\n",
+        (void*)damage_coll,
+        damage_coll ? (void*)damage_coll->joint : NULL,
+        damage_coll ? (int)damage_coll->joint_id : -999);
+#endif
     dobj = damage_coll->joint;
     parts = ftGetParts(dobj);
 

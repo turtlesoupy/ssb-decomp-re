@@ -4,6 +4,18 @@
 #ifndef NULL
 #define NULL 0
 #endif
+
+#ifdef PORT
+#include <stddef.h>
+#if defined(_MSC_VER)
+__declspec(noreturn) extern void abort(void);
+#else
+extern void abort(void) __attribute__((noreturn));
+#endif
+extern void *malloc(size_t size);
+extern void free(void *ptr);
+#endif
+
 typedef struct lldiv_t
 {
 	long long quot;

@@ -4,7 +4,11 @@
 
 FTMotionDesc dFTNYoshiSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_1815_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTYoshiAnimEggLayFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
@@ -18,6 +22,10 @@ FTMotionDesc dFTNYoshiSubMotionDescs[] =
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_494_FileID, 0x80000000, 0x00000000
+#else
 	&llFTNYoshiAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTNYoshiSubMotionDescsCount = sizeof(dFTNYoshiSubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

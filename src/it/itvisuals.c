@@ -1,4 +1,7 @@
 #include <it/item.h>
+#ifdef PORT
+#include <ft/ftmain.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //

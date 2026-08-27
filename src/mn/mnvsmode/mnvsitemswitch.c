@@ -6,6 +6,9 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -57,7 +60,11 @@ s32 dMNVSItemSwitchTogglesItemKinds[/* */] =
 };
 
 // 0x80133250
+#ifdef PORT
+u32 dMNVSItemSwitchFileIDs[/* */] = { llMNVSItemSwitchFileID };
+#else
 u32 dMNVSItemSwitchFileIDs[/* */] = { &llMNVSItemSwitchFileID };
+#endif
 
 // 0x80133258
 Lights1 dMNVSItemSwitchLights1 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x3C, 0x3C, 0x3C);
@@ -151,7 +158,11 @@ void mnVSItemSwitchSetToggleSpriteColors(GObj *gobj, s32 status)
 // 0x80131B98
 void mnVSItemSwitchMakeToggle(GObj *gobj, f32 pos_x, f32 pos_y)
 {
+#ifdef PORT
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchToggleOnSprite));
+#else
     SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchToggleOnSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -159,7 +170,11 @@ void mnVSItemSwitchMakeToggle(GObj *gobj, f32 pos_x, f32 pos_y)
     sobj->pos.x = pos_x;
     sobj->pos.y = pos_y;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchToggleOffSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchToggleOffSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -167,7 +182,11 @@ void mnVSItemSwitchMakeToggle(GObj *gobj, f32 pos_x, f32 pos_y)
     sobj->pos.x = pos_x + 21.0F + 5.0F;
     sobj->pos.y = pos_y;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchToggleSlashSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchToggleSlashSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -206,7 +225,11 @@ void mnVSItemSwitchMakeLabels(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 3, GOBJ_PRIORITY_DEFAULT);
 
     gcAddGObjDisplay(gobj, mnVSItemSwitchLabelsProcDisplay, 1, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchLabelVSOptionsSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchLabelVSOptionsSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -222,7 +245,11 @@ void mnVSItemSwitchMakeLabels(void)
     sobj->pos.x = 84.0F;
     sobj->pos.y = 24.0F;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchLabelItemSwitchSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchLabelItemSwitchSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -259,6 +286,24 @@ void mnItemSwitchMakeSubtitle(s32 option_id)
     // 0x80133298
     intptr_t offsets1[/* */] =
     {
+#ifdef PORT
+        llMNVSItemSwitchAppearancePercentTextJapSprite,
+        llMNVSItemSwitchBeamSwordTextJapSprite,
+        llMNVSItemSwitchHomerunBatTextJapSprite,
+        llMNVSItemSwitchHammerTextJapSprite,
+        llMNVSItemSwitchHarisenTextJapSprite,
+        llMNVSItemSwitchMotionSensorBombTextJapSprite,
+        llMNVSItemSwitchBombTrooperTextJapSprite,
+        llMNVSItemSwitchBumperTextJapSprite,
+        llMNVSItemSwitchShellTextJapSprite,
+        llMNVSItemSwitchMonsterBallTextJapSprite,
+        llMNVSItemSwitchLayGunTextJapSprite,
+        llMNVSItemSwitchFireFlowerTextJapSprite,
+        llMNVSItemSwitchStarRodTextJapSprite,
+        llMNVSItemSwitchMaximTomatoTextJapSprite,
+        llMNVSItemSwitchHeartTextJapSprite,
+        llMNVSItemSwitchStarTextJapSprite
+#else
         &llMNVSItemSwitchAppearancePercentTextJapSprite,
         &llMNVSItemSwitchBeamSwordTextJapSprite,
         &llMNVSItemSwitchHomerunBatTextJapSprite,
@@ -275,17 +320,27 @@ void mnItemSwitchMakeSubtitle(s32 option_id)
         &llMNVSItemSwitchMaximTomatoTextJapSprite,
         &llMNVSItemSwitchHeartTextJapSprite,
         &llMNVSItemSwitchStarTextJapSprite
+#endif
     };
 
     // 0x801332D8
     intptr_t offsets2[/* */] =
     {
+#ifdef PORT
+        llMNVSItemSwitchNothingTextJapSprite,
+        llMNVSItemSwitchVeryLowTextJapSprite,
+        llMNVSItemSwitchLowTextJapSprite,
+        llMNVSItemSwitchMiddleTextJapSprite,
+        llMNVSItemSwitchHighTextJapSprite,
+        llMNVSItemSwitchVeryHighTextJapSprite
+#else
         &llMNVSItemSwitchNothingTextJapSprite,
         &llMNVSItemSwitchVeryLowTextJapSprite,
         &llMNVSItemSwitchLowTextJapSprite,
         &llMNVSItemSwitchMiddleTextJapSprite,
         &llMNVSItemSwitchHighTextJapSprite,
         &llMNVSItemSwitchVeryHighTextJapSprite
+#endif
     };
     
 #if defined(REGION_US)
@@ -297,7 +352,11 @@ void mnItemSwitchMakeSubtitle(s32 option_id)
 #if defined(REGION_JP)
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 1, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchFrameSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchFrameSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -354,7 +413,11 @@ void mnVSItemSwitchMakeDecal(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 6, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 4, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchDecalButtonSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchDecalButtonSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -376,7 +439,11 @@ void mnVSItemSwitchMakeItemList(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 3, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 1, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchItemListSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchItemListSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -412,7 +479,11 @@ void mnVSItemSwitchMakeCursor(s32 off_y)
     sMNVSItemSwitchCursorGObj = gobj = gcMakeGObjSPAfter(0, NULL, 5, GOBJ_PRIORITY_DEFAULT);
 
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 3, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], llMNVSItemSwitchCursorSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNVSItemSwitchFiles[0], &llMNVSItemSwitchCursorSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -444,12 +515,21 @@ void mnVSItemSwitchMakeAppearance(s32 rate)
     // 0x80133308
     intptr_t rate_offsets[/* */] =
     {
+#ifdef PORT
+        llMNVSItemSwitchAppearanceNoneSprite,
+        llMNVSItemSwitchAppearanceVeryLowSprite,
+        llMNVSItemSwitchAppearanceLowSprite,
+        llMNVSItemSwitchAppearanceMiddleSprite,
+        llMNVSItemSwitchAppearanceHighSprite,
+        llMNVSItemSwitchAppearanceVeryHighSprite
+#else
         &llMNVSItemSwitchAppearanceNoneSprite,
         &llMNVSItemSwitchAppearanceVeryLowSprite,
         &llMNVSItemSwitchAppearanceLowSprite,
         &llMNVSItemSwitchAppearanceMiddleSprite,
         &llMNVSItemSwitchAppearanceHighSprite,
         &llMNVSItemSwitchAppearanceVeryHighSprite
+#endif
     };
         
     sMNVSItemSwitchOptionGObjs[0] = gobj = gcMakeGObjSPAfter(0, NULL, 3, GOBJ_PRIORITY_DEFAULT);
@@ -853,7 +933,11 @@ void mnVSItemSwitchFuncStart(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
+#ifdef PORT
+    rl_setup.table_files_num = (u32)llRelocFileCount;
+#else
     rl_setup.table_files_num = (u32)&llRelocFileCount;
+#endif
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMNVSItemSwitchStatusBuffer;

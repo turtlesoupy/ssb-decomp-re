@@ -2,6 +2,9 @@
 #include <gr/ground.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ ITDesc dITGLuckyItemDesc =
 {
     nITKindGLucky,                          // Item Kind
     &gGRCommonStruct.yamabuki.item_head,    // Pointer to item file data?
+#ifdef PORT
+    llGRYamabukiMapGLuckyItemAttributes,   // Offset of item attributes in file?
+#else
     &llGRYamabukiMapGLuckyItemAttributes,   // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {

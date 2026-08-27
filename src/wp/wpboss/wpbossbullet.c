@@ -1,6 +1,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ WPDesc dWPBossBulletNormalWeaponDesc =
     0x01,                                          // Render flags?
     nWPKindBulletNormal,                           // Weapon Kind
     &gFTDataBossMainMotion,                        // Pointer to character's loaded files?
+#ifdef PORT
+    llBossMainMotionBulletNormalWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llBossMainMotionBulletNormalWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -37,7 +44,11 @@ WPDesc dWPBossBulletHardWeaponDesc =
     0x01,                                        // Render flags?
     nWPKindBulletHard,                           // Weapon Kind
     &gFTDataBossMainMotion,                      // Pointer to character's loaded files?
+#ifdef PORT
+    llBossMainMotionBulletHardWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llBossMainMotionBulletHardWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

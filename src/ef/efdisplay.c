@@ -99,9 +99,16 @@ void efDisplayInitAll(void)
 
     gEFManagerParticleBankID = efParticleGetLoadBankID
     (
+#ifdef PORT
+        (uintptr_t)&lEFCommonParticleScriptBankLo,
+        (uintptr_t)&lEFCommonParticleScriptBankHi,
+        (uintptr_t)&lEFCommonParticleTextureBankLo,
+        (uintptr_t)&lEFCommonParticleTextureBankHi
+#else
         &lEFCommonParticleScriptBankLo,
         &lEFCommonParticleScriptBankHi,
         &lEFCommonParticleTextureBankLo,
         &lEFCommonParticleTextureBankHi
+#endif
     );
 }

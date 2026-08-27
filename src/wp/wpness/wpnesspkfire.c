@@ -14,7 +14,11 @@ WPDesc dWPNessPKFireWeaponDesc =
     0x00,                                   // Render flags?
     nWPKindPKFire,                          // Weapon Kind
     &gFTNessFileSpecial1,                   // Pointer to character's loaded files?
+#ifdef PORT
+    llNessSpecial1PKFireWeaponAttributes,  // Offset of weapon attributes in loaded files
+#else
     &llNessSpecial1PKFireWeaponAttributes,  // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

@@ -1,6 +1,9 @@
 #include <it/item.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ ITDesc dITMLuckyItemDesc =
 {
     nITKindMLucky,                          // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataMLuckyItemAttributes,    // Offset of item attributes in file?
+#else
     &llITCommonDataMLuckyItemAttributes,    // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -114,7 +121,11 @@ void itMLuckyMakeEggInitVars(GObj *item_gobj)
 
     if (ip->kind == nITKindMLucky)
     {
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj->child, itGetPData(ip, llITCommonDataLuckyDataStart, llITCommonDataLuckyAnimJoint), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj->child, itGetPData(ip, &llITCommonDataLuckyDataStart, &llITCommonDataLuckyAnimJoint), 0.0F);
+#endif
         gcPlayAnimAll(item_gobj);
     }
     ip->damage_coll.hitstatus = nGMHitStatusNormal;
@@ -363,7 +374,11 @@ GObj* itMLuckyMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj->child, itGetMonsterAnimNode(ip, llITCommonDataLuckyDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj->child, itGetMonsterAnimNode(ip, &llITCommonDataLuckyDataStart), 0.0F);
+#endif
     }
     return item_gobj;
 }

@@ -6,8 +6,16 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <it/itmanager.h>
+#include <sys/debug.h>
+#include <wp/wpmanager.h>
 
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+extern void port_log(const char *fmt, ...);
+extern char *getenv(const char *name);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -31,7 +39,7 @@ FTKeyEvent dMVOpeningYoshiKeyEvents[/* */] =
 };
 
 // 0x8018E108
-u32 dMVOpeningYoshiFileIDs[/* */] = { &llIFCommonAnnounceCommonFileID, &llMVOpeningCommonFileID };
+u32 dMVOpeningYoshiFileIDs[/* */] = { llIFCommonAnnounceCommonFileID, llMVOpeningCommonFileID };
 
 // // // // // // // // // // // //
 //                               //
@@ -96,7 +104,7 @@ void mvOpeningYoshiSetupFiles(void)
 	LBRelocSetup rl_setup;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-	rl_setup.table_files_num = (u32)&llRelocFileCount;
+	rl_setup.table_files_num = (u32)llRelocFileCount;
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sMVOpeningYoshiStatusBuffer;
@@ -131,11 +139,11 @@ void mvOpeningYoshiMakeName(void)
 
 	intptr_t offsets[/* */] =
 	{
-		&llIFCommonAnnounceCommonLetterYSprite,
-		&llIFCommonAnnounceCommonLetterOSprite,
-		&llIFCommonAnnounceCommonLetterSSprite,
-		&llIFCommonAnnounceCommonLetterHSprite,
-		&llIFCommonAnnounceCommonLetterISprite,
+		llIFCommonAnnounceCommonLetterYSprite,
+		llIFCommonAnnounceCommonLetterOSprite,
+		llIFCommonAnnounceCommonLetterSSprite,
+		llIFCommonAnnounceCommonLetterHSprite,
+		llIFCommonAnnounceCommonLetterISprite,
 		0x0
 	};
 	f32 pos_x[/* */] =
@@ -417,7 +425,7 @@ void mvOpeningYoshiMakePosedFighterCamera(void)
 	
 	cobj->projection.persp.aspect = 26.25F / 7.0F;
 
-	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningYoshiFiles[1], &llMVOpeningCommonYoshiCamAnimJoint), 0.0F);
+	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningYoshiFiles[1], llMVOpeningCommonYoshiCamAnimJoint), 0.0F);
 	gcAddGObjProcess(camera_gobj, gcPlayCamAnim, nGCProcessKindFunc, 1);
 }
 
@@ -451,6 +459,18 @@ void mvOpeningYoshiMakePosedWallpaperCamera(void)
 void mvOpeningYoshiFuncRun(GObj *gobj)
 {
 	sMVOpeningYoshiTotalTimeTics++;
+
+#ifdef PORT
+	if (getenv("SSB64_TRACE_INTRO_ANIM") && sMVOpeningYoshiFighterGObj != NULL) {
+		FTStruct *fp = ftGetStruct(sMVOpeningYoshiFighterGObj);
+		port_log("SSB64: mvOpeningYoshiRun tic=%d status=0x%x motion=%d hitlag=%u fgobj_anim_frame=%f\n",
+			(int)sMVOpeningYoshiTotalTimeTics,
+			fp ? (unsigned)fp->status_id : 0,
+			fp ? (int)fp->motion_id : -1,
+			fp ? (unsigned)fp->hitlag_tics : 0,
+			sMVOpeningYoshiFighterGObj->anim_frame);
+	}
+#endif
 
 	if (scSubsysControllerGetPlayerTapButtons(A_BUTTON | B_BUTTON | START_BUTTON))
 	{
@@ -518,6 +538,9 @@ void mvOpeningYoshiFuncStart(void)
 
 	while (sySchedulerGetTicCount() < 1875)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 }

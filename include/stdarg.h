@@ -1,12 +1,46 @@
 #ifndef STDARG_H
 #define STDARG_H
+#ifdef PORT
 
+// On MSVC, define va_list etc. using MSVC intrinsics
+#ifdef _MSC_VER
+#include <vadefs.h>
+#ifndef va_start
+#define va_start __crt_va_start
+#define va_arg __crt_va_arg
+#define va_end __crt_va_end
+#define va_copy __crt_va_copy
+#endif
+#else
+#endif
+
+// MSVC fell through the _MSC_VER branch above; <vadefs.h> already
+// defined va_list/start/end/arg/copy via __crt_va_*. Skip both the
+// GCC-builtin branch (no __builtin_va_list on MSVC → C2061) and the
+// IDO `else` branch (would re-`typedef char* va_list` after
+// vadefs.h already typedef'd it).
+#ifndef _MSC_VER
 // When not building with IDO, use the builtin vaarg macros for portability.
 #ifndef __sgi
 #define va_list __builtin_va_list
 #define va_start __builtin_va_start
 #define va_arg __builtin_va_arg
 #define va_end __builtin_va_end
+#ifdef PORT
+
+// glibc's <stdio.h> (and other headers) declare functions in terms of
+// __gnuc_va_list, expecting <stdarg.h> to typedef it. This shadow
+// header pre-empts the system <stdarg.h> via the project's include
+// path ordering, so we must provide __gnuc_va_list ourselves on
+// Linux/glibc — otherwise the first system header that uses it
+// triggers a cascade of "unknown type name '__gnuc_va_list'" errors.
+// Darwin's libc and MSVC's CRT don't reference this typedef.
+#ifndef __GNUC_VA_LIST
+#define __GNUC_VA_LIST
+typedef __builtin_va_list __gnuc_va_list;
+#endif
+
+#endif
 #else
 
 typedef char* va_list;
@@ -35,5 +69,7 @@ typedef char* va_list;
 				  : __va_stack_arg(list, mode))))[-1]
 #define va_end(__list)
 
-#endif
-#endif
+#endif /* __sgi */
+#endif /* !_MSC_VER */
+#endif /* PORT */
+#endif /* STDARG_H */

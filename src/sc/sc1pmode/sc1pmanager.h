@@ -29,6 +29,12 @@ extern u8 gSC1PManagerKirbyTeamFinalCopy;
 // 0x80130D76
 extern u8 gSC1PManagerKirbyTeamModelPartID;
 
+#ifdef PORT
+// Classic Co-op: TRUE while a co-op classic run is active (port toggle
+// latched on AND the CSS handed off a second human in coop_player2).
+extern sb32 sc1PManagerIsCoopActive(void);
+#endif
+
 extern s32 sc1PManagerGetFighterKindsNum(u16 flag);
 extern s32 sc1PManagerGetShuffledFighterKind(u16 this_mask, u16 prev_mask, s32 random);
 extern s32 sc1PManagerGetShuffledKirbyCopy(u16 flags, s32 random);

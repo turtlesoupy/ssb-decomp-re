@@ -1,5 +1,8 @@
 #include <ft/fighter.h>
 #include <it/item.h>
+#ifdef PORT
+#include <if/ifscreenflash.h>
+#endif
 
 extern alSoundEffect* func_800269C0_275C0(u16);
 

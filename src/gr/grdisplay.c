@@ -197,15 +197,27 @@ GObj* grDisplayMakeGeometryLayer(MPGroundDesc *gr_desc, s32 gr_desc_id, DObj **d
     else proc_display = dGRDisplayDescs[gr_desc_id].pri_proc_display;
 
     gcAddGObjDisplay(ground_gobj, proc_display, dGRDisplayDescs[gr_desc_id].dl_link, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    gcSetupCustomDObjs(ground_gobj, (DObjDesc*)PORT_RESOLVE(gr_desc->dobjdesc), dobjs, nGCMatrixKindTraRotRpyRSca, nGCMatrixKindNull, nGCMatrixKindNull);
+#else
     gcSetupCustomDObjs(ground_gobj, gr_desc->dobjdesc, dobjs, nGCMatrixKindTraRotRpyRSca, nGCMatrixKindNull, nGCMatrixKindNull);
+#endif
 
     if (gr_desc->p_mobjsubs != NULL)
     {
+#ifdef PORT
+        gcAddMObjAll(ground_gobj, (MObjSub***)PORT_RESOLVE(gr_desc->p_mobjsubs));
+#else
         gcAddMObjAll(ground_gobj, gr_desc->p_mobjsubs);
+#endif
     }
     if ((gr_desc->anim_joints != NULL) || (gr_desc->p_matanim_joints != NULL))
     {
+#ifdef PORT
+        gcAddAnimAll(ground_gobj, (AObjEvent32**)PORT_RESOLVE(gr_desc->anim_joints), (AObjEvent32***)PORT_RESOLVE(gr_desc->p_matanim_joints), 0.0F);
+#else
         gcAddAnimAll(ground_gobj, gr_desc->anim_joints, gr_desc->p_matanim_joints, 0.0F);
+#endif
         gcAddGObjProcess(ground_gobj, dGRDisplayDescs[gr_desc_id].proc_update, nGCProcessKindFunc, 4);
         gcPlayAnimAll(ground_gobj);
     }
@@ -213,7 +225,11 @@ GObj* grDisplayMakeGeometryLayer(MPGroundDesc *gr_desc, s32 gr_desc_id, DObj **d
     {
         gcAddGObjProcess(ground_gobj, mpCollisionAdvanceUpdateTic, nGCProcessKindFunc, 4);
     }
+#ifdef PORT
+    grDisplayDObjSetNoAnimXObj(ground_gobj, (DObjDesc*)PORT_RESOLVE(gr_desc->dobjdesc));
+#else
     grDisplayDObjSetNoAnimXObj(ground_gobj, gr_desc->dobjdesc);
+#endif
 
     return ground_gobj;
 }

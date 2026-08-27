@@ -1,6 +1,10 @@
 #include <ef/effect.h>
 #include <gm/gmsound.h>
 
+#ifdef PORT
+extern unsigned int portRelocRegisterPointer(void *ptr);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       INITIALIZED DATA        //
@@ -637,6 +641,10 @@ u32 dGMColScriptsFighterFoxSpecialLw[/* */] =
 	gmColCommandGoto(dGMColScriptsFighterFoxSpecialLw)
 };
 
+#ifdef PORT
+extern u32 dGMColScriptsFighterFoxSpecialHiHold[];
+#endif
+
 // 0x8012D3D8
 u32 dGMColScriptsFighterFoxSpecialHiStart[/* */] =
 {
@@ -656,7 +664,12 @@ u32 dGMColScriptsFighterFoxSpecialHiStart[/* */] =
 	gmColCommandWait(1),
 	gmColCommandClearColorAll(),
 	gmColCommandWait(1),
-	gmColCommandLoopEnd()
+	gmColCommandLoopEnd(),
+#ifdef PORT
+	/* port: explicit fall-through that was implicit on N64 (adjacent BSS layout). With
+	   source-compiled globals + ASan redzones the cursor walks off the end. */
+	gmColCommandGoto(dGMColScriptsFighterFoxSpecialHiHold)
+#endif
 };
 
 // 0x8012D42C - part of FoxSpecialHiStart, as that script does not have an End command
@@ -814,10 +827,18 @@ u32 dGMColScriptsFighterPikachuAttackS4[/* */] =
 	gmColCommandGoto(dGMColScriptsFighterPikachuAttackS4)
 };
 
+#ifdef PORT
+extern u32 dGMColScriptsFighterPikachuSpecialHiStartLoop[];
+#endif
+
 // 0x8012D6AC
 u32 dGMColScriptsFighterPikachuSpecialHiStart[/* */] =
 {
-	gmColCommandPlayFGM(nSYAudioFGMPikachuSpecialHiStart)
+	gmColCommandPlayFGM(nSYAudioFGMPikachuSpecialHiStart),
+#ifdef PORT
+	/* port: explicit fall-through that was implicit on N64 (adjacent BSS layout). */
+	gmColCommandGoto(dGMColScriptsFighterPikachuSpecialHiStartLoop)
+#endif
 };
 
 // 0x8012D6B0 - part of PikachuSpecialHiStart, as that script does not have an End command
@@ -1255,3 +1276,108 @@ GMColDesc dGMColScriptsDescs[/* */] =
 	{ dGMColScriptsScreenFlashDamageElectric,  			 60,  TRUE },
 	{ dGMColScriptsScreenFlashDamageIce,  				 60,  TRUE }
 };
+
+#ifdef PORT
+typedef struct GMColScriptLink
+{
+	u32 *script;
+	u32 operand_index;
+	u32 *target;
+} GMColScriptLink;
+
+static GMColScriptLink sGMColScriptLinks[] =
+{
+	{ dGMColScriptsFighterComPlayer, 4, dGMColScriptsFighterComPlayer },
+	{ dGMColScriptsFighterHitStatusIntangible, 8, dGMColScriptsFighterHitStatusIntangible },
+	{ dGMColScriptsFighterHitStatusInvincible, 8, dGMColScriptsFighterHitStatusInvincible },
+	{ dGMColScriptsFighterCommonSpecialNCharge, 15, dGMColScriptsFighterCommonSpecialNCharge },
+	{ dGMColScriptsFighterFallSpecial, 6, dGMColScriptsFighterFallSpecial },
+	{ dGMColScriptsFighterHeal, 15, dGMColScriptsFighterHeal },
+	{ dGMColScriptsFighterNoDamage, 12, dGMColScriptsFighterNoDamage },
+	{ dGMColScriptsFighterRebirth, 11, dGMColScriptsFighterRebirth },
+	{ dGMColScriptsFighterDamageFireWeak, 6, dGMColScriptsFighterDamageFireSub1 },
+	{ dGMColScriptsFighterDamageFireWeak, 14, dGMColScriptsFighterDamageFireSub2 },
+	{ dGMColScriptsFighterDamageFireMid, 6, dGMColScriptsFighterDamageFireSub1 },
+	{ dGMColScriptsFighterDamageFireMid, 14, dGMColScriptsFighterDamageFireSub2 },
+	{ dGMColScriptsFighterDamageFireStrong, 6, dGMColScriptsFighterDamageFireSub1 },
+	{ dGMColScriptsFighterDamageFireStrong, 14, dGMColScriptsFighterDamageFireSub2 },
+	{ dGMColScriptsFighterDamageFireFly, 6, dGMColScriptsFighterDamageFireSub1 },
+	{ dGMColScriptsFighterDamageFireFly, 14, dGMColScriptsFighterDamageFireSub2 },
+	{ dGMColScriptsFighterDamageElectricCommonWeak, 6, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricCommonMid, 6, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricCommonStrong, 6, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricCommonFly, 6, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonWeak, 6, dGMColScriptsFighterDamageElectricSkeletonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonWeak, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonMid, 6, dGMColScriptsFighterDamageElectricSkeletonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonMid, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonStrong, 6, dGMColScriptsFighterDamageElectricSkeletonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonStrong, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonFly, 6, dGMColScriptsFighterDamageElectricSkeletonSub },
+	{ dGMColScriptsFighterDamageElectricSkeletonFly, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonWeak, 6, dGMColScriptsFighterDamageElectricBalloonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonWeak, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonMid, 6, dGMColScriptsFighterDamageElectricBalloonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonMid, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonStrong, 6, dGMColScriptsFighterDamageElectricBalloonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonStrong, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonFly, 6, dGMColScriptsFighterDamageElectricBalloonSub },
+	{ dGMColScriptsFighterDamageElectricBalloonFly, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSamusWeak, 6, dGMColScriptsFighterDamageElectricSamusSub },
+	{ dGMColScriptsFighterDamageElectricSamusWeak, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSamusMid, 6, dGMColScriptsFighterDamageElectricSamusSub },
+	{ dGMColScriptsFighterDamageElectricSamusMid, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSamusStrong, 6, dGMColScriptsFighterDamageElectricSamusSub },
+	{ dGMColScriptsFighterDamageElectricSamusStrong, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterDamageElectricSamusFly, 6, dGMColScriptsFighterDamageElectricSamusSub },
+	{ dGMColScriptsFighterDamageElectricSamusFly, 14, dGMColScriptsFighterDamageElectricCommonSub },
+	{ dGMColScriptsFighterShieldBreakFly, 9, dGMColScriptsFighterShieldBreakFly },
+	{ dGMColScriptsFighterFuraFura, 10, dGMColScriptsFighterFuraFura },
+	{ dGMColScriptsFighterFuraSleep, 11, dGMColScriptsFighterFuraSleep },
+	{ dGMColScriptsFighterMarioAppeal, 13, dGMColScriptsFighterMarioAppeal },
+	{ dGMColScriptsFighterSamusSpecialHi, 12, dGMColScriptsFighterSamusSpecialHi },
+	{ dGMColScriptsFighterFoxSpecialLw, 7, dGMColScriptsFighterFoxSpecialLw },
+	{ dGMColScriptsFighterFoxSpecialHiHold, 9, dGMColScriptsFighterFoxSpecialHiHold },
+	{ dGMColScriptsFighterLinkSpecialHi, 12, dGMColScriptsFighterLinkSpecialHi },
+	{ dGMColScriptsFighterKirbySpecialLwHigh, 9, dGMColScriptsFighterKirbySpecialLwHigh },
+	{ dGMColScriptsFighterKirbySpecialLwMid, 9, dGMColScriptsFighterKirbySpecialLwMid },
+	{ dGMColScriptsFighterKirbySpecialLwLow, 9, dGMColScriptsFighterKirbySpecialLwLow },
+	{ dGMColScriptsFighterPikachuAttackS4, 13, dGMColScriptsFighterPikachuAttackS4 },
+	{ dGMColScriptsFighterPikachuSpecialHiStartLoop, 7, dGMColScriptsFighterPikachuSpecialHiStartLoop },
+#if defined(REGION_US)
+	/* dGMColScriptsFighterPikachuSpecialHi exists only in the US build
+	 * (see its #if REGION_US definition and the matching guard in the
+	 * decomp's own script table above). JP has no such script. */
+	{ dGMColScriptsFighterPikachuSpecialHi, 6, dGMColScriptsFighterPikachuSpecialHi },
+#endif
+	{ dGMColScriptsFighterPikachuSpecialN, 17, dGMColScriptsFighterPikachuSpecialN },
+	{ dGMColScriptsFighterPikachuSpecialLwHit, 21, dGMColScriptsFighterPikachuSpecialLwHit },
+	{ dGMColScriptsFighterPikachuSpecialLwEnd, 9, dGMColScriptsFighterPikachuSpecialLwEnd },
+	{ dGMColScriptsFighterNessSpecialLwHold, 7, dGMColScriptsFighterNessSpecialLwHold },
+	{ dGMColScriptsFighterNessSpecialHiHold, 13, dGMColScriptsFighterNessSpecialHiHold },
+	{ dGMColScriptsFighterNessSpecialHiJibaku, 23, dGMColScriptsFighterNessSpecialHiJibaku },
+	{ dGMColScriptsFighterBossDeskArrange, 4, dGMColScriptsFighterBossDeskArrange },
+	{ dGMColScriptsFighterBossOkuhikouki, 6, dGMColScriptsFighterBossOkuhikouki },
+	{ dGMColScriptsFighterBossOkupunch, 6, dGMColScriptsFighterBossOkupunch },
+	{ dGMColScriptsFighterChallenger, 4, dGMColScriptsFighterChallenger },
+	{ dGMColScriptsFighterHammer, 9, dGMColScriptsFighterHammer },
+	{ dGMColScriptsFighterStar, 35, dGMColScriptsFighterStar },
+	{ dGMColScriptsFighterStarRod, 6, dGMColScriptsFighterStarRod },
+	{ dGMColScriptsFighterBat, 14, dGMColScriptsFighterBat },
+	{ dGMColScriptsItemBombHeiCritical, 11, dGMColScriptsItemBombHeiCritical },
+	{ dGMColScriptsItemHammerEnd, 7, dGMColScriptsItemHammerEnd },
+	{ dGMColScriptsItemLinkBombCritical, 11, dGMColScriptsItemLinkBombCritical },
+};
+
+void gmColScriptsLinkRelocTargets(void)
+{
+	s32 i;
+
+	for (i = 0; i < ARRAY_COUNT(sGMColScriptLinks); i++)
+	{
+		GMColScriptLink *link = &sGMColScriptLinks[i];
+
+		link->script[link->operand_index] = portRelocRegisterPointer(link->target);
+	}
+}
+#endif

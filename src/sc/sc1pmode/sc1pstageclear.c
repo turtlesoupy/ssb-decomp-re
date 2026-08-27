@@ -5,6 +5,15 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <sys/audio.h>
+#ifdef PORT
+#include <bridge/framebuffer_capture.h>
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, unsigned int count);
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+extern void portTextureCacheDeleteRange(const void *base, size_t size);
+#endif
+extern void *func_800269C0_275C0(u16 id);
 
 // // // // // // // // // // // //
 //                               //
@@ -23,394 +32,394 @@ extern void *gSYSchedulerCurrentFramebuffer;
 // 0x80134EE0
 u32 dSC1PStageClearFileIDs[/* */] = 
 {
-	&llSC1PStageClear1FileID,
-	&llSC1PStageClear2FileID,
-	&llIFCommonPlayerDamageFileID,
-	&llIFCommonTimerFileID,
-	&llIFCommonDigitsFileID,
-	&llSC1PStageClear3FileID,
-	&llGRWallpaperTrainingBlackFileID
+	llSC1PStageClear1FileID,
+	llSC1PStageClear2FileID,
+	llIFCommonPlayerDamageFileID,
+	llIFCommonTimerFileID,
+	llIFCommonDigitsFileID,
+	llSC1PStageClear3FileID,
+	llGRWallpaperTrainingBlackFileID
 };
 
 // 0x80134EFC
 SC1PStageClearScore dSC1PStageClearBonusData[/* */] =
 {
 	// Cheap Shot
-	{ &llSC1PStageClear1CheapShotTextSprite, -99 },
+	{ llSC1PStageClear1CheapShotTextSprite, -99 },
 
 	// Star Finish
 #if defined(REGION_US)
-	{ &llSC1PStageClear1StarFinishTextSprite, 10000 },
+	{ llSC1PStageClear1StarFinishTextSprite, 10000 },
 #else
-	{ &llSC1PStageClear1StarFinishTextSprite, 2000 },
+	{ llSC1PStageClear1StarFinishTextSprite, 2000 },
 #endif
 
 	// No Item
 #if defined(REGION_US)
-	{ &llSC1PStageClear1NoItemTextSprite, 1000 },
+	{ llSC1PStageClear1NoItemTextSprite, 1000 },
 #else
-	{ &llSC1PStageClear1NoItemTextSprite, 5000 },
+	{ llSC1PStageClear1NoItemTextSprite, 5000 },
 #endif
 
 	// Shield Breaker
 #if defined(REGION_US)
-	{ &llSC1PStageClear1ShieldBreakerTextSprite, 8000 },
+	{ llSC1PStageClear1ShieldBreakerTextSprite, 8000 },
 #else
-	{ &llSC1PStageClear1ShieldBreakerTextSprite, 5000 },
+	{ llSC1PStageClear1ShieldBreakerTextSprite, 5000 },
 #endif
 
 	// Judo Warrior
 #if defined(REGION_US)
-	{ &llSC1PStageClear1JudoWarriorTextSprite, 5000 },
+	{ llSC1PStageClear1JudoWarriorTextSprite, 5000 },
 #else
-	{ &llSC1PStageClear1JudoWarriorTextSprite, 4000 },
+	{ llSC1PStageClear1JudoWarriorTextSprite, 4000 },
 #endif
 
 	// Hawk
 #if defined(REGION_US)
-	{ &llSC1PStageClear1HawkTextSprite, 18000 },
+	{ llSC1PStageClear1HawkTextSprite, 18000 },
 #else
-	{ &llSC1PStageClear1HawkTextSprite, 10000 },
+	{ llSC1PStageClear1HawkTextSprite, 10000 },
 #endif
 
 	// Shooter
 #if defined(REGION_US)
-	{ &llSC1PStageClear1ShooterTextSprite, 12000 },
+	{ llSC1PStageClear1ShooterTextSprite, 12000 },
 #else
-	{ &llSC1PStageClear1ShooterTextSprite, 5000 },
+	{ llSC1PStageClear1ShooterTextSprite, 5000 },
 #endif
 
 	// Heavy Damage
 #if defined(REGION_US)
-	{ &llSC1PStageClear1HeavyDamageTextSprite, 28000 },
+	{ llSC1PStageClear1HeavyDamageTextSprite, 28000 },
 #else
-	{ &llSC1PStageClear1HeavyDamageTextSprite, 10000 },
+	{ llSC1PStageClear1HeavyDamageTextSprite, 10000 },
 #endif
 
 	// All Variations
 #if defined(REGION_US)
-	{ &llSC1PStageClear1AllVariationsTextSprite, 30000 },
+	{ llSC1PStageClear1AllVariationsTextSprite, 30000 },
 #else
-	{ &llSC1PStageClear1AllVariationsTextSprite, 15000 },
+	{ llSC1PStageClear1AllVariationsTextSprite, 15000 },
 #endif
 
 	// Item Strike
 #if defined(REGION_US)
-	{ &llSC1PStageClear1ItemStrikeTextSprite, 20000 },
+	{ llSC1PStageClear1ItemStrikeTextSprite, 20000 },
 #else
-	{ &llSC1PStageClear1ItemStrikeTextSprite, 10000 },
+	{ llSC1PStageClear1ItemStrikeTextSprite, 10000 },
 #endif
 
 	// Double KO
 #if defined(REGION_US)
-	{ &llSC1PStageClear1DoubleKOTextSprite, 0 },
+	{ llSC1PStageClear1DoubleKOTextSprite, 0 },
 #else
-	{ &llSC1PStageClear1DoubleKOTextSprite, 6000 },
+	{ llSC1PStageClear1DoubleKOTextSprite, 6000 },
 #endif
 
 	// Trickster
 #if defined(REGION_US)
-	{ &llSC1PStageClear1TricksterTextSprite, 11000 },
+	{ llSC1PStageClear1TricksterTextSprite, 11000 },
 #else
-	{ &llSC1PStageClear1TricksterTextSprite, 8000 },
+	{ llSC1PStageClear1TricksterTextSprite, 8000 },
 #endif
 
 	// Giant Impact
 #if defined(REGION_US)
-	{ &llSC1PStageClear1GiantImpactTextSprite, 0 },
+	{ llSC1PStageClear1GiantImpactTextSprite, 0 },
 #else
-	{ &llSC1PStageClear1GiantImpactTextSprite, 7000 },
+	{ llSC1PStageClear1GiantImpactTextSprite, 7000 },
 #endif
 
 	// Speedster
 #if defined(REGION_US)
-	{ &llSC1PStageClear1SpeedsterTextSprite, 10000 },
+	{ llSC1PStageClear1SpeedsterTextSprite, 10000 },
 #else
-	{ &llSC1PStageClear1SpeedsterTextSprite, 8000 },
+	{ llSC1PStageClear1SpeedsterTextSprite, 8000 },
 #endif
 
 	// Item Throw
 #if defined(REGION_US)
-	{ &llSC1PStageClear1ItemThrowTextSprite, 16000 },
+	{ llSC1PStageClear1ItemThrowTextSprite, 16000 },
 #else
-	{ &llSC1PStageClear1ItemThrowTextSprite, 10000 },
+	{ llSC1PStageClear1ItemThrowTextSprite, 10000 },
 #endif
 
 	// Triple KO
 #if defined(REGION_US)
-	{ &llSC1PStageClear1TripleKOTextSprite, 0 },
+	{ llSC1PStageClear1TripleKOTextSprite, 0 },
 #else
-	{ &llSC1PStageClear1TripleKOTextSprite, 15000 },
+	{ llSC1PStageClear1TripleKOTextSprite, 15000 },
 #endif
 
 	// Last Chance
 #if defined(REGION_US)
-	{ &llSC1PStageClear1LastChanceTextSprite, 0 },
+	{ llSC1PStageClear1LastChanceTextSprite, 0 },
 #else
-	{ &llSC1PStageClear1LastChanceTextSprite, 15000 },
+	{ llSC1PStageClear1LastChanceTextSprite, 15000 },
 #endif
 
 	// Pacifist
 #if defined(REGION_US)
-	{ &llSC1PStageClear1PacifistTextSprite, 60000 },
+	{ llSC1PStageClear1PacifistTextSprite, 60000 },
 #else
-	{ &llSC1PStageClear1PacifistTextSprite, 30000 },
+	{ llSC1PStageClear1PacifistTextSprite, 30000 },
 #endif
 
 	// Perfect
 #if defined(REGION_US)
-	{ &llSC1PStageClear1PerfectTextSprite, 30000 },
+	{ llSC1PStageClear1PerfectTextSprite, 30000 },
 #else
-	{ &llSC1PStageClear1PerfectTextSprite, 10000 },
+	{ llSC1PStageClear1PerfectTextSprite, 10000 },
 #endif
 
 	// No Miss
 #if defined(REGION_US)
-	{ &llSC1PStageClear1NoMissTextSprite, 5000 },
+	{ llSC1PStageClear1NoMissTextSprite, 5000 },
 #else
-	{ &llSC1PStageClear1NoMissTextSprite, 1500 },
+	{ llSC1PStageClear1NoMissTextSprite, 1500 },
 #endif
 
 	// No Damage
 #if defined(REGION_US)
-	{ &llSC1PStageClear1NoDamageTextSprite, 15000 },
+	{ llSC1PStageClear1NoDamageTextSprite, 15000 },
 #else
-	{ &llSC1PStageClear1NoDamageTextSprite, 10000 },
+	{ llSC1PStageClear1NoDamageTextSprite, 10000 },
 #endif
 
 	// Full Power
-	{ &llSC1PStageClear1FullPowerTextSprite, 5000 },
+	{ llSC1PStageClear1FullPowerTextSprite, 5000 },
 
 	// Final Stage Clear
 #if defined(REGION_US)
-	{ &llSC1PStageClear1VeryEasyClearTextSprite, 70000 },
+	{ llSC1PStageClear1VeryEasyClearTextSprite, 70000 },
 #else
-	{ &llSC1PStageClear1VeryEasyClearTextSprite, 40000 },
+	{ llSC1PStageClear1VeryEasyClearTextSprite, 40000 },
 #endif
 
 	// No Miss Clear
 #if defined(REGION_US)
-	{ &llSC1PStageClear1NoMissClearTextSprite, 70000 },
+	{ llSC1PStageClear1NoMissClearTextSprite, 70000 },
 #else
-	{ &llSC1PStageClear1NoMissClearTextSprite, 40000 },
+	{ llSC1PStageClear1NoMissClearTextSprite, 40000 },
 #endif
 
 	// No Damage Clear
 #if defined(REGION_US)
-	{ &llSC1PStageClear1NoDamageClearTextSprite, 400000 },
+	{ llSC1PStageClear1NoDamageClearTextSprite, 400000 },
 #else
-	{ &llSC1PStageClear1NoDamageClearTextSprite, 300000 },
+	{ llSC1PStageClear1NoDamageClearTextSprite, 300000 },
 #endif
 
 	// Speed King
 #if defined(REGION_US)
-	{ &llSC1PStageClear1SpeedKingTextSprite, 40000 },
+	{ llSC1PStageClear1SpeedKingTextSprite, 40000 },
 #else
-	{ &llSC1PStageClear1SpeedKingTextSprite, 20000 },
+	{ llSC1PStageClear1SpeedKingTextSprite, 20000 },
 #endif
 
 	// Speed Demon
 #if defined(REGION_US)
-	{ &llSC1PStageClear1SpeedDemonTextSprite, 80000 },
+	{ llSC1PStageClear1SpeedDemonTextSprite, 80000 },
 #else
-	{ &llSC1PStageClear1SpeedDemonTextSprite, 60000 },
+	{ llSC1PStageClear1SpeedDemonTextSprite, 60000 },
 #endif
 
 	// Mew Catcher
 #if defined(REGION_US)
-	{ &llSC1PStageClear1MewCatcherTextSprite, 15000 },
+	{ llSC1PStageClear1MewCatcherTextSprite, 15000 },
 #else
-	{ &llSC1PStageClear1MewCatcherTextSprite, 8000 },
+	{ llSC1PStageClear1MewCatcherTextSprite, 8000 },
 #endif
 
 	// Star Clear
 #if defined(REGION_US)
-	{ &llSC1PStageClear1StarClearTextSprite, 12000 },
+	{ llSC1PStageClear1StarClearTextSprite, 12000 },
 #else
-	{ &llSC1PStageClear1StarClearTextSprite, 8000 },
+	{ llSC1PStageClear1StarClearTextSprite, 8000 },
 #endif
 
 	// Vegetarian
 #if defined(REGION_US)
-	{ &llSC1PStageClear1VegetarianTextSprite, 9000 },
+	{ llSC1PStageClear1VegetarianTextSprite, 9000 },
 #else
-	{ &llSC1PStageClear1VegetarianTextSprite, 5000 },
+	{ llSC1PStageClear1VegetarianTextSprite, 5000 },
 #endif
 
 	// Heart Throb
 #if defined(REGION_US)
-	{ &llSC1PStageClear1HeartThrobTextSprite, 17000 },
+	{ llSC1PStageClear1HeartThrobTextSprite, 17000 },
 #else
-	{ &llSC1PStageClear1HeartThrobTextSprite, 8000 },
+	{ llSC1PStageClear1HeartThrobTextSprite, 8000 },
 #endif
 
 	// Throw Down
-	{ &llSC1PStageClear1ThrowDownTextSprite, 2000 },
+	{ llSC1PStageClear1ThrowDownTextSprite, 2000 },
 
 	// Smash Mania
 #if defined(REGION_US)
-	{ &llSC1PStageClear1SmashManiaTextSprite, 3500 },
+	{ llSC1PStageClear1SmashManiaTextSprite, 3500 },
 #else
-	{ &llSC1PStageClear1SmashManiaTextSprite, 3000 },
+	{ llSC1PStageClear1SmashManiaTextSprite, 3000 },
 #endif
 
 	// Smashless
 #if defined(REGION_US)
-	{ &llSC1PStageClear1SmashlessTextSprite, 5000 },
+	{ llSC1PStageClear1SmashlessTextSprite, 5000 },
 #else
-	{ &llSC1PStageClear1SmashlessTextSprite, 3000 },
+	{ llSC1PStageClear1SmashlessTextSprite, 3000 },
 #endif
 
 	// Special Move
 #if defined(REGION_US)
-	{ &llSC1PStageClear1SpecialMoveTextSprite, 5000 },
+	{ llSC1PStageClear1SpecialMoveTextSprite, 5000 },
 #else
-	{ &llSC1PStageClear1SpecialMoveTextSprite, 5000 },
+	{ llSC1PStageClear1SpecialMoveTextSprite, 5000 },
 #endif
 
 	// Single Move
-	{ &llSC1PStageClear1SingleMoveTextSprite, 8000 },
+	{ llSC1PStageClear1SingleMoveTextSprite, 8000 },
 
 	// Pokemon Finish
 #if defined(REGION_US)
-	{ &llSC1PStageClear1PokemonFinishTextSprite, 11000 },
+	{ llSC1PStageClear1PokemonFinishTextSprite, 11000 },
 #else
-	{ &llSC1PStageClear1PokemonFinishTextSprite, 8000 },
+	{ llSC1PStageClear1PokemonFinishTextSprite, 8000 },
 #endif
 
 	// Booby Trap
 #if defined(REGION_US)
-	{ &llSC1PStageClear1BoobyTrapTextSprite, 12000 },
+	{ llSC1PStageClear1BoobyTrapTextSprite, 12000 },
 #else
-	{ &llSC1PStageClear1BoobyTrapTextSprite, 8000 },
+	{ llSC1PStageClear1BoobyTrapTextSprite, 8000 },
 #endif
 
 	// Fighter Stance
-	{ &llSC1PStageClear1FighterStanceTextSprite, 100 },
+	{ llSC1PStageClear1FighterStanceTextSprite, 100 },
 
 	// Mystic
 #if defined(REGION_US)
-	{ &llSC1PStageClear1MysticTextSprite, 7000 },
+	{ llSC1PStageClear1MysticTextSprite, 7000 },
 #else
-	{ &llSC1PStageClear1MysticTextSprite, 6000 },
+	{ llSC1PStageClear1MysticTextSprite, 6000 },
 #endif
 
 	// Comet Mystic
 #if defined(REGION_US)
-	{ &llSC1PStageClear1CometMysticTextSprite, 10000 },
+	{ llSC1PStageClear1CometMysticTextSprite, 10000 },
 #else
-	{ &llSC1PStageClear1CometMysticTextSprite, 7000 },
+	{ llSC1PStageClear1CometMysticTextSprite, 7000 },
 #endif
 
 	// Acid Clear
 #if defined(REGION_US)
-	{ &llSC1PStageClear1AcidClearTextSprite, 1500 },
+	{ llSC1PStageClear1AcidClearTextSprite, 1500 },
 #else
-	{ &llSC1PStageClear1AcidClearTextSprite, 1000 },
+	{ llSC1PStageClear1AcidClearTextSprite, 1000 },
 #endif
 
 	// Bumper Clear
 #if defined(REGION_US)
-	{ &llSC1PStageClear1BumperClearTextSprite, 10000 },
+	{ llSC1PStageClear1BumperClearTextSprite, 10000 },
 #else
-	{ &llSC1PStageClear1BumperClearTextSprite, 3000 },
+	{ llSC1PStageClear1BumperClearTextSprite, 3000 },
 #endif
 
 	// Tornado Clear
-	{ &llSC1PStageClear1TornadoClearTextSprite, 3000 },
+	{ llSC1PStageClear1TornadoClearTextSprite, 3000 },
 
 	// ARWING Clear
 #if defined(REGION_US)
-	{ &llSC1PStageClear1ArwingClearTextSprite, 4000 },
+	{ llSC1PStageClear1ArwingClearTextSprite, 4000 },
 #else
-	{ &llSC1PStageClear1ArwingClearTextSprite, 3000 },
+	{ llSC1PStageClear1ArwingClearTextSprite, 3000 },
 #endif
 
 	// Counter Attack
 #if defined(REGION_US)
-	{ &llSC1PStageClear1CounterAttackTextSprite, 0 },
+	{ llSC1PStageClear1CounterAttackTextSprite, 0 },
 #else
-	{ &llSC1PStageClear1CounterAttackTextSprite, 5000 },
+	{ llSC1PStageClear1CounterAttackTextSprite, 5000 },
 #endif
 
 	// Meteor Smash
 #if defined(REGION_US)
-	{ &llSC1PStageClear1MeteorSmashTextSprite, 0 },
+	{ llSC1PStageClear1MeteorSmashTextSprite, 0 },
 #else
-	{ &llSC1PStageClear1MeteorSmashTextSprite, 6000 },
+	{ llSC1PStageClear1MeteorSmashTextSprite, 6000 },
 #endif
 
 	// Aerial
 #if defined(REGION_US)
-	{ &llSC1PStageClear1AerialTextSprite, 0 },
+	{ llSC1PStageClear1AerialTextSprite, 0 },
 #else
-	{ &llSC1PStageClear1AerialTextSprite, 20000 },
+	{ llSC1PStageClear1AerialTextSprite, 20000 },
 #endif
 
 	// Last Second
 #if defined(REGION_US)
-	{ &llSC1PStageClear1LastSecondTextSprite, 8000 },
+	{ llSC1PStageClear1LastSecondTextSprite, 8000 },
 #else
-	{ &llSC1PStageClear1LastSecondTextSprite, 10000 },
+	{ llSC1PStageClear1LastSecondTextSprite, 10000 },
 #endif
 
 	// Lucky 3
 #if defined(REGION_US)
-	{ &llSC1PStageClear1Lucky3TextSprite, 9990 },
+	{ llSC1PStageClear1Lucky3TextSprite, 9990 },
 #else
-	{ &llSC1PStageClear1Lucky3TextSprite, 8000 },
+	{ llSC1PStageClear1Lucky3TextSprite, 8000 },
 #endif
 
 	// Jackpot
 #if defined(REGION_US)
-	{ &llSC1PStageClear1JackpotTextSprite, 3330 },
+	{ llSC1PStageClear1JackpotTextSprite, 3330 },
 #else
-	{ &llSC1PStageClear1JackpotTextSprite, 5000 },
+	{ llSC1PStageClear1JackpotTextSprite, 5000 },
 #endif
 
 	// Yoshi Rainbow
 #if defined(REGION_US)
-	{ &llSC1PStageClear1YoshiRainbowTextSprite, 50000 },
+	{ llSC1PStageClear1YoshiRainbowTextSprite, 50000 },
 #else
-	{ &llSC1PStageClear1YoshiRainbowTextSprite, 15000 },
+	{ llSC1PStageClear1YoshiRainbowTextSprite, 15000 },
 #endif
 
 	// Kirby Ranks
 #if defined(REGION_US)
-	{ &llSC1PStageClear1KirbyRanksTextSprite, 25000 },
+	{ llSC1PStageClear1KirbyRanksTextSprite, 25000 },
 #else
-	{ &llSC1PStageClear1KirbyRanksTextSprite, 12000 },
+	{ llSC1PStageClear1KirbyRanksTextSprite, 12000 },
 #endif
 
 	// Bros. Calamity
 #if defined(REGION_US)
-	{ &llSC1PStageClear1BrosCalamityTextSprite, 25000 },
+	{ llSC1PStageClear1BrosCalamityTextSprite, 25000 },
 #else
-	{ &llSC1PStageClear1BrosCalamityTextSprite, 12000 },
+	{ llSC1PStageClear1BrosCalamityTextSprite, 12000 },
 #endif
 
 	// DK Defender
 #if defined(REGION_US)
-	{ &llSC1PStageClear1DKDefenderTextSprite, 10000 },
+	{ llSC1PStageClear1DKDefenderTextSprite, 10000 },
 #else
-	{ &llSC1PStageClear1DKDefenderTextSprite, 7000 },
+	{ llSC1PStageClear1DKDefenderTextSprite, 7000 },
 #endif
 
 	// DK Perfect
-	{ &llSC1PStageClear1DKPerfectTextSprite, 50000 },
+	{ llSC1PStageClear1DKPerfectTextSprite, 50000 },
 
 	// Good Friend
 #if defined(REGION_US)
-	{ &llSC1PStageClear1GoodFriendTextSprite, 8000 },
+	{ llSC1PStageClear1GoodFriendTextSprite, 8000 },
 #else
-	{ &llSC1PStageClear1GoodFriendTextSprite, 5000 },
+	{ llSC1PStageClear1GoodFriendTextSprite, 5000 },
 #endif
 
 	// True Friend
 #if defined(REGION_US)
-	{ &llSC1PStageClear1TrueFriendTextSprite, 25000 }
+	{ llSC1PStageClear1TrueFriendTextSprite, 25000 }
 #else
-	{ &llSC1PStageClear1TrueFriendTextSprite, 30000 },
+	{ llSC1PStageClear1TrueFriendTextSprite, 30000 },
 #endif
 };
 
@@ -670,16 +679,16 @@ Sprite* sc1PStageClearGetScoreDigitSprite(s32 digit_kind, s32 digit)
 	// 0x80135120
 	intptr_t offsets[/* */][3] =
 	{
-		{ &llSC1PStageClear1TimerDamageDigit0Sprite, &llIFCommonDigits0Sprite, &llIFCommonPlayerDamageDigit0Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit1Sprite, &llIFCommonDigits1Sprite, &llIFCommonPlayerDamageDigit1Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit2Sprite, &llIFCommonDigits2Sprite, &llIFCommonPlayerDamageDigit2Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit3Sprite, &llIFCommonDigits3Sprite, &llIFCommonPlayerDamageDigit3Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit4Sprite, &llIFCommonDigits4Sprite, &llIFCommonPlayerDamageDigit4Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit5Sprite, &llIFCommonDigits5Sprite, &llIFCommonPlayerDamageDigit5Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit6Sprite, &llIFCommonDigits6Sprite, &llIFCommonPlayerDamageDigit6Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit7Sprite, &llIFCommonDigits7Sprite, &llIFCommonPlayerDamageDigit7Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit8Sprite, &llIFCommonDigits8Sprite, &llIFCommonPlayerDamageDigit8Sprite },
-		{ &llSC1PStageClear1TimerDamageDigit9Sprite, &llIFCommonDigits9Sprite, &llIFCommonPlayerDamageDigit9Sprite }
+		{ llSC1PStageClear1TimerDamageDigit0Sprite, llIFCommonDigits0Sprite, llIFCommonPlayerDamageDigit0Sprite },
+		{ llSC1PStageClear1TimerDamageDigit1Sprite, llIFCommonDigits1Sprite, llIFCommonPlayerDamageDigit1Sprite },
+		{ llSC1PStageClear1TimerDamageDigit2Sprite, llIFCommonDigits2Sprite, llIFCommonPlayerDamageDigit2Sprite },
+		{ llSC1PStageClear1TimerDamageDigit3Sprite, llIFCommonDigits3Sprite, llIFCommonPlayerDamageDigit3Sprite },
+		{ llSC1PStageClear1TimerDamageDigit4Sprite, llIFCommonDigits4Sprite, llIFCommonPlayerDamageDigit4Sprite },
+		{ llSC1PStageClear1TimerDamageDigit5Sprite, llIFCommonDigits5Sprite, llIFCommonPlayerDamageDigit5Sprite },
+		{ llSC1PStageClear1TimerDamageDigit6Sprite, llIFCommonDigits6Sprite, llIFCommonPlayerDamageDigit6Sprite },
+		{ llSC1PStageClear1TimerDamageDigit7Sprite, llIFCommonDigits7Sprite, llIFCommonPlayerDamageDigit7Sprite },
+		{ llSC1PStageClear1TimerDamageDigit8Sprite, llIFCommonDigits8Sprite, llIFCommonPlayerDamageDigit8Sprite },
+		{ llSC1PStageClear1TimerDamageDigit9Sprite, llIFCommonDigits9Sprite, llIFCommonPlayerDamageDigit9Sprite }
 	};
 
 	return lbRelocGetFileData
@@ -751,7 +760,7 @@ void sc1PStageClearMakeScoreDigits
 	{
 		if (digit_kind == 1)
 		{
-			sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[4], &llIFCommonDigitsDashSprite));
+			sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[4], llIFCommonDigitsDashSprite));
 		}
 		sc1PStageClearSetDigitSpriteColors(sobj, digit_kind, colors);
 
@@ -779,7 +788,7 @@ void sc1PStageClearMakeTextSObjs(void)
 	gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1TextShadowSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1TextShadowSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -793,7 +802,7 @@ void sc1PStageClearMakeTextSObjs(void)
 
 	if (sSC1PStageClearKind == nSC1PStageClearKindResult)
 	{
-		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1ResultTextSprite));
+		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1ResultTextSprite));
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 		sobj->sprite.attr |= SP_TRANSPARENT;
 
@@ -810,7 +819,7 @@ void sc1PStageClearMakeTextSObjs(void)
 	}
 	else
 	{
-		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1ClearTextSprite));
+		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1ClearTextSprite));
 
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 		sobj->sprite.attr |= SP_TRANSPARENT;
@@ -828,9 +837,9 @@ void sc1PStageClearMakeTextSObjs(void)
 
 		if (sSC1PStageClearKind == nSC1PStageClearKindStage)
 		{
-			sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1StageTextSprite));
+			sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1StageTextSprite));
 		}
-		else sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1GameTextSprite));
+		else sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1GameTextSprite));
 
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 		sobj->sprite.attr |= SP_TRANSPARENT;
@@ -849,7 +858,7 @@ void sc1PStageClearMakeTextSObjs(void)
 	sSC1PStageClearBonusTextGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1BonusTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1BonusTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -871,7 +880,7 @@ void sc1PStageClearMakeScoreSObjs(void)
 	sSC1PStageClearScoreTextGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[1], &llSC1PStageClear2ScoreTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[1], llSC1PStageClear2ScoreTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -899,7 +908,7 @@ void sc1PStageClearMakeTimerTextSObjs(f32 y)
 	sSC1PStageClearTimerTextGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1TimerTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1TimerTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -915,7 +924,7 @@ void sc1PStageClearMakeTimerTextSObjs(f32 y)
 	sobj->sprite.green = 0xE4;
 	sobj->sprite.blue = 0xFF;
 
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1ColonTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1ColonTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -946,7 +955,7 @@ void sc1PStageClearMakeTimerDigits(f32 y)
 	sSC1PStageClearTimerMultiplierGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[3], &llIFCommonTimerSymbolCrossSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[3], llIFCommonTimerSymbolCrossSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1036,7 +1045,7 @@ void sc1PStageClearMakeDamageTextSObjs(f32 y)
 	sSC1PStageClearDamageTextGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
 
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1DamageTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1DamageTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1052,7 +1061,7 @@ void sc1PStageClearMakeDamageTextSObjs(f32 y)
 	sobj->sprite.green = 0xE4;
 	sobj->sprite.blue = 0xFF;
 
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1ColonTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1ColonTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1086,7 +1095,7 @@ void sc1PStageClearMakeDamageDigits(f32 y)
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
 
 	sc1PStageClearMakeScoreDigits(gobj, sSC1PStageClearDamageDealt, x, (s32)y - 1, NULL, 1, 0, 0, 4, FALSE);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[3], &llIFCommonTimerSymbolCrossSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[3], llIFCommonTimerSymbolCrossSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1133,7 +1142,7 @@ void sc1PStageClearMakeTargetTextSObjs(void)
 	sSC1PStageClearTargetGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1TargetTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1TargetTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1149,7 +1158,7 @@ void sc1PStageClearMakeTargetTextSObjs(void)
 	sobj->sprite.green = 0xE4;
 	sobj->sprite.blue = 0xFF;
 
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1ColonTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1ColonTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1198,11 +1207,11 @@ void func_ovl56_80132E40(f32 x, f32 y, s32 objective_num)
 	switch (sSC1PStageClear1PGameStage)
 	{
 	case nSC1PGameStageBonus1:
-		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[5], &llSC1PStageClear3TargetSprite));
+		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[5], llSC1PStageClear3TargetSprite));
 		break;
 
 	case nSC1PGameStageBonus2:
-		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[5], &llSC1PStageClear3PlatformSprite));
+		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[5], llSC1PStageClear3PlatformSprite));
 		break;
 	}
 	sobj->sprite.attr &= ~SP_FASTCOPY;
@@ -1270,7 +1279,11 @@ sb32 sc1PStageClearCheckHaveBonusStats(void)
 		{
 			return TRUE;
 		}
+#ifdef PORT
+		if (i == ARRAY_COUNT(dSC1PStageClearBonusData))
+#else
 		if (i == NBITS(sSC1PStageClearBonusFlags))
+#endif
 		{
 			return FALSE;
 		}
@@ -1323,16 +1336,22 @@ s32 sc1PStageClearGetAppendBonusStatPoints(s32 bonus_id, s32 bonus_num, f32 x, f
 	// 0x801351D0
 	intptr_t offsets[/* */] =
 	{
-		&llSC1PStageClear1VeryEasyClearTextSprite,
-		&llSC1PStageClear1EasyClearTextSprite,
-		&llSC1PStageClear1NormalClearTextSprite,
-		&llSC1PStageClear1HardClearTextSprite,
-		&llSC1PStageClear1VeryHardClearTextSprite
+		llSC1PStageClear1VeryEasyClearTextSprite,
+		llSC1PStageClear1EasyClearTextSprite,
+		llSC1PStageClear1NormalClearTextSprite,
+		llSC1PStageClear1HardClearTextSprite,
+		llSC1PStageClear1VeryHardClearTextSprite
 	};
 
 	// 0x801351E4
 	SYColorRGBPair colors = { { 0x00, 0x00, 0x00 }, { 0xFF, 0xFF, 0x00 } };
 
+#ifdef PORT
+	if (bonus_id >= ARRAY_COUNT(dSC1PStageClearBonusData))
+	{
+		return 0;
+	}
+#endif
 	sSC1PStageClearBonusStatGObjs[bonus_num] = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
@@ -1366,7 +1385,7 @@ s32 sc1PStageClearGetAppendBonusStatPoints(s32 bonus_id, s32 bonus_num, f32 x, f
 	}
 	if (bonus_id == nSC1PGameBonusNoMiss)
 	{
-		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[4], &llIFCommonDigitsCrossSprite));
+		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[4], llIFCommonDigitsCrossSprite));
 
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 		sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1380,7 +1399,7 @@ s32 sc1PStageClearGetAppendBonusStatPoints(s32 bonus_id, s32 bonus_num, f32 x, f
 
 		sc1PStageClearMakeScoreDigits(gobj, sc1PStageClearGetNoMissMultiplier(sSC1PStageClear1PGameStage), (x + 40.0F) + 26.0F, y - 1.0F, &colors, 0, 1, 0, 2, FALSE);
 	}
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[4], &llIFCommonDigitsColonSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[4], llIFCommonDigitsColonSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1423,7 +1442,7 @@ void sc1PStageClearMakeBonusPageArrow(void)
 
 	gobj->user_data.u = sSC1PStageClearTotalTimeTics + 90;
 
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1BonusPageArrowSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1BonusPageArrowSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1437,7 +1456,11 @@ sb32 sc1PStageClearCheckHaveBonusStatID(s32 bonus_id)
 {
 	SC1PStageClearStats bonus;
 
+#ifdef PORT
+	while (bonus_id < ARRAY_COUNT(dSC1PStageClearBonusData))
+#else
 	while (bonus_id < NBITS(sSC1PStageClearBonusFlags))
+#endif
 	{
 		sc1PStageClearSetupBonusStats(&bonus, bonus_id);
 
@@ -1470,7 +1493,11 @@ s32 sc1PStageClearGetUpdateBonusStatPointsAll(void)
 
 	while (TRUE)
 	{
+#ifdef PORT
+		if (sSC1PStageClearBonusID >= ARRAY_COUNT(dSC1PStageClearBonusData))
+#else
 		if (sSC1PStageClearBonusID == NBITS(sSC1PStageClearBonusFlags))
+#endif
 		{
 			sSC1PStageClearIsAdvance = TRUE;
 			return points;
@@ -1505,7 +1532,7 @@ void sc1PStageClearMakeBonusTable(void)
 	gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
 	gcAddGObjDisplay(gobj, sc1PStageClearTextProcDisplay, 26, GOBJ_PRIORITY_DEFAULT, ~0);
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1BonusBorderSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1BonusBorderSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1521,7 +1548,7 @@ void sc1PStageClearMakeBonusTable(void)
 	sobj->pos.x = 52.0F;
 	sobj->pos.y = 62.0F;
 
-	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], &llSC1PStageClear1SpecialBonusTextSprite));
+	sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[0], llSC1PStageClear1SpecialBonusTextSprite));
 
 	sobj->sprite.attr &= ~SP_FASTCOPY;
 	sobj->sprite.attr |= SP_TRANSPARENT;
@@ -1569,7 +1596,7 @@ void sc1PStageClearMakeWallpaper(void)
 		(
 			Sprite*,
 			sSC1PStageClearFiles[6],
-			&llGRWallpaperTrainingBlackSprite
+			llGRWallpaperTrainingBlackSprite
 		)
 	);
 	sobj->sprite.attr &= ~SP_FASTCOPY;
@@ -1650,6 +1677,12 @@ void sc1PStageClearInitVars(void)
 	case nSC1PGameStageBonus3:
 		sSC1PStageClearKind = nSC1PStageClearKindResult;
 		sSC1PStageClearBonusObjectivesCleared = gSCManagerSceneData.bonus_tasks_complete;
+#ifdef PORT
+		if (sSC1PStageClearBonusObjectivesCleared > ARRAY_COUNT(sSC1PStageClearBonusObjectiveGObjs))
+		{
+			sSC1PStageClearBonusObjectivesCleared = ARRAY_COUNT(sSC1PStageClearBonusObjectiveGObjs);
+		}
+#endif
 		break;
 
 	case nSC1PGameStageBoss:
@@ -1664,6 +1697,14 @@ void sc1PStageClearInitVars(void)
 	sSC1PStageClearBonusFlags[1] = gSCManagerSceneData.bonus_get_mask[1];
 	sSC1PStageClearBonusFlags[2] = gSCManagerSceneData.bonus_get_mask[2];
 
+#ifdef PORT
+	if ((sSC1PStageClear1PGameStage == nSC1PGameStageBonus1) || (sSC1PStageClear1PGameStage == nSC1PGameStageBonus2))
+	{
+		sSC1PStageClearBonusFlags[0] = (sSC1PStageClearBonusObjectivesCleared == SCBATTLE_BONUSGAME_TASK_MAX) ? SC1PGAME_BONUS_MASK0_PERFECT : 0;
+		sSC1PStageClearBonusFlags[1] = 0;
+		sSC1PStageClearBonusFlags[2] = 0;
+	}
+#endif
 	sSC1PStageClearIsHaveBonusStats = sc1PStageClearCheckHaveBonusStats();
 
 	sSC1PStageClearBonusID = 0;
@@ -1680,10 +1721,34 @@ void sc1PStageClearInitVars(void)
 	sSC1PStageClearTimerTextGObj = NULL;
 	sSC1PStageClearTimerMultiplierGObj = NULL;
 	sSC1PStageClearTargetGObj = NULL;
+#ifdef PORT
+	sSC1PStageClearScoreTextGObj = NULL;
+	sSC1PStageClearDamageTextGObj = NULL;
+	sSC1PStageClearDamageMultiplierGObj = NULL;
+	sSC1PStageClearBonusTextGObj = NULL;
+#endif
 
 	sSC1PStageClearIsSetCommonAdvanceTic = 0;
 	sSC1PStageClearIsAdvance = FALSE;
 	sSC1PStageClearIsAllowProceedNext = 0;
+#ifdef PORT
+	/* On N64, dSC1PManager1PStageClearOverlay's BSS is re-zeroed every time
+	 * `syDmaLoadOverlay(...)` re-DMAs the overlay before a new stage-clear
+	 * scene. The PC port has overlays statically linked, so these tic-target
+	 * globals retain values from the previous result screen — e.g. after a
+	 * regular stage clear leaves CommonAdvanceTic=130/BonusShowNext=170/
+	 * BonusAdv=190, the next BTT result screen's TotalTimeTics=130 would
+	 * coincidentally match CommonAdvanceTic and prematurely fire the
+	 * bonus-stats transition on the same frame as MakeTimerTextSObjs,
+	 * ejecting the timer GObj instantly and desynchronizing the auto-
+	 * advance state machine (no timer animation; screen "won't advance on
+	 * its own"). Reset them here so each scene starts with a clean state
+	 * machine. */
+	sSC1PStageClearCommonAdvanceTic = 0;
+	sSC1PStageClearBonusShowNextTic = 0;
+	sSC1PStageClearBonusAdvanceTic = 0;
+	sSC1PStageClearBonusNum = 0;
+#endif
 
 	if ((sSC1PStageClearKind == nSC1PStageClearKindStage) || (sSC1PStageClearKind == nSC1PStageClearKindGame))
 	{
@@ -2123,6 +2188,76 @@ void sc1PStageClearCopyFramebufToWallpaper(void)
 	u32 *row_pixels;
 	u32 *wallpaper_pixels;
 
+#ifdef PORT
+	/* GPU framebuffer passthrough (issue #57).
+	 *
+	 * On real hardware the RDP renders into RDRAM so the CPU can memcpy
+	 * the framebuffer pixels straight into the wallpaper bitmap. Under
+	 * libultraship the RDP is replaced by a GPU rasterizer and
+	 * gSYSchedulerCurrentFramebuffer stays zero, so the original copy
+	 * loop produced an all-black wallpaper.
+	 *
+	 * Replacement: register every stripe-bitmap's pixel buffer as a
+	 * mirror of an internal snapshot FB. The wallpaper sprite is split
+	 * into ~37 row-stripes (one Bitmap struct per stripe); the sprite
+	 * renderer issues one gsDPSetTextureImage(bitmap[i].buf) per
+	 * stripe, so we have to register every stripe address that the
+	 * GBI will reference. Fast3D then samples the snapshot directly
+	 * via SelectTextureFb -- no CPU readback, no byte-swap, no
+	 * texture-cache eviction, full GPU resolution. The registrations
+	 * are dropped on the next scene change via lbRelocInitSetup ->
+	 * port_capture_release_all (see port/bridge/lbreloc_bridge.cpp). */
+	{
+		Sprite *wp_sprite = lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[6], llGRWallpaperTrainingBlackSprite);
+		Bitmap *wp_bitmap;
+		s32 nbitmaps;
+		s32 i;
+		s32 bytes_per_row;
+
+		/* Normalise the sprite/bitmap structs so each bitmap[i].buf is
+		 * a resolved native pointer Fast3D will see in its GBI
+		 * processing. All idempotent. */
+		portFixupSprite(wp_sprite);
+		wp_bitmap = (Bitmap*)PORT_RESOLVE(wp_sprite->bitmap);
+		nbitmaps = wp_sprite->nbitmaps;
+		portFixupBitmapArray(wp_bitmap, (unsigned int)nbitmaps);
+		portFixupSpriteBitmapData(wp_sprite, wp_bitmap);
+
+		/* Each bitmap[i] is one row-stripe of the wallpaper. Stripes stack
+		 * top-to-bottom into the photo region (rows 10..229, cols 10..309
+		 * of the N64 320x240 framebuffer) -- the same region the original
+		 * decomp memcpy loop pulled from gSYSchedulerCurrentFramebuffer.
+		 * For each stripe we register its CPU buf range AND the
+		 * corresponding sub-rect of the snapshot FB so its local UV (0..1)
+		 * samples just its slice. RGBA5551 = 2 bytes/px; width_img is the
+		 * stripe's natural row width (the LoadBlock line stride). */
+		const float fb_w_n64 = 320.0f;
+		const float fb_h_n64 = 240.0f;
+		const float photo_x0 = 10.0f;
+		const float photo_y0 = 10.0f;
+		s32 cur_y = 0; /* cumulative N64 rows consumed across stripes so far */
+		for (i = 0; i < nbitmaps; i++) {
+			void *buf = PORT_RESOLVE(wp_bitmap[i].buf);
+			s32 width_img = wp_bitmap[i].width_img;
+			s32 actualHeight = wp_bitmap[i].actualHeight;
+			if (buf == NULL || width_img <= 0 || actualHeight <= 0) {
+				continue;
+			}
+			bytes_per_row = width_img * 2;
+
+			float u0 = photo_x0 / fb_w_n64;
+			float u1 = (photo_x0 + (float)width_img) / fb_w_n64;
+			float v0 = (photo_y0 + (float)cur_y) / fb_h_n64;
+			float v1 = (photo_y0 + (float)(cur_y + actualHeight)) / fb_h_n64;
+
+			(void)port_capture_register_fb_for_subrect(
+				buf, (unsigned int)(bytes_per_row * actualHeight),
+				u0, v0, u1, v1);
+
+			cur_y += actualHeight;
+		}
+	}
+#else
 	// gSYSchedulerCurrentFramebuffer = framebuf0; start farther in, skipping border
 	framebuffer_pixels = (u32*)
 	(
@@ -2130,7 +2265,7 @@ void sc1PStageClearCopyFramebufToWallpaper(void)
 		SYVIDEO_BORDER_SIZE(320, 10, u16) +
 		SYVIDEO_BORDER_SIZE(1, 10, u16)
 	);
-	wallpaper_pixels = (u32*) lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[6], &llGRWallpaperTrainingBlackSprite)->bitmap->buf;
+	wallpaper_pixels = (u32*) lbRelocGetFileData(Sprite*, sSC1PStageClearFiles[6], llGRWallpaperTrainingBlackSprite)->bitmap->buf;
 
 	for (i = 0; i < 220; i++)
 	{
@@ -2159,6 +2294,7 @@ void sc1PStageClearCopyFramebufToWallpaper(void)
 			wallpaper_pixels += 2;
 		}
 	}
+#endif
 }
 
 // 0x80134CC4
@@ -2168,7 +2304,7 @@ void sc1PStageClearFuncStart(void)
 	LBRelocSetup rl_setup;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-	rl_setup.table_files_num = (u32)&llRelocFileCount;
+	rl_setup.table_files_num = (u32)llRelocFileCount;
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sSC1PStageClearStatusBuffer;

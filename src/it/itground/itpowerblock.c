@@ -1,6 +1,9 @@
 #include <it/item.h>
 #include <gr/ground.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -12,7 +15,11 @@ ITDesc dITPowerBlockItemDesc =
 {
     nITKindPowerBlock,                      // Item Kind
     &gGRCommonStruct.inishie.item_head,     // Pointer to item file data?
+#ifdef PORT
+    llGRInishieMapPowerBlockItemAttributes,// Offset of item attributes in file?
+#else
     &llGRInishieMapPowerBlockItemAttributes,// Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -105,7 +112,11 @@ sb32 itPowerBlockWaitProcDamage(GObj *item_gobj)
     ip->proc_update = itPowerBlockNDamageProcUpdate;
     ip->damage_coll.hitstatus = nGMHitStatusNone;
 
+#ifdef PORT
+    gcAddDObjAnimJoint(DObjGetStruct(item_gobj), itGetPData(ip, llGRInishieMapPowerBlockDataStart, llGRInishieMapPowerBlockAnimJoint), 0.0F);
+#else
     gcAddDObjAnimJoint(DObjGetStruct(item_gobj), itGetPData(ip, &llGRInishieMapPowerBlockDataStart, &llGRInishieMapPowerBlockAnimJoint), 0.0F);
+#endif
     gcPlayAnimAll(item_gobj);
     func_800269C0_275C0(nSYAudioFGMInishiePowerBlock);
     efManagerQuakeMakeEffect(3);

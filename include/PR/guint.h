@@ -13,16 +13,39 @@
 #include <PR/mbi.h>
 #include <PR/gu.h>
 
+/* The du constant tables in sinf.c/cosf.c assemble doubles from {hi, lo}
+ * 32-bit word pairs laid out in the N64's big-endian order. On little-endian
+ * hosts (every PC/mobile port target) both the member order and the
+ * positional initializers must flip so .d reassembles the same double —
+ * initializers fill ascending addresses no matter what the members are
+ * named, so the swap has to happen in the initializer too (DU_INIT below).
+ * IDO and any other big-endian build keeps the original order via the
+ * #else branches and preprocesses to the original source, byte-identical. */
+#if defined(_MSC_VER) || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+#define DU_LITTLE_ENDIAN 1
+#endif
+
 typedef union
 {
 	struct
 	{
+#ifdef DU_LITTLE_ENDIAN
+		unsigned int lo;
+		unsigned int hi;
+#else
 		unsigned int hi;
 		unsigned int lo;
+#endif
 	} word;
 
 	double d;
 } du;
+
+#ifdef DU_LITTLE_ENDIAN
+#define DU_INIT(hi_, lo_) { lo_, hi_ }
+#else
+#define DU_INIT(hi_, lo_) { hi_, lo_ }
+#endif
 
 typedef union
 {

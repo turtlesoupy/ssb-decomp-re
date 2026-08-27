@@ -5,6 +5,10 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#ifdef PORT
+#include <sys/audio.h>
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 extern ub8 gSYMainDmemOK;
 
@@ -36,7 +40,11 @@ mnCommonSetOptionChangeWaitN(sMN1PModeOptionChangeWait, is_button, stick_range, 
 // // // // // // // // // // // //
 
 // 0x80133080
+#ifdef PORT
+u32 dMN1PModeFileIDs[/* */] = { llMNCommonFileID, llMN1PFileID };
+#else
 u32 dMN1PModeFileIDs[/* */] = { &llMNCommonFileID, &llMN1PFileID };
+#endif
 
 // 0x80133088
 Lights1 dMN1PModeLights1 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x3C, 0x3C, 0x3C);
@@ -158,7 +166,11 @@ void mn1PModeSetOptionSpriteColors(GObj *gobj, s32 status, s32 option_id)
 // 0x80131D04
 void mn1PModeMakeOptionTab(GObj *gobj, f32 pos_x, f32 pos_y, s32 lrs)
 {
+#ifdef PORT
+    SObj  *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonOptionTabLeftSprite));
+#else
     SObj  *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonOptionTabLeftSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -166,7 +178,11 @@ void mn1PModeMakeOptionTab(GObj *gobj, f32 pos_x, f32 pos_y, s32 lrs)
     sobj->pos.x = pos_x;
     sobj->pos.y = pos_y;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonOptionTabMiddleSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonOptionTabMiddleSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -183,7 +199,11 @@ void mn1PModeMakeOptionTab(GObj *gobj, f32 pos_x, f32 pos_y, s32 lrs)
     sobj->lrs = lrs * 8;
     sobj->lrt = 29;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonOptionTabRightSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonOptionTabRightSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -204,7 +224,11 @@ void mn1PModeMake1PGame(void)
     mn1PModeMakeOptionTab(gobj, 124.0F, 42.0F, 16);
     mn1PModeSetOptionSpriteColors(gobj, sMN1PModeOption == nMN1PModeOption1PGame, nMN1PModeOption1PGame);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1P1PGameTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1P1PGameTextSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -229,7 +253,11 @@ void mn1PModeMakeTrainingMode(void)
     mn1PModeMakeOptionTab(gobj, 99.0F, 84.0F, 16);
     mn1PModeSetOptionSpriteColors(gobj, sMN1PModeOption == nMN1PModeOptionTrainingMode, nMN1PModeOptionTrainingMode);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1PTrainingModeTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1PTrainingModeTextSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -251,7 +279,11 @@ void mn1PModeMakeBonus1Practice(void)
     sMN1PModeOptionGObjs[nMN1PModeOptionBonus1Practice] = gobj = gcMakeGObjSPAfter(0, NULL, 4, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 2, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1POptionTabSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1POptionTabSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -260,7 +292,11 @@ void mn1PModeMakeBonus1Practice(void)
     sobj->pos.y = 126.0F;
     
     mn1PModeSetOptionSpriteColors(gobj, sMN1PModeOption == nMN1PModeOptionBonus1Practice, nMN1PModeOptionBonus1Practice);
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1PBonus1PracticeTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1PBonus1PracticeTextSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -282,7 +318,11 @@ void mn1PModeMakeBonus2Practice(void)
     sMN1PModeOptionGObjs[nMN1PModeOptionBonus2Practice] = gobj = gcMakeGObjSPAfter(0, NULL, 4, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 2, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1POptionTabSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1POptionTabSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -291,7 +331,11 @@ void mn1PModeMakeBonus2Practice(void)
     sobj->pos.y = 148.0F;
     
     mn1PModeSetOptionSpriteColors(gobj, sMN1PModeOption == nMN1PModeOptionBonus2Practice, nMN1PModeOptionBonus2Practice);
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1PBonus2PracticeTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1PBonus2PracticeTextSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -330,7 +374,11 @@ void mn1PModeMakeSubtitle(void)
 #if defined(REGION_JP)
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 3, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonFrameSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonFrameSprite));
+#endif
 
     sobj->pos.x = 93.0F;
     sobj->pos.y = 189.0F;
@@ -340,7 +388,11 @@ void mn1PModeMakeSubtitle(void)
     switch (sMN1PModeOption)
     {
         case nMN1PModeOption1PGame:
+#ifdef PORT
+            sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1P1PGameTextJapSprite));
+#else
             sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1P1PGameTextJapSprite));
+#endif
             
             sobj->pos.x = 122.0F;
             sobj->pos.y = 195.0F;
@@ -349,7 +401,11 @@ void mn1PModeMakeSubtitle(void)
             return;
 
         case nMN1PModeOptionTrainingMode:
+#ifdef PORT
+            sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1PTrainingModeTextJapSprite));
+#else
             sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1PTrainingModeTextJapSprite));
+#endif
             
             sobj->pos.x = 121.0F;
             sobj->pos.y = 195.0F;
@@ -358,7 +414,11 @@ void mn1PModeMakeSubtitle(void)
             return;
 
         case nMN1PModeOptionBonus1Practice:
+#ifdef PORT
+            sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1PBonus1PracticeTextJapSprite));
+#else
             sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1PBonus1PracticeTextJapSprite));
+#endif
             
             sobj->pos.x = 98.0F;
             sobj->pos.y = 195.0F;
@@ -367,7 +427,11 @@ void mn1PModeMakeSubtitle(void)
             return;
 
         case nMN1PModeOptionBonus2Practice:
+#ifdef PORT
+            sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1PBonus2PracticeTextJapSprite));
+#else
             sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1PBonus2PracticeTextJapSprite));
+#endif
             
             sobj->pos.x = 97.0F;
             sobj->pos.y = 195.0F;
@@ -404,7 +468,11 @@ void mn1PModeMakeLabels(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 3, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, mn1PModeLabelsProcDisplay, 1, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonSmashLogoSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonSmashLogoSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -416,7 +484,11 @@ void mn1PModeMakeLabels(void)
     sobj->pos.x = 235.0F;
     sobj->pos.y = 158.0F;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1P1PTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1P1PTextSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -428,7 +500,11 @@ void mn1PModeMakeLabels(void)
     sobj->pos.x = 161.0F;
     sobj->pos.y = 194.0F;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonGameModeTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonGameModeTextSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -450,12 +526,20 @@ void mn1PModeMakeDecals(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 2, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 0, GOBJ_PRIORITY_DEFAULT, ~0);
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonSmashBrosCollageSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonSmashBrosCollageSprite));
+#endif
     
     sobj->pos.x = 10.0F;
     sobj->pos.y = 10.0F;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonDecalPaperSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonDecalPaperSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -467,7 +551,11 @@ void mn1PModeMakeDecals(void)
     sobj->pos.x = 140.0F;
     sobj->pos.y = 143.0F;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], llMNCommonDecalPaperSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[0], &llMNCommonDecalPaperSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -479,7 +567,11 @@ void mn1PModeMakeDecals(void)
     sobj->pos.x = 225.0F;
     sobj->pos.y = 56.0F;
     
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], llMN1PControllerIconDarkSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PModeFiles[1], &llMN1PControllerIconDarkSprite));
+#endif
     
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -617,8 +709,16 @@ void mn1PModeInitVars(void)
     sMN1PModeTotalTimeTics = 0;
 
     sMN1PModeIsProceedScene = FALSE;
-    
+
     sMN1PModeReturnTic = sMN1PModeTotalTimeTics + I_MIN_TO_TICS(5);
+
+#ifdef PORT
+    /* Classic Co-op: entering the 1P Mode menu invalidates any P2 handoff
+     * from an earlier run, so training / bonus-practice / a later solo run
+     * can never see stale co-op state. The co-op CSS rewrites this on every
+     * confirm. */
+    gSCManagerSceneData.coop_player2 = SCCOMMON_COOP_NO_PLAYER2;
+#endif
 }
 
 // 0x801329A8
@@ -684,7 +784,30 @@ void mn1PModeFuncRun(GObj *gobj)
                 mn1PModeSetOptionSpriteColors(sMN1PModeOptionGObjs[nMN1PModeOption1PGame], nMNOptionTabStatusSelected, nMN1PModeOption1PGame);
 
                 gSCManagerSceneData.scene_prev = gSCManagerSceneData.scene_curr;
+#ifdef PORT
+                {
+                    /* Classic Co-op: serve Classic mode with the VS CSS so a
+                     * second player can join. The context flag tells the VS
+                     * CSS overlay which mode it is serving; is_reset_players
+                     * forces fresh slots (no characters carried over from a
+                     * prior VS session). */
+                    extern int port_enhancement_classic_coop(void);
+                    extern void port_classic_coop_set_context(int);
+                    if (port_enhancement_classic_coop())
+                    {
+                        gSCManagerTransferBattleState.is_reset_players = TRUE;
+                        gSCManagerSceneData.scene_curr = nSCKindPlayersVS;
+                        port_classic_coop_set_context(1);
+                    }
+                    else
+                    {
+                        port_classic_coop_set_context(0);
+                        gSCManagerSceneData.scene_curr = nSCKind1PGamePlayers;
+                    }
+                }
+#else
                 gSCManagerSceneData.scene_curr = nSCKind1PGamePlayers;
+#endif
                 gSCManagerSceneData.player = player - 1;
 
                 sMN1PModeIsProceedScene = TRUE;
@@ -790,7 +913,11 @@ void mn1PModeFuncStart(void)
     LBRelocSetup rl_setup;
     
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
+#ifdef PORT
+    rl_setup.table_files_num = (u32)llRelocFileCount;
+#else
     rl_setup.table_files_num = (u32)&llRelocFileCount;
+#endif
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMN1PModeStatusBuffer;

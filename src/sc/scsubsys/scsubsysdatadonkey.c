@@ -27,6 +27,15 @@ s32 D_ovl1_80391350[] =
 
 FTMotionDesc dFTDonkeySubMotionDescs[] =
 {
+#ifdef PORT
+    ll_800_FileID, 0x80000000, 0x00000000,
+    ll_381_FileID, (intptr_t)D_ovl1_80391340, 0x00000000,
+    ll_382_FileID, (intptr_t)D_ovl1_80391348, 0x00000000,
+    ll_383_FileID, 0x80000000, 0x00000000,
+    ll_384_FileID, (intptr_t)D_ovl1_8039134C, 0x00000000,
+    ll_385_FileID, (intptr_t)D_ovl1_80391350, 0x00000000,
+    ll_806_FileID, 0x80000000, 0x00000000,
+#else
     &llFTDonkeyAnimEggLayFileID, 0x80000000, 0x00000000,
     &llFTDonkeyAnimSelectedFileID, D_ovl1_80391340, 0x00000000,
     &llFTDonkeyAnimWin1FileID, D_ovl1_80391348, 0x00000000,
@@ -34,7 +43,17 @@ FTMotionDesc dFTDonkeySubMotionDescs[] =
     &llFTDonkeyAnimWin3FileID, D_ovl1_8039134C, 0x00000000,
     &llFTDonkeyAnimClapsFileID, D_ovl1_80391350, 0x00000000,
     &llFTDonkeyAnimRunFileID, 0x80000000, 0x00000000,
+#endif
     0x00000000,   0x80000000, 0x00000000,
+#ifdef PORT
+    ll_386_FileID, 0x80000000, 0x80000000,
+    ll_387_FileID, 0x80000000, 0x40000000,
+    ll_388_FileID, 0x80000000, 0x40000000,
+    ll_389_FileID, 0x80000000, 0x80000000,
+    ll_390_FileID, 0x80000000, 0x00000000,
+    ll_391_FileID, 0x80000000, 0x00000000,
+    ll_392_FileID, 0x80000000, 0x00000000
+#else
     &llFTDonkeyAnimDollPickUpFileID, 0x80000000, 0x80000000,
     &llFTDonkeyAnimDollFallFileID, 0x80000000, 0x40000000,
     &llFTDonkeyAnimDollRevivalFileID, 0x80000000, 0x40000000,
@@ -42,6 +61,7 @@ FTMotionDesc dFTDonkeySubMotionDescs[] =
     &llFTDonkeyAnimUnknownFileID, 0x80000000, 0x00000000,
     &llFTDonkeyAnimPose1PFileID, 0x80000000, 0x00000000,
     &llFTGDonkeyAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 
 s32 dFTDonkeySubMotionDescsCount = sizeof(dFTDonkeySubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

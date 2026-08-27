@@ -4,7 +4,11 @@
 
 FTMotionDesc dFTNLinkSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_1115_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTLinkAnimEggLayFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
@@ -18,6 +22,10 @@ FTMotionDesc dFTNLinkSubMotionDescs[] =
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_493_FileID, 0x80000000, 0x00000000
+#else
 	&llFTNLinkAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTNLinkSubMotionDescsCount = sizeof(dFTNLinkSubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

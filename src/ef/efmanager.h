@@ -23,6 +23,9 @@ extern LBParticle* efManagerDestroyParticleGObj(LBParticle *pc, GObj *effect_gob
 extern void efManagerDefaultProcDead(LBTransform *xf);
 extern void efManagerDefaultProcUpdate(GObj *effect_gobj);
 extern LBParticle* efManagerDamageNormalLightMakeEffect(Vec3f *pos, s32 player, s32 size, sb32 is_static);
+#ifdef PORT
+extern LBParticle* efManagerDamageNormalHeavyMakeEffect(Vec3f *pos, s32 player, s32 size);
+#endif
 extern void efManagerDamageNormalHeavyProcDead(LBTransform *xf);
 extern LBParticle* efManagerImpactShockMakeEffect(Vec3f *pos, s32 size);
 extern void efManagerVelAddDestroyAnimEnd(GObj *effect_gobj);
@@ -30,7 +33,11 @@ extern LBParticle* efManagerDamageFireMakeEffect(Vec3f *pos, s32 size);
 extern LBParticle* efManagerDamageElectricMakeEffect(Vec3f *pos, s32 size);
 extern GObj* efManagerDamageSlashMakeEffect(Vec3f *pos, s32 size, f32 rotate);
 extern LBParticle* efManagerFlameLRMakeEffect(Vec3f *pos, s32 lr);
+#ifdef PORT
+extern LBParticle* efManagerFlameRandgcMakeEffect(Vec3f *pos);
+#else
 extern LBParticle* efManagerFlameRandomMakeEffect(Vec3f *pos);
+#endif
 extern LBParticle* efManagerFlameStaticMakeEffect(Vec3f *pos);
 extern LBParticle* efManagerDustCollideMakeEffect(Vec3f *pos);
 extern GObj* efManagerShockSmallMakeEffect(Vec3f *pos);
@@ -45,7 +52,11 @@ extern LBParticle* efManagerDustDashMakeEffect(Vec3f *pos, s32 lr, f32 scale);
 extern void efManagerDamageFlyOrbsProcUpdate(GObj *effect_gobj);
 extern void efManagerDamageSpawnOrbsProcUpdate(GObj *this_gobj);
 extern GObj* efManagerDamageSpawnOrbsMakeEffect(Vec3f *pos);
+#ifdef PORT
+extern GObj* efManagerDamageSpawnOrbsRandgcMakeEffect(Vec3f *pos);
+#else
 extern GObj* efManagerDamageSpawnOrbsRandomMakeEffect(Vec3f *pos);
+#endif
 extern void efManagerImpactWaveProcDisplay(GObj *effect_gobj);
 extern void efManagerImpactWaveProcUpdate(GObj *effect_gobj);
 extern GObj* efManagerImpactWaveMakeEffect(Vec3f *pos, s32 index, f32 rotate);
@@ -55,10 +66,18 @@ extern GObj* efManagerStarRodSparkMakeEffect(Vec3f *pos, s32 lr);
 extern void efManagerDamageFlySparksProcUpdate(GObj *effect_gobj);
 extern void efManagerDamageSpawnSparksProcUpdate(GObj *effect_gobj);
 extern GObj* efManagerDamageSpawnSparksMakeEffect(Vec3f *pos, s32 lr);
+#ifdef PORT
+extern GObj* efManagerDamageSpawnSparksRandgcMakeEffect(Vec3f *pos, s32 lr);
+#else
 extern GObj* efManagerDamageSpawnSparksRandomMakeEffect(Vec3f *pos, s32 lr);
+#endif
 extern void efManagerDamageSpawnMDustProcUpdate(GObj *effect_gobj);
 extern GObj* efManagerDamageSpawnMDustMakeEffect(Vec3f *pos, s32 lr);
+#ifdef PORT
+extern GObj* efManagerDamageSpawnMDustRandgcMakeEffect(Vec3f *pos, s32 lr);
+#else
 extern GObj* efManagerDamageSpawnMDustRandomMakeEffect(Vec3f *pos, s32 lr);
+#endif
 extern LBParticle* efManagerSparkleWhiteMakeEffect(Vec3f *pos);
 extern LBParticle* efManagerSparkleWhiteMultiMakeEffect(Vec3f *pos);
 extern LBParticle* efManagerSparkleWhiteMultiExplodeMakeEffect(Vec3f *pos);
@@ -76,6 +95,9 @@ extern void efManagerFoxReflectorProcUpdate(GObj *effect_gobj);
 extern GObj* efManagerFoxReflectorMakeEffect(GObj *fighter_gobj);
 extern void efManagerShieldProcUpdate(GObj *effect_gobj);
 extern void efManagerShieldProcDisplay(GObj *effect_gobj);
+#ifdef PORT
+extern GObj* efManagerShieldMakeEffect(GObj *fighter_gobj);
+#endif
 extern GObj* LBParticle_Shield_MakeEffect(GObj *fighter_gobj);
 extern void efManagerYoshiShieldProcDisplay(GObj *effect_gobj);
 extern GObj* efManagerYoshiShieldMakeEffect(GObj *fighter_gobj);

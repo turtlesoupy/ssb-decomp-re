@@ -41,6 +41,15 @@ s32 D_ovl1_8039114C[] =
 
 FTMotionDesc dFTFoxSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_642_FileID, 0x80000000, 0x00000000,
+	ll_370_FileID, (intptr_t)D_ovl1_80391110, 0x00000000,
+	ll_371_FileID, (intptr_t)D_ovl1_80391124, 0x00000000,
+	ll_372_FileID, (intptr_t)D_ovl1_80391134, 0x00000000,
+	ll_372_FileID, (intptr_t)D_ovl1_80391134, 0x00000000,
+	ll_373_FileID, (intptr_t)D_ovl1_80391140, 0x00000000,
+	ll_648_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTFoxAnimEggLayFileID, 0x80000000, 0x00000000,
 	&llFTFoxAnimWin1FileID, D_ovl1_80391110, 0x00000000,
 	&llFTFoxAnimWin2FileID, D_ovl1_80391124, 0x00000000,
@@ -48,7 +57,26 @@ FTMotionDesc dFTFoxSubMotionDescs[] =
 	&llFTFoxAnimSelectedFileID, D_ovl1_80391134, 0x00000000,
 	&llFTFoxAnimClapsFileID, D_ovl1_80391140, 0x00000000,
 	&llFTFoxAnimRunFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_374_FileID, 0x80000000, 0x80000000,
+	ll_375_FileID, 0x80000000, 0x40000000,
+	ll_376_FileID, 0x80000000, 0x40000000,
+	ll_377_FileID, 0x80000000, 0x00000000,
+	ll_378_FileID, 0x80000000, 0x00000000,
+	ll_379_FileID, (intptr_t)D_ovl1_8039114C, 0x00000000,
+	ll_380_FileID, (intptr_t)D_ovl1_8039114C, 0x00000000,
+	ll_781_FileID, 0x80000000, 0x00000000,
+	ll_782_FileID, 0x80000000, 0x00000000,
+	ll_783_FileID, 0x80000000, 0x00000000,
+	ll_784_FileID, 0x80000000, 0x00000000,
+	ll_779_FileID, 0x80000000, 0x00000000,
+	ll_790_FileID, 0x80000000, 0x00000000,
+	ll_791_FileID, 0x80000000, 0x00000000,
+	ll_792_FileID, 0x80000000, 0x00000000,
+	ll_793_FileID, 0x80000000, 0x00000000
+#else
 	&llFTFoxAnimDollPickUpFileID, 0x80000000, 0x80000000,
 	&llFTFoxAnimDollFallFileID, 0x80000000, 0x40000000,
 	&llFTFoxAnimDollFileID, 0x80000000, 0x40000000,
@@ -65,5 +93,6 @@ FTMotionDesc dFTFoxSubMotionDescs[] =
 	&llFTFoxAnimSwitchDirectionShineFileID, 0x80000000, 0x00000000,
 	&llFTFoxAnimReflectingFileID, 0x80000000, 0x00000000,
 	&llFTFoxAnimShineFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTFoxSubMotionDescsCount = sizeof(dFTFoxSubMotionDescs)/sizeof(FTMotionDesc); // 0x00000018

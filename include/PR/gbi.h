@@ -21,6 +21,9 @@
 #define	_GBI_H_
 
 #include <PR/ultratypes.h>
+#ifdef PORT
+#include <stdint.h>
+#endif
 
 /*
  * To use the F3DEX ucodes, define F3DEX_GBI before include this file.
@@ -1160,8 +1163,24 @@ typedef struct {
  * 4x4 matrix, fixed point s15.16 format.
  * First 8 words are integer portion of the 4x4 matrix
  * Last 8 words are the fraction portion of the 4x4 matrix
+ *
+ * IMPORTANT: each element is a 32-bit word on the N64. The SDK originally
+ * typed this as `long`, which is 4 bytes on LLP64 (MSVC / Windows x64) but
+ * 8 bytes on LP64 (macOS/Linux clang/gcc). The extra padding makes every
+ * matrix on LP64 twice the size Fast3D expects — guMtxF2L writes at 4-byte
+ * stride while the reader reads at 4-byte stride, but the *struct* steps at
+ * 8-byte stride, so every other word is a zero padding byte. The net effect
+ * is that only m[0][0] (and its padded neighbour) survives and every
+ * transformed vertex collapses to z=0,w=0. See the "N64 Mtx LP64 stride"
+ * entry in CLAUDE.md for the full symptom story.
+ *
+ * Force a 32-bit element type under PORT on every non-MSVC target.
  */
+#if defined(PORT) && !defined(_MSC_VER)
+typedef int	Mtx_t[4][4];
+#else
 typedef long	Mtx_t[4][4];
+#endif
 
 typedef union {
     Mtx_t		m;
@@ -1696,8 +1715,13 @@ typedef struct {
  * Generic Gfx Packet
  */
 typedef struct {
+	#ifdef PORT
+	uintptr_t w0;
+	uintptr_t w1;
+	#else
 	unsigned int w0;
 	unsigned int w1;
+	#endif
 } Gwords;
 
 /*
@@ -1730,6 +1754,12 @@ typedef union {
  * Macros to assemble the graphics display list
  */
 
+#ifdef PORT
+#define GBI_PTR_CAST(v) ((uintptr_t)(v))
+#else
+#define GBI_PTR_CAST(v) ((unsigned int)(v))
+#endif
+
 /*
  * DMA macros
  */
@@ -1738,12 +1768,12 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 									\
 	_g->words.w0 = _SHIFTL((c), 24, 8) | _SHIFTL((l), 0, 24);	\
-	_g->words.w1 = (unsigned int)(s);				\
+	_g->words.w1 = GBI_PTR_CAST(s);				\
 }
 
 #define	gsDma0p(c, s, l)						\
 {									\
-	_SHIFTL((c), 24, 8) | _SHIFTL((l), 0, 24), (unsigned int)(s)	\
+	_SHIFTL((c), 24, 8) | _SHIFTL((l), 0, 24), GBI_PTR_CAST(s)	\
 }
 
 #define	gDma1p(pkt, c, s, l, p)						\
@@ -1752,14 +1782,14 @@ typedef union {
 									\
 	_g->words.w0 = (_SHIFTL((c), 24, 8) | _SHIFTL((p), 16, 8) |	\
 			_SHIFTL((l), 0, 16));				\
-	_g->words.w1 = (unsigned int)(s);				\
+	_g->words.w1 = GBI_PTR_CAST(s);				\
 }
 
 #define	gsDma1p(c, s, l, p)						\
 {									\
 	(_SHIFTL((c), 24, 8) | _SHIFTL((p), 16, 8) | 			\
 	 _SHIFTL((l), 0, 16)), 						\
-        (unsigned int)(s)						\
+        GBI_PTR_CAST(s)						\
 }
 
 #define	gDma2p(pkt, c, adrs, len, idx, ofs)				\
@@ -1767,13 +1797,13 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL((c),24,8)|_SHIFTL(((len)-1)/8,19,5)|	\
 			_SHIFTL((ofs)/8,8,8)|_SHIFTL((idx),0,8));	\
-	_g->words.w1 = (unsigned int)(adrs);				\
+	_g->words.w1 = GBI_PTR_CAST(adrs);				\
 }
 #define	gsDma2p(c, adrs, len, idx, ofs)					\
 {									\
 	(_SHIFTL((c),24,8)|_SHIFTL(((len)-1)/8,19,5)|			\
 	 _SHIFTL((ofs)/8,8,8)|_SHIFTL((idx),0,8)),			\
-        (unsigned int)(adrs)						\
+        GBI_PTR_CAST(adrs)						\
 }
 
 #define	gSPNoOp(pkt)		gDma0p(pkt, G_SPNOOP, 0, 0)
@@ -1804,12 +1834,12 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 =							\
 	  _SHIFTL(G_VTX,24,8)|_SHIFTL((n),12,8)|_SHIFTL((v0)+(n),1,7);	\
-	_g->words.w1 = (unsigned int)(v);				\
+	_g->words.w1 = GBI_PTR_CAST(v);				\
 }
 # define	gsSPVertex(v, n, v0)					\
 {									\
 	(_SHIFTL(G_VTX,24,8)|_SHIFTL((n),12,8)|_SHIFTL((v0)+(n),1,7)),	\
-        (unsigned int)(v)						\
+        GBI_PTR_CAST(v)						\
 }
 #elif	(defined(F3DEX_GBI)||defined(F3DLP_GBI))
 /*
@@ -2370,7 +2400,7 @@ typedef union {
 {									\
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_RDPHALF_1,24,8);			\
-	_g->words.w1 = (unsigned int)(dl);				\
+	_g->words.w1 = GBI_PTR_CAST(dl);				\
 	_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL(G_BRANCH_Z,24,8)|			\
 		        _SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12));	\
@@ -2379,7 +2409,7 @@ typedef union {
 
 #define	gsSPBranchLessZrg(dl, vtx, zval, near, far, flag, zmin, zmax)	      \
 {	_SHIFTL(G_RDPHALF_1,24,8),					      \
-	(unsigned int)(dl),						},    \
+	GBI_PTR_CAST(dl),						},    \
 {	_SHIFTL(G_BRANCH_Z,24,8)|_SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12),\
 	G_DEPTOZSrg(zval, near, far, flag, zmin, zmax),			}
 
@@ -2399,7 +2429,7 @@ typedef union {
 {									\
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_RDPHALF_1,24,8);			\
-	_g->words.w1 = (unsigned int)(dl);				\
+	_g->words.w1 = GBI_PTR_CAST(dl);				\
 	_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL(G_BRANCH_Z,24,8)|			\
 		        _SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12));	\
@@ -2408,7 +2438,7 @@ typedef union {
 
 #define	gsSPBranchLessZraw(dl, vtx, zval)				\
 {	_SHIFTL(G_RDPHALF_1,24,8),					      \
-	(unsigned int)(dl),						},    \
+	GBI_PTR_CAST(dl),						},    \
 {	_SHIFTL(G_BRANCH_Z,24,8)|_SHIFTL((vtx)*5,12,12)|_SHIFTL((vtx)*2,0,12),\
 	(unsigned int)(zval),						}
 
@@ -2422,19 +2452,19 @@ typedef union {
 {									\
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_RDPHALF_1,24,8);			\
-	_g->words.w1 = (unsigned int)(uc_dstart);			\
+	_g->words.w1 = GBI_PTR_CAST(uc_dstart);			\
 	_g = (Gfx *)(pkt);						\
 	_g->words.w0 = (_SHIFTL(G_LOAD_UCODE,24,8)|			\
 			_SHIFTL((int)(uc_dsize)-1,0,16));		\
-	_g->words.w1 = (unsigned int)(uc_start);			\
+	_g->words.w1 = GBI_PTR_CAST(uc_start);			\
 }
 
 #define	gsSPLoadUcodeEx(uc_start, uc_dstart, uc_dsize)			\
 {	_SHIFTL(G_RDPHALF_1,24,8),					\
-	(unsigned int)(uc_dstart),				},	\
+	GBI_PTR_CAST(uc_dstart),				},	\
 {	_SHIFTL(G_LOAD_UCODE,24,8)|					\
 	  _SHIFTL((int)(uc_dsize)-1,0,16),				\
-	(unsigned int)(uc_start),				}
+	GBI_PTR_CAST(uc_start),				}
 
 #define	gSPLoadUcode(pkt, uc_start, uc_dstart)				\
         gSPLoadUcodeEx((pkt), (uc_start), (uc_dstart), SP_UCODE_DATA_SIZE)
@@ -2458,14 +2488,14 @@ typedef union {
 	Gfx *_g = (Gfx *)(pkt);						\
 	_g->words.w0 = _SHIFTL(G_DMA_IO,24,8)|_SHIFTL((flag),23,1)|	\
 	  _SHIFTL((dmem)/8,13,10)|_SHIFTL((size)-1,0,12);		\
-	_g->words.w1 = (unsigned int)(dram);				\
+	_g->words.w1 = GBI_PTR_CAST(dram);				\
 }
 
 #define	gsSPDma_io(flag, dmem, dram, size)				\
 {									\
 	_SHIFTL(G_DMA_IO,24,8)|_SHIFTL((flag),23,1)|			\
 	_SHIFTL((dmem)/8,13,10)|_SHIFTL((size)-1,0,12),			\
-	(unsigned int)(dram)						\
+	GBI_PTR_CAST(dram)						\
 }
 
 #define	gSPDmaRead(pkt,dmem,dram,size)	gSPDma_io((pkt),0,(dmem),(dram),(size))
@@ -3043,14 +3073,14 @@ typedef union {
 									\
 	_g->words.w0 = _SHIFTL(cmd, 24, 8) | _SHIFTL(fmt, 21, 3) |	\
 		       _SHIFTL(siz, 19, 2) | _SHIFTL((width)-1, 0, 12);	\
-	_g->words.w1 = (unsigned int)(i);				\
+	_g->words.w1 = GBI_PTR_CAST(i);				\
 }
 
 #define	gsSetImage(cmd, fmt, siz, width, i)				\
 {									\
 	_SHIFTL(cmd, 24, 8) | _SHIFTL(fmt, 21, 3) |			\
 	_SHIFTL(siz, 19, 2) | _SHIFTL((width)-1, 0, 12),		\
-	(unsigned int)(i)						\
+	GBI_PTR_CAST(i)						\
 }
 
 #define	gDPSetColorImage(pkt, f, s, w, i)	gSetImage(pkt, G_SETCIMG, f, s, w, i)
@@ -4538,7 +4568,7 @@ typedef union {
 }
 
 /* like gSPTextureRectangle but accepts negative position arguments */
-/* FIX: yl is not cast to s32 in the original file; this has been remedied here */
+/* FIX: yl is not cast to s16 in the original file; this has been remedied here */
 #define gSPScisTextureRectangle(pkt, xl, yl, xh, yh, tile, s, t, dsdx, dtdy) \
 {                                                                            \
     Gfx *_g = (Gfx *)(pkt);                                                  \
@@ -4557,7 +4587,7 @@ typedef union {
 			    (MIN((((s16)(xl)*(s16)(dsdx))>>7),0))) : 0)),    \
 			 16, 16) |                                           \
                  _SHIFTL(((t) -                                              \
-                          (((s32)(yl) < 0) ?                                 \
+                          ((((s16)yl) < 0) ?                                 \
                            (((s16)(dtdy) < 0) ?                              \
                             (MAX((((s16)(yl)*(s16)(dtdy))>>7),0)) :          \
                             (MIN((((s16)(yl)*(s16)(dtdy))>>7),0))) : 0)),    \

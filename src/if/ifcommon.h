@@ -83,8 +83,13 @@ extern void ifCommonTimerFuncRun(GObj *interface_gobj);
 extern void ifCommonTimerMakeInterface(void (*proc)(void));
 extern GObj* ifCommonAnnounceGameSetMakeInterface(void);
 extern void ifCommonBattleInitPlacement(void);
+#ifdef PORT
+extern void ifCommonBattleInterfacePauseGObj(GObj *interface_gobj, uintptr_t unused);
+extern void ifCommonBattleInterfaceResumeGObj(GObj *interface_gobj, uintptr_t unused);
+#else
 extern void ifCommonBattleInterfacePauseGObj(GObj *interface_gobj, u32 unused);
 extern void ifCommonBattleInterfaceResumeGObj(GObj *interface_gobj, u32 unused);
+#endif
 extern void ifCommonBattleInterfaceProcUpdate(void);
 extern void ifCommonBattleEndInitSoundNum(void);
 extern void ifCommonBattleEndPlaySoundQueue(void);

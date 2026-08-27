@@ -5,10 +5,19 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <sys/audio.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void func_800266A0_272A0(void);
 
 extern void dbMenuUpdateMenuInputs();
 
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, unsigned int count);
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -19,57 +28,57 @@ extern u32 sySchedulerGetTicCount();
 // 0x801341E0
 intptr_t dMNTitleLogoAnimSprites[/* */] =
 {
-	&llMNTitleLogoAnimCutoutSprite,  // Full circle cutout
-	&llMNTitleLogoAnimStrikeVSprite, // Vertical rectangle
-	&llMNTitleLogoAnimStrikeHSprite, // Horizontal rectangle
-	&llMNTitleLogoAnimFullSprite     // Full sprite? Unused?
+	llMNTitleLogoAnimCutoutSprite,  // Full circle cutout
+	llMNTitleLogoAnimStrikeVSprite, // Vertical rectangle
+	llMNTitleLogoAnimStrikeHSprite, // Horizontal rectangle
+	llMNTitleLogoAnimFullSprite     // Full sprite? Unused?
 };
 
 // 0x801341F0
 intptr_t dMNTitleFireSpriteOffsets[/* */] =
 {
-	&llMNTitleFireAnimFrame1Sprite,
-	&llMNTitleFireAnimFrame2Sprite,
-	&llMNTitleFireAnimFrame3Sprite,
-	&llMNTitleFireAnimFrame4Sprite,
-	&llMNTitleFireAnimFrame5Sprite,
-	&llMNTitleFireAnimFrame6Sprite,
-	&llMNTitleFireAnimFrame7Sprite,
-	&llMNTitleFireAnimFrame8Sprite,
-	&llMNTitleFireAnimFrame9Sprite,
-	&llMNTitleFireAnimFrame10Sprite,
-	&llMNTitleFireAnimFrame11Sprite,
-	&llMNTitleFireAnimFrame12Sprite,
-	&llMNTitleFireAnimFrame13Sprite,
-	&llMNTitleFireAnimFrame14Sprite,
-	&llMNTitleFireAnimFrame15Sprite,
-	&llMNTitleFireAnimFrame16Sprite,
-	&llMNTitleFireAnimFrame17Sprite,
-	&llMNTitleFireAnimFrame18Sprite,
-	&llMNTitleFireAnimFrame19Sprite,
-	&llMNTitleFireAnimFrame20Sprite,
-	&llMNTitleFireAnimFrame21Sprite,
-	&llMNTitleFireAnimFrame22Sprite,
-	&llMNTitleFireAnimFrame23Sprite,
-	&llMNTitleFireAnimFrame24Sprite,
-	&llMNTitleFireAnimFrame25Sprite,
-	&llMNTitleFireAnimFrame26Sprite,
-	&llMNTitleFireAnimFrame27Sprite,
-	&llMNTitleFireAnimFrame28Sprite,
-	&llMNTitleFireAnimFrame29Sprite,
-	&llMNTitleFireAnimFrame30Sprite
+	llMNTitleFireAnimFrame1Sprite,
+	llMNTitleFireAnimFrame2Sprite,
+	llMNTitleFireAnimFrame3Sprite,
+	llMNTitleFireAnimFrame4Sprite,
+	llMNTitleFireAnimFrame5Sprite,
+	llMNTitleFireAnimFrame6Sprite,
+	llMNTitleFireAnimFrame7Sprite,
+	llMNTitleFireAnimFrame8Sprite,
+	llMNTitleFireAnimFrame9Sprite,
+	llMNTitleFireAnimFrame10Sprite,
+	llMNTitleFireAnimFrame11Sprite,
+	llMNTitleFireAnimFrame12Sprite,
+	llMNTitleFireAnimFrame13Sprite,
+	llMNTitleFireAnimFrame14Sprite,
+	llMNTitleFireAnimFrame15Sprite,
+	llMNTitleFireAnimFrame16Sprite,
+	llMNTitleFireAnimFrame17Sprite,
+	llMNTitleFireAnimFrame18Sprite,
+	llMNTitleFireAnimFrame19Sprite,
+	llMNTitleFireAnimFrame20Sprite,
+	llMNTitleFireAnimFrame21Sprite,
+	llMNTitleFireAnimFrame22Sprite,
+	llMNTitleFireAnimFrame23Sprite,
+	llMNTitleFireAnimFrame24Sprite,
+	llMNTitleFireAnimFrame25Sprite,
+	llMNTitleFireAnimFrame26Sprite,
+	llMNTitleFireAnimFrame27Sprite,
+	llMNTitleFireAnimFrame28Sprite,
+	llMNTitleFireAnimFrame29Sprite,
+	llMNTitleFireAnimFrame30Sprite
 };
 
 // 0x80134268
 MNTitleSpriteDesc dMNTitleCommonSpriteDescs[/* */] =
 {
 #if defined(REGION_US)
-	{ { 157,  94 }, &llMNTitleCutoutSprite },
-	{ { 161,  88 }, &llMNTitleSmashSprite },
-	{ {  55,  96 }, &llMNTitleSuperSprite },
-	{ { 268,  96 }, &llMNTitleBrosSprite },
-	{ { 270, 132 }, &llMNTitleTMUnkSprite },
-	{ { 160, 208 }, &llMNTitleCopyrightSprite },
+	{ { 157,  94 }, llMNTitleCutoutSprite },
+	{ { 161,  88 }, llMNTitleSmashSprite },
+	{ {  55,  96 }, llMNTitleSuperSprite },
+	{ { 268,  96 }, llMNTitleBrosSprite },
+	{ { 270, 132 }, llMNTitleTMUnkSprite },
+	{ { 160, 208 }, llMNTitleCopyrightSprite },
 #else
 	{ { 136,  68 }, 0x10580 },
 	{ { 172,  71 }, 0x10CA8 },
@@ -86,10 +95,10 @@ MNTitleSpriteDesc dMNTitleCommonSpriteDescs[/* */] =
 	{ { 243, 120 }, 0x16468 },
 	{ { 160, 208 }, 0x19CE0 },
 #endif
-	{ { 160,  15 }, &llMNTitleBorderUpperSprite },
-	{ { 162, 177 }, &llMNTitlePressStartSprite },
-	{ { 260,  60 }, &llMNTitleLogoAnimFullSprite },
-	{ { 277, 157 }, &llMNTitleTMSprite }
+	{ { 160,  15 }, llMNTitleBorderUpperSprite },
+	{ { 162, 177 }, llMNTitlePressStartSprite },
+	{ { 260,  60 }, llMNTitleLogoAnimFullSprite },
+	{ { 277, 157 }, llMNTitleTMSprite }
 };
 
 // 0x801342E0
@@ -334,6 +343,7 @@ s32 mnTitleSetDemoFighterKinds(void)
 		gSCManagerSceneData.demo_fkind[1] = mnTitleGetShuffledFighterKind(unlocked_mask, gSCManagerSceneData.demo_mask_prev, syUtilsRandIntRange(non_recently_demoed_count));
 		gSCManagerSceneData.demo_mask_prev |= LBBACKUP_MASK_FIGHTER(gSCManagerSceneData.demo_fkind[1]);
 	}
+	return 0;
 }
 
 // 0x80131CF4
@@ -907,6 +917,17 @@ void mnTitleUpdateFireSprite(SObj *sobj, sb32 is_next)
 {
 	Sprite *sprite = lbRelocGetFileData(Sprite*, sMNTitleFiles[1], dMNTitleFireSpriteOffsets[sobj->user_data.s]);
 
+#ifdef PORT
+	portFixupSprite(sprite);
+	{
+		Bitmap *bitmaps = (Bitmap*)PORT_RESOLVE(sprite->bitmap);
+		if (bitmaps != NULL)
+		{
+			portFixupBitmapArray(bitmaps, sprite->nbitmaps);
+			portFixupSpriteBitmapData(sprite, bitmaps);
+		}
+	}
+#endif
 	sobj->sprite = *sprite;
 	sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1094,8 +1115,8 @@ void mnTitleMakeLogo(void)
 	else
 	{
 		animated_logo_gobj = gcMakeGObjSPAfter(7, NULL, 7, GOBJ_PRIORITY_DEFAULT);
-		gcSetupCommonDObjs(animated_logo_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], &llMNTitleLogoDObjDesc), 0);
-		gcAddAnimJointAll(animated_logo_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], &llMNTitleLogoAnimJoint), 0.0F);
+		gcSetupCommonDObjs(animated_logo_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], llMNTitleLogoDObjDesc), 0);
+		gcAddAnimJointAll(animated_logo_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], llMNTitleLogoAnimJoint), 0.0F);
 		gcPlayAnimAll(animated_logo_gobj);
 
 		fire_logo_gobj = gcMakeGObjSPAfter(6, NULL, 7, GOBJ_PRIORITY_DEFAULT);
@@ -1186,8 +1207,8 @@ void mnTitleMakeLabels(void)
 	DObj *animation_dobj;
 
 	animation_gobj = gcMakeGObjSPAfter(10, NULL, 8, GOBJ_PRIORITY_DEFAULT);
-	gcSetupCommonDObjs(animation_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], &llMNTitleLabelsDObjDesc), 0);
-	gcAddAnimJointAll(animation_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], &llMNTitleLabelsAnimJoint), 0.0F);
+	gcSetupCommonDObjs(animation_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], llMNTitleLabelsDObjDesc), 0);
+	gcAddAnimJointAll(animation_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], llMNTitleLabelsAnimJoint), 0.0F);
 	gcPlayAnimAll(animation_gobj);
 
 	gobj = gcMakeGObjSPAfter(8, NULL, 8, GOBJ_PRIORITY_DEFAULT);
@@ -1240,8 +1261,8 @@ void mnTitleMakePressStart(void)
 	SObj *press_start_sobj;
 
 	press_start_anim_gobj = gcMakeGObjSPAfter(10, NULL, 8, GOBJ_PRIORITY_DEFAULT);
-	gcSetupCommonDObjs(press_start_anim_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], &llMNTitlePressStartDObjDesc), 0);
-	gcAddAnimJointAll(press_start_anim_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], &llMNTitlePressStartAnimJoint), 0.0F);
+	gcSetupCommonDObjs(press_start_anim_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], llMNTitlePressStartDObjDesc), 0);
+	gcAddAnimJointAll(press_start_anim_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], llMNTitlePressStartAnimJoint), 0.0F);
 	gcPlayAnimAll(press_start_anim_gobj);
 
 	press_start_anim_dobj = DObjGetStruct(press_start_anim_gobj)->child;
@@ -1301,15 +1322,15 @@ void mnTitleMakeSlash(void)
 		gcSetupCustomDObjsWithMObj
 		(
 			gobj,
-			lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], &llMNTitleSlashDObjDesc),
-			lbRelocGetFileData(MObjSub***, sMNTitleFiles[0], &llMNTitleSlashMObjSub),
+			lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], llMNTitleSlashDObjDesc),
+			lbRelocGetFileData(MObjSub***, sMNTitleFiles[0], llMNTitleSlashMObjSub),
 			NULL,
 			nGCMatrixKindTraRotRpyRSca,
 			nGCMatrixKindNull,
 			nGCMatrixKindNull
 		);
-		gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], &llMNTitleSlashAnimJoint), 0.0F);
-		gcAddMatAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32***, sMNTitleFiles[0], &llMNTitleSlashMatAnimJoint), 0.0F);
+		gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], llMNTitleSlashAnimJoint), 0.0F);
+		gcAddMatAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32***, sMNTitleFiles[0], llMNTitleSlashMatAnimJoint), 0.0F);
 		gcPlayAnimAll(gobj);
 		gcAddGObjProcess(gobj, gcPlayAnimAll, nGCProcessKindFunc, 1);
 	}
@@ -1317,8 +1338,8 @@ void mnTitleMakeSlash(void)
 #if defined(REGION_JP)
 	gobj = gcMakeGObjSPAfter(12, NULL, 13, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, gcDrawDObjTreeDLLinksForGObj, 2, GOBJ_PRIORITY_DEFAULT, ~0);
-	gcSetupCustomDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], &llMNTitleUnknownDObjDesc), NULL, nGCMatrixKindTraRotRpyRSca, nGCMatrixKindNull, nGCMatrixKindNull);
-	gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], &llMNTitleUnknownAnimJoint), 0.0F);
+	gcSetupCustomDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], llMNTitleUnknownDObjDesc), NULL, nGCMatrixKindTraRotRpyRSca, nGCMatrixKindNull, nGCMatrixKindNull);
+	gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], llMNTitleUnknownAnimJoint), 0.0F);
 	gcPlayAnimAll(gobj);
 	gcAddGObjProcess(gobj, mnTitleSlashProcUpdate, nGCProcessKindFunc, 1);
 	gobj->flags = GOBJ_FLAG_HIDDEN;
@@ -1466,7 +1487,7 @@ void mnTitleMakeLogoFire(void)
 
 	gobj->camera_mask = COBJ_MASK_DLLINK(0);
 
-	sMNTitleParticleBankID = efParticleGetLoadBankID(&lMNTitleParticleScriptBankLo, &lMNTitleParticleScriptBankHi, &lMNTitleParticleTextureBankLo, &lMNTitleParticleTextureBankHi);
+	sMNTitleParticleBankID = efParticleGetLoadBankID((uintptr_t)&lMNTitleParticleScriptBankLo, (uintptr_t)&lMNTitleParticleScriptBankHi, (uintptr_t)&lMNTitleParticleTextureBankLo, (uintptr_t)&lMNTitleParticleTextureBankHi);
 }
 
 // 0x80133E68
@@ -1479,8 +1500,8 @@ void mnTitleMakeLogoFireParticles(void)
 	{
 		logo_fire_effect_gobj = gcMakeGObjSPAfter(14, NULL, 5, GOBJ_PRIORITY_DEFAULT);
 
-		gcSetupCommonDObjs(logo_fire_effect_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], &llMNTitleFireDObjDesc), NULL);
-		gcAddAnimJointAll(logo_fire_effect_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], &llMNTitleFireAnimJoint), 0.0F);
+		gcSetupCommonDObjs(logo_fire_effect_gobj, lbRelocGetFileData(DObjDesc*, sMNTitleFiles[0], llMNTitleFireDObjDesc), NULL);
+		gcAddAnimJointAll(logo_fire_effect_gobj, lbRelocGetFileData(AObjEvent32**, sMNTitleFiles[0], llMNTitleFireAnimJoint), 0.0F);
 		gcPlayAnimAll(logo_fire_effect_gobj);
 		gcAddGObjProcess(logo_fire_effect_gobj, gcPlayAnimAll, nGCProcessKindFunc, 1);
 
@@ -1527,6 +1548,9 @@ void mnTitleFuncStart(void)
 	{
 		while (sySchedulerGetTicCount() < 4215)
 		{
+#ifdef PORT
+			port_coroutine_yield();
+#endif
 			continue;
 		};
 	}

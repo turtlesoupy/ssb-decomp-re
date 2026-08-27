@@ -15,7 +15,18 @@
 #include <ft/ftdef.h>
 
 #include <ft/ftcommon.h>
-#include <ft/ftchar.h>
+/*
+ * NOTE: <ft/ftchar.h> intentionally included *after* the core struct
+ * definitions below. Character headers declare arrays like
+ *     extern FTStatusDesc dFTMarioSpecialStatusDescs[];
+ * which requires the element type to be complete. On MSVC the incomplete
+ * type is accepted at extern-array scope, but clang (correctly) rejects it,
+ * so we delay the include until FTStatusDesc/FTMotionDesc are defined. See
+ * the secondary include at the bottom of this file.
+ */
+#ifdef PORT
+#include <stddef.h>
+#endif
 
 // Structs
 struct FTSpecialColl
@@ -49,19 +60,33 @@ union FTAnimDesc
 {
     u32 word;
 
+#if IS_BIG_ENDIAN
     struct
     {
         ub32 is_use_xrotn_joint : 1;        // 0x80000000
         ub32 is_use_transn_joint : 1;       // 0x40000000
         ub32 is_use_yrotn_joint : 1;        // 0x20000000
-        ub32 is_enabled_joints : 24;        // 0x10000000 to 0x00000020 - not actually a single variable, but 24 bits, each corresponding to a joint ID
+        ub32 is_enabled_joints : 24;        // 0x10000000 to 0x00000020
         ub32 is_use_submotion_script : 1;   // 0x00000010
-        ub32 is_anim_joint : 1;             // 0x00000008 - whether current animation is type Figatree (0) or AnimJoint (1)
+        ub32 is_anim_joint : 1;             // 0x00000008
         ub32 is_have_translate_scale : 1;   // 0x00000004
         ub32 is_use_shieldpose : 1;         // 0x00000002
         ub32 is_use_animlocks : 1;          // 0x00000001
-
     } flags;
+#else
+    struct
+    {
+        ub32 is_use_animlocks : 1;          // 0x00000001
+        ub32 is_use_shieldpose : 1;         // 0x00000002
+        ub32 is_have_translate_scale : 1;   // 0x00000004
+        ub32 is_anim_joint : 1;             // 0x00000008
+        ub32 is_use_submotion_script : 1;   // 0x00000010
+        ub32 is_enabled_joints : 24;        // 0x00000020 to 0x10000000
+        ub32 is_use_yrotn_joint : 1;        // 0x20000000
+        ub32 is_use_transn_joint : 1;       // 0x40000000
+        ub32 is_use_xrotn_joint : 1;        // 0x80000000
+    } flags;
+#endif
 };
 
 struct FTMotionDesc
@@ -121,32 +146,92 @@ struct FTData
 struct FTAccessPart
 {
     s32 joint_id;
+#ifdef PORT
+    u32 dl;
+    u32 mobjsubs;
+    u32 costume_matanim_joints;
+#else
     Gfx *dl;
     MObjSub **mobjsubs;
     AObjEvent32 **costume_matanim_joints;
+#endif
 };
 
 struct FTModelPart
 {
+#ifdef PORT
+    u32 dl;
+    u32 mobjsubs;
+    u32 costume_matanim_joints;
+    u32 main_matanim_joints;
+#else
     Gfx *dl;
     MObjSub **mobjsubs;
     AObjEvent32 **costume_matanim_joints;
     AObjEvent32 **main_matanim_joints;
+#endif
+#if IS_BIG_ENDIAN
     u8 flags;
+#else
+    u8 pad[3];
+    u8 flags;
+#endif
 };
 
 struct FTCommonPart
 {
+#ifdef PORT
+    u32 dobjdesc;                   // Relocation token
+    u32 p_mobjsubs;                 // Relocation token
+    u32 p_costume_matanim_joints;   // Relocation token
+#else
     DObjDesc *dobjdesc;
     MObjSub ***p_mobjsubs;
     AObjEvent32 ***p_costume_matanim_joints;
+#endif
+#if IS_BIG_ENDIAN
     u8 flags;
+#else
+    u8 pad[3];
+    u8 flags;
+#endif
 };
 
 struct FTCommonPartContainer
 {
     FTCommonPart commonparts[2];
 };
+
+#ifdef PORT
+#define FTACCESSPART_GET_DL(accesspart) ((Gfx*)PORT_RESOLVE((accesspart)->dl))
+#define FTACCESSPART_GET_MOBJSUBS(accesspart) ((MObjSub**)PORT_RESOLVE((accesspart)->mobjsubs))
+#define FTACCESSPART_GET_COSTUME_MATANIM_JOINTS(accesspart) ((AObjEvent32**)PORT_RESOLVE((accesspart)->costume_matanim_joints))
+#define FTMODELPART_GET_DL(modelpart) ((Gfx*)PORT_RESOLVE((modelpart)->dl))
+#define FTMODELPART_GET_MOBJSUBS(modelpart) ((MObjSub**)PORT_RESOLVE((modelpart)->mobjsubs))
+#define FTMODELPART_GET_COSTUME_MATANIM_JOINTS(modelpart) ((AObjEvent32**)PORT_RESOLVE((modelpart)->costume_matanim_joints))
+#define FTMODELPART_GET_MAIN_MATANIM_JOINTS(modelpart) ((AObjEvent32**)PORT_RESOLVE((modelpart)->main_matanim_joints))
+#define FTMODELPARTCONTAINER_GET_DESC(container, index) ((FTModelPartDesc*)PORT_RESOLVE((container)->modelparts_desc[index]))
+#define FTPARTS_GET_FLAGS(commonpart) ((commonpart)->flags)
+#define FTPARTS_GET_DOBJDESC(commonpart) ((DObjDesc*)PORT_RESOLVE((commonpart)->dobjdesc))
+#define FTPARTS_GET_MOBJSUBS(commonpart) ((MObjSub***)PORT_RESOLVE((commonpart)->p_mobjsubs))
+#define FTPARTS_GET_COSTUME_MATANIM_JOINTS(commonpart) ((AObjEvent32***)PORT_RESOLVE((commonpart)->p_costume_matanim_joints))
+_Static_assert(sizeof(FTAccessPart) == 16, "FTAccessPart must be 16 bytes to match file data layout");
+_Static_assert(sizeof(FTModelPart) == 20, "FTModelPart must be 20 bytes to match file data layout");
+_Static_assert(sizeof(FTCommonPart) == 16, "FTCommonPart must be 16 bytes to match file data layout");
+#else
+#define FTACCESSPART_GET_DL(accesspart) ((accesspart)->dl)
+#define FTACCESSPART_GET_MOBJSUBS(accesspart) ((accesspart)->mobjsubs)
+#define FTACCESSPART_GET_COSTUME_MATANIM_JOINTS(accesspart) ((accesspart)->costume_matanim_joints)
+#define FTMODELPART_GET_DL(modelpart) ((modelpart)->dl)
+#define FTMODELPART_GET_MOBJSUBS(modelpart) ((modelpart)->mobjsubs)
+#define FTMODELPART_GET_COSTUME_MATANIM_JOINTS(modelpart) ((modelpart)->costume_matanim_joints)
+#define FTMODELPART_GET_MAIN_MATANIM_JOINTS(modelpart) ((modelpart)->main_matanim_joints)
+#define FTMODELPARTCONTAINER_GET_DESC(container, index) ((container)->modelparts_desc[index])
+#define FTPARTS_GET_FLAGS(commonpart) ((commonpart)->flags)
+#define FTPARTS_GET_DOBJDESC(commonpart) ((commonpart)->dobjdesc)
+#define FTPARTS_GET_MOBJSUBS(commonpart) ((commonpart)->p_mobjsubs)
+#define FTPARTS_GET_COSTUME_MATANIM_JOINTS(commonpart) ((commonpart)->p_costume_matanim_joints)
+#endif
 
 struct FTModelPartDesc
 {
@@ -155,7 +240,11 @@ struct FTModelPartDesc
 
 struct FTModelPartContainer
 {
+#ifdef PORT
+    u32 modelparts_desc[FTPARTS_JOINT_NUM_MAX - nFTPartsJointCommonStart];
+#else
     FTModelPartDesc *modelparts_desc[FTPARTS_JOINT_NUM_MAX - nFTPartsJointCommonStart];
+#endif
 };
 
 struct FTModelPartStatus
@@ -181,8 +270,23 @@ struct FTTexturePartStatus
 
 struct FTMotionFlags
 {
+#ifdef PORT
+    // LP64/LE fix: positional C initializers (`{motion_id_val, attack_id_val}`)
+    // would write the wrong bitfield on LE — the LE declaration has `attack_id`
+    // declared first for correct runtime bit layout, but that makes the first
+    // positional init value land in `attack_id` instead of `motion_id`.  Using
+    // plain fields keeps the source-order positional init working.  Embedding
+    // struct (`FTStatusDesc`) is never read from file data so the size bump
+    // (2 → 4 bytes) is harmless.
+    s16 motion_id;
+    u16 attack_id;
+#elif IS_BIG_ENDIAN
     s16 motion_id : 10;
     u16 attack_id : 6;
+#else
+    u16 attack_id : 6;
+    s16 motion_id : 10;
+#endif
 };
 
 struct FTMotionScript
@@ -190,25 +294,52 @@ struct FTMotionScript
 	f32 script_wait;
 	u32 *p_script;
 	s32 script_id;
+#ifdef PORT
+	/* On IDO/N64, void* is 4 bytes, so the original `void *p_goto[1]`
+	 * + `s32 loop_count[4]` formed a contiguous 20-byte region where
+	 * p_goto[N] for N>0 cleanly aliased loop_count[N-1].  On LP64
+	 * void* is 8 bytes, so p_goto[1] (offset 32) aliases TWO loop_count
+	 * slots and the strides no longer line up: a 4-byte write to
+	 * loop_count[1] clobbers only the *upper* half of an 8-byte
+	 * return address sitting in p_goto[1], leaving p_script with
+	 * (loop_count[1] << 32) | retaddr_low — exactly the 0x3xxxxxxxx
+	 * fault we hit on Yoshi-egg-on-Giant-DK (motion 153, script_id=3).
+	 * Give p_goto its own dedicated slots so subroutine and loop state
+	 * don't share storage.  See docs/bugs/. */
+	void *p_goto[4];
+#else
 	void *p_goto[1];
+#endif
 	s32 loop_count[4];
 };
 
 struct FTMotionEventDefault // Event with no arguments
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
-    u32 value : 26;
+	u32 value : 26;
+#else
+	u32 value : 26;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventDouble // Event with no arguments
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 pad1 : 26;
 	u32 pad2 : 32;
+#else
+	u32 pad1 : 26;
+	u32 opcode : 6;
+	u32 pad2 : 32;
+#endif
 };
 
 struct FTMotionEventMakeAttack1
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 attack_id: 3;
 	u32 group_id : 3;
@@ -216,35 +347,77 @@ struct FTMotionEventMakeAttack1
 	u32 damage : 8;
 	ub32 can_rebound : 1;
 	u32 element : 4;
+#else
+	u32 element : 4;
+	ub32 can_rebound : 1;
+	u32 damage : 8;
+	s32 joint_id : 7;
+	u32 group_id : 3;
+	u32 attack_id: 3;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventMakeAttack2
 {
+#if IS_BIG_ENDIAN
 	u32 size : 16;
 	s32 off_x : 16;
+#else
+	s32 off_x : 16;
+	u32 size : 16;
+#endif
 };
 
 struct FTMotionEventMakeAttack3
 {
+#if IS_BIG_ENDIAN
 	s32 off_y : 16;
 	s32 off_z : 16;
+#else
+	s32 off_z : 16;
+	s32 off_y : 16;
+#endif
 };
 
 struct FTMotionEventMakeAttack4
 {
+#if IS_BIG_ENDIAN
 	s32 angle : 10;
 	u32 knockback_scale : 10;
 	u32 knockback_weight : 10;
-	u32 is_hit_ground_air : 2;  // This should really be two separate bits, but it doesn't match that way
+	u32 is_hit_ground_air : 2;
+#else
+	u32 is_hit_ground_air : 2;
+	u32 knockback_weight : 10;
+	u32 knockback_scale : 10;
+	s32 angle : 10;
+#endif
 };
 
 struct FTMotionEventMakeAttack5
 {
+#if IS_BIG_ENDIAN
 	s32 shield_damage : 8;
 	u32 fgm_level : 3;
 	u32 fgm_kind : 4;
 	u32 knockback_base : 10;
+	u32 pad : 7;
+#else
+	/* LE mirror: the 25 declared bits don't fill a u32, so a naive reversal
+	 * would start `knockback_base` at bit 0 and leave the unused 7 bits at
+	 * the TOP of the word — the opposite of where BE leaves them (bottom).
+	 * Every field would then land at the wrong physical position.
+	 * Leading `pad : 7` pushes the real fields up into the same bit
+	 * positions the BE layout produces. */
+	u32 pad : 7;
+	u32 knockback_base : 10;
+	u32 fgm_kind : 4;
+	u32 fgm_level : 3;
+	s32 shield_damage : 8;
+#endif
 };
+_Static_assert(sizeof(struct FTMotionEventMakeAttack5) == 4, "FTMotionEventMakeAttack5 must be 4 bytes — pad bits missing or bitfield packing broken");
 
 struct FTMotionEventMakeAttack
 {
@@ -257,15 +430,29 @@ struct FTMotionEventMakeAttack
 
 struct FTMotionEventSetAttackOffset1
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 attack_id: 3;
 	s32 off_x : 16;
+	u32 pad : 7;
+#else
+	u32 pad : 7;    /* see FTMotionEventMakeAttack5 for rationale */
+	s32 off_x : 16;
+	u32 attack_id: 3;
+	u32 opcode : 6;
+#endif
 };
+_Static_assert(sizeof(struct FTMotionEventSetAttackOffset1) == 4, "FTMotionEventSetAttackOffset1 must be 4 bytes");
 
 struct FTMotionEventSetAttackOffset2
 {
+#if IS_BIG_ENDIAN
 	s32 off_y : 16;
 	s32 off_z : 16;
+#else
+	s32 off_z : 16;
+	s32 off_y : 16;
+#endif
 };
 
 struct FTMotionEventSetAttackOffset
@@ -276,24 +463,51 @@ struct FTMotionEventSetAttackOffset
 
 struct FTMotionEventSetAttackCollDamage
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 attack_id: 3;
 	u32 damage : 8;
+	u32 pad : 15;
+#else
+	u32 pad : 15;   /* see FTMotionEventMakeAttack5 for rationale */
+	u32 damage : 8;
+	u32 attack_id: 3;
+	u32 opcode : 6;
+#endif
 };
+_Static_assert(sizeof(struct FTMotionEventSetAttackCollDamage) == 4, "FTMotionEventSetAttackCollDamage must be 4 bytes");
 
 struct FTMotionEventSetAttackCollSize
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 attack_id: 3;
 	u32 size : 16;
+	u32 pad : 7;
+#else
+	u32 pad : 7;    /* see FTMotionEventMakeAttack5 for rationale */
+	u32 size : 16;
+	u32 attack_id: 3;
+	u32 opcode : 6;
+#endif
 };
+_Static_assert(sizeof(struct FTMotionEventSetAttackCollSize) == 4, "FTMotionEventSetAttackCollSize must be 4 bytes");
 
 struct FTMotionEventSetAttackCollSound
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 attack_id: 3;
 	u32 fgm_level : 3;
+	u32 pad : 20;
+#else
+	u32 pad : 20;   /* see FTMotionEventMakeAttack5 for rationale */
+	u32 fgm_level : 3;
+	u32 attack_id: 3;
+	u32 opcode : 6;
+#endif
 };
+_Static_assert(sizeof(struct FTMotionEventSetAttackCollSound) == 4, "FTMotionEventSetAttackCollSound must be 4 bytes");
 
 struct FTMotionEventSetThrow1
 {
@@ -302,7 +516,11 @@ struct FTMotionEventSetThrow1
 
 struct FTMotionEventSetThrow2
 {
+#ifdef PORT
+	u32 throw_desc;     // Relocation token — use PORT_RESOLVE()
+#else
 	FTThrowHitDesc* throw_desc;
+#endif
 };
 
 struct FTMotionEventSetThrow
@@ -313,28 +531,50 @@ struct FTMotionEventSetThrow
 
 struct FTMotionEventMakeEffect1
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	s32 joint_id : 7;
 	u32 effect_id : 9;
 	u32 flag : 10;
+#else
+	u32 flag : 10;
+	u32 effect_id : 9;
+	s32 joint_id : 7;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventMakeEffect2
 {
+#if IS_BIG_ENDIAN
 	s32 off_x : 16;
 	s32 off_y : 16;
+#else
+	s32 off_y : 16;
+	s32 off_x : 16;
+#endif
 };
 
 struct FTMotionEventMakeEffect3
 {
+#if IS_BIG_ENDIAN
 	s32 off_z : 16;
 	s32 rng_x : 16;
+#else
+	s32 rng_x : 16;
+	s32 off_z : 16;
+#endif
 };
 
 struct FTMotionEventMakeEffect4
 {
+#if IS_BIG_ENDIAN
 	s32 rng_y : 16;
 	s32 rng_z : 16;
+#else
+	s32 rng_z : 16;
+	s32 rng_y : 16;
+#endif
 };
 
 struct FTMotionEventMakeEffect
@@ -347,33 +587,62 @@ struct FTMotionEventMakeEffect
 
 struct FTMotionEventSetHitStatusPartID
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	s32 joint_id : 7;
 	u32 hitstatus : 19;
+#else
+	u32 hitstatus : 19;
+	s32 joint_id : 7;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventSetDamageCollPartID1
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	s32 joint_id : 7;
+	u32 pad : 19;
+#else
+	u32 pad : 19;   /* see FTMotionEventMakeAttack5 for rationale */
+	s32 joint_id : 7;
+	u32 opcode : 6;
+#endif
 };
+_Static_assert(sizeof(struct FTMotionEventSetDamageCollPartID1) == 4, "FTMotionEventSetDamageCollPartID1 must be 4 bytes");
 
 struct FTMotionEventSetDamageCollPartID2
 {
+#if IS_BIG_ENDIAN
 	s32 off_x : 16;
 	s32 off_y : 16;
+#else
+	s32 off_y : 16;
+	s32 off_x : 16;
+#endif
 };
 
 struct FTMotionEventSetDamageCollPartID3
 {
+#if IS_BIG_ENDIAN
 	s32 off_z : 16;
 	s32 size_x : 16;
+#else
+	s32 size_x : 16;
+	s32 off_z : 16;
+#endif
 };
 
 struct FTMotionEventSetDamageCollPartID4
 {
+#if IS_BIG_ENDIAN
 	s32 size_y : 16;
 	s32 size_z : 16;
+#else
+	s32 size_z : 16;
+	s32 size_y : 16;
+#endif
 };
 
 struct FTMotionEventSetDamageCollPartID
@@ -391,7 +660,11 @@ struct FTMotionEventSubroutine1
 
 struct FTMotionEventSubroutine2
 {
+#ifdef PORT
+	u32 p_goto;         // Relocation token — use PORT_RESOLVE()
+#else
 	void* p_goto;
+#endif
 };
 
 struct FTMotionEventSubroutine
@@ -407,12 +680,20 @@ struct FTMotionEventSetDamageThrown1
 
 struct FTMotionEventSetDamageThrown2
 {
+#ifdef PORT
+	u32 p_subroutine;   // Relocation token — use PORT_RESOLVE()
+#else
 	void* p_subroutine;
+#endif
 };
 
 struct FTMotionDamageScript
 {
+#ifdef PORT
+	u32 p_script[2][nFTKindEnumCount];   // Relocation tokens — use PORT_RESOLVE()
+#else
 	void* p_script[2][nFTKindEnumCount];
+#endif
 };
 
 struct FTMotionEventSetDamageThrown
@@ -428,7 +709,11 @@ struct FTMotionEventGoto1
 
 struct FTMotionEventGoto2
 {
+#ifdef PORT
+	u32 p_goto;         // Relocation token — use PORT_RESOLVE()
+#else
 	void* p_goto;
+#endif
 };
 
 struct FTMotionEventGoto
@@ -444,7 +729,11 @@ struct FTMotionEventParallel1
 
 struct FTMotionEventParallel2
 {
+#ifdef PORT
+	u32 p_goto;         // Relocation token — use PORT_RESOLVE()
+#else
 	void* p_goto;
+#endif
 };
 
 struct FTMotionEventParallel
@@ -455,50 +744,91 @@ struct FTMotionEventParallel
 
 struct FTMotionEventSetModelPartID
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	s32 joint_id : 7;
 	s32 modelpart_id : 19;
+#else
+	s32 modelpart_id : 19;
+	s32 joint_id : 7;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventSetTexturePartID
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 texturepart_id : 6;
 	u32 frame : 20;
+#else
+	u32 frame : 20;
+	u32 texturepart_id : 6;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventSetColAnimID
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 colanim_id : 8;
 	u32 length : 18;
+#else
+	u32 length : 18;
+	u32 colanim_id : 8;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventSetSlopeContour
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 pad : 23;
 	u32 flags : 3;
+#else
+	u32 flags : 3;
+	u32 pad : 23;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventSetAfterImage
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 is_itemswing : 8;
 	s32 drawstatus : 18;
+#else
+	s32 drawstatus : 18;
+	u32 is_itemswing : 8;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventMakeRumble
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 length : 13;
 	u32 rumble_id : 13;
+#else
+	u32 rumble_id : 13;
+	u32 length : 13;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTMotionEventStopRumble
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 rumble_id : 26;
+#else
+	u32 rumble_id : 26;
+	u32 opcode : 6;
+#endif
 };
 
 struct FTStatusDesc
@@ -511,6 +841,13 @@ struct FTStatusDesc
     void (*proc_physics)(GObj*);
     void (*proc_map)(GObj*);
 };
+
+/*
+ * Character headers need FTStatusDesc / FTMotionDesc to be complete for their
+ * `extern FTStatusDesc dFTMarioSpecialStatusDescs[]` style declarations; they
+ * also provide the fighter-specific *StatusVars types used in the union below.
+ */
+#include <ft/ftchar.h>
 
 struct FTOpeningDesc
 {
@@ -693,11 +1030,30 @@ struct FTSkeleton
 {
     union
     {
+#ifdef PORT
+        u32 dl;        // Relocation token
+        u32 dls;       // Relocation token for a 2-entry display-list array
+#else
         Gfx *dl;        // Single array of display lists
         Gfx **dls;      // Pointer to two arrays of display lists
+#endif
     };
+#if IS_BIG_ENDIAN
     u8 flags;
+#else
+    u8 pad[3];
+    u8 flags;
+#endif
 };
+
+#ifdef PORT
+#define FTSKELETON_GET_DL(skeleton) ((Gfx*)PORT_RESOLVE((skeleton)->dl))
+#define FTSKELETON_GET_DLS(skeleton) (PORT_RESOLVE((skeleton)->dls))
+_Static_assert(sizeof(FTSkeleton) == 8, "FTSkeleton must be 8 bytes to match file data layout");
+#else
+#define FTSKELETON_GET_DL(skeleton) ((skeleton)->dl)
+#define FTSKELETON_GET_DLS(skeleton) ((skeleton)->dls)
+#endif
 
 struct FTShadow
 {
@@ -738,10 +1094,20 @@ struct FTCamera
 
 struct FTSprites
 {
+#ifdef PORT
+    u32 stock_sprite;   // Relocation token — use PORT_RESOLVE()
+    u32 stock_luts;     // Relocation token — resolves to array of u32 LUT tokens
+    u32 emblem;         // Relocation token
+#else
     Sprite *stock_sprite;
     int **stock_luts;
     Sprite *emblem;
+#endif
 };
+
+#ifdef PORT
+_Static_assert(sizeof(FTSprites) == 12, "FTSprites must be 12 bytes to match file data layout");
+#endif
 
 struct FTComputer
 {
@@ -851,12 +1217,19 @@ union FTKeyEvent
 {
     u16 halfword;
 
+#if IS_BIG_ENDIAN
     struct
     {
         u16 opcode : 4;
         u16 param : 12;
-    } 
-    command;
+    } command;
+#else
+    struct
+    {
+        u16 param : 12;
+        u16 opcode : 4;
+    } command;
+#endif
 
     Vec2b stick_range;
 };
@@ -921,6 +1294,7 @@ struct FTAttributes
     f32 halo_size;                                  // Respawn platform size?
     SYColorRGBA shade_color[3];
     SYColorRGBA fog_color;
+#if IS_BIG_ENDIAN
     ub32 is_have_attack11    : 1;
     ub32 is_have_attack12    : 1;
     ub32 is_have_attackdash  : 1;
@@ -940,20 +1314,60 @@ struct FTAttributes
     ub32 is_have_specialhi   : 1;
     ub32 is_have_specialairhi: 1;
     ub32 is_have_speciallw   : 1;
-    ub32 is_have_specialairlw: 1;                   
+    ub32 is_have_specialairlw: 1;
     ub32 is_have_catch       : 1;                   // Whether fighter has a grab
     ub32 is_have_voice       : 1;                   // Whether fighter can play FGMs marked "voice"
+#else
+    // LE: LSB-first bitfield allocation — reverse field order and add
+    // explicit padding so each field maps to the same bit position as on BE
+    // (the u32 value is identical after bswap32).
+    ub32 : 10;                                      // bits 0-9 (padding — matches BE trailing bits)
+    ub32 is_have_voice       : 1;                   // Whether fighter can play FGMs marked "voice"
+    ub32 is_have_catch       : 1;                   // Whether fighter has a grab
+    ub32 is_have_specialairlw: 1;
+    ub32 is_have_speciallw   : 1;
+    ub32 is_have_specialairhi: 1;
+    ub32 is_have_specialhi   : 1;
+    ub32 is_have_specialairn : 1;
+    ub32 is_have_specialn    : 1;
+    ub32 is_have_attackairlw : 1;
+    ub32 is_have_attackairhi : 1;
+    ub32 is_have_attackairb  : 1;
+    ub32 is_have_attackairf  : 1;
+    ub32 is_have_attackairn  : 1;
+    ub32 is_have_attacklw4   : 1;
+    ub32 is_have_attackhi4   : 1;
+    ub32 is_have_attacks4    : 1;
+    ub32 is_have_attacklw3   : 1;
+    ub32 is_have_attackhi3   : 1;
+    ub32 is_have_attacks3    : 1;
+    ub32 is_have_attackdash  : 1;
+    ub32 is_have_attack12    : 1;
+    ub32 is_have_attack11    : 1;
+#endif
     FTDamageCollDesc damage_coll_descs[11];         // Hurtbox array setup
     Vec3f hit_detect_range;                         // This is a radius around the fighter within which hitbox detection can occur
+#ifdef PORT
+    u32 setup_parts;                                // Relocation token — use PORT_RESOLVE()
+    u32 animlock;                                   // Relocation token
+#else
     u32 *setup_parts;                               // Pointer to two sets of flags marking joints that should be initialized on fighter creation
     u32 *animlock;                                  // Pointer to two sets of flags marking joints that should not be animated; ignores joints 0 through 3
+#endif
     s32 effect_joint_ids[5];                        // The game will cycle through these joints when applying certain particles such as electricity and flames
     sb32 cliff_status_ga[5];                        // Bool for whether fighter is grounded or airborne during each cliff state
     s32 unused_0x2CC;                               // ???
+#ifdef PORT
+    u32 hiddenparts;                                // Relocation token
+    u32 commonparts_container;                      // Relocation token
+    u32 dobj_lookup;                                // Relocation token
+    u32 shield_anim_joints[8];                      // Relocation tokens — one for each ordinal direction
+#else
     FTHiddenPart *hiddenparts;                      // Hidden fighter body parts?
     FTCommonPartContainer *commonparts_container;   // Base fighter body parts
     DObjDesc *dobj_lookup;                          // I don't actually know how this works at the moment
     AObjEvent32 **shield_anim_joints[8];            // One for each ordinal direction
+#endif
     s32 joint_rfoot_id;                             // Right foot joint
     f32 joint_rfoot_rotate;                         // Amount of bend applied to right foot on slope contour?
     s32 joint_lfoot_id;                             // Left foot joint
@@ -961,16 +1375,45 @@ struct FTAttributes
     u8 filler_0x30C[0x31C - 0x30C];
     f32 unk_0x31C;
     f32 unk_0x320;
+#ifdef PORT
+    u32 translate_scales;                           // Relocation token
+    u32 modelparts_container;                       // Relocation token
+    u32 accesspart;                                 // Relocation token
+    u32 textureparts_container;                     // Relocation token
+#else
     Vec3f *translate_scales;                        // A set of scaling vectors to modify the translation vector of a given joint?
     FTModelPartContainer *modelparts_container;     // Passive model parts controlled via motion events or code
     FTAccessPart *accesspart;                       // Headgear accessory (Pikachu wizard hat or Jigglypuff bow)
     FTTexturePartContainer *textureparts_container; // These are generally facial expressions, controlled via motion events
+#endif
     s32 joint_itemheavy_id;                         // Joint for holding heavy items
+#ifdef PORT
+    u32 thrown_status;                              // Relocation token
+#else
     FTThrownStatusArray *thrown_status;             // Array of thrown status IDs (forward- and back throw) to use for thrown fighters
+#endif
     s32 joint_itemlight_id;                         // Joint for holding light items
+#ifdef PORT
+    u32 sprites;                                    // Relocation token
+    u32 skeleton;                                   // Relocation token
+#else
     FTSprites *sprites;                             // Stock sprites, stock palettes and emblem sprites
     FTSkeleton **skeleton;                          // Electric damage skeleton model data
+#endif
 };
+
+#ifdef PORT
+_Static_assert(sizeof(FTAttributes) == 0x348, "FTAttributes must be 0x348 bytes to match file data layout");
+_Static_assert(offsetof(FTAttributes, dead_fgm_ids) == 0xB4, "dead_fgm_ids offset mismatch");
+_Static_assert(offsetof(FTAttributes, deadup_sfx) == 0xB8, "deadup_sfx offset mismatch");
+_Static_assert(offsetof(FTAttributes, smash_sfx) == 0xBC, "smash_sfx offset mismatch");
+_Static_assert(offsetof(FTAttributes, itemthrow_vel_scale) == 0xE4, "itemthrow_vel_scale offset mismatch");
+_Static_assert(offsetof(FTAttributes, heavyget_sfx) == 0xE8, "heavyget_sfx offset mismatch");
+_Static_assert(offsetof(FTAttributes, shade_color) == 0xF0, "shade_color offset mismatch");
+_Static_assert(offsetof(FTAttributes, fog_color) == 0xFC, "fog_color offset mismatch");
+_Static_assert(offsetof(FTAttributes, unused_0x2CC) == 0x2CC, "unused_0x2CC offset mismatch");
+_Static_assert(offsetof(FTAttributes, filler_0x30C) == 0x30C, "filler_0x30C offset mismatch");
+#endif
 
 // Main fighter struct
 struct FTStruct

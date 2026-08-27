@@ -4,7 +4,11 @@
 
 FTMotionDesc dFTMMarioSubMotionDescs[] =
 {
+#ifdef PORT
+	llFTMarioAnimWaitFileID, 0x80000000, 0x00000000,
+#else
 	&llFTMarioAnimWaitFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
@@ -18,6 +22,10 @@ FTMotionDesc dFTMMarioSubMotionDescs[] =
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_488_FileID, 0x80000000, 0x00000000
+#else
 	&llFTMMarioAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTMMarioSubMotionDescsCount = sizeof(dFTMMarioSubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

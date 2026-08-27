@@ -64,7 +64,11 @@ typedef struct {
     s32                 maxAuxBusses;
     s32                 outputRate;
     s32                 maxOutSamples;
+#ifdef PORT
+    uintptr_t           sv_dramout;
+#else
     s32                 sv_dramout;
+#endif
     s32                 sv_first;
 } N_ALSynth;
 
@@ -192,8 +196,18 @@ typedef struct {
     ALSeq              *target;        /* current sequence                 */
     ALMicroTime         curTime;
     ALBank             *bank;           /* current ALBank                   */
+#ifdef PORT
+    /* HAL stored two extra bank slots here as s32.  The game uses
+     * `(&seqp->bank)[idx]` to pick between them, which requires all three
+     * slots to share pointer width.  On LP64 `bank` is 8 bytes so
+     * `unknown0/1` must be pointers too, otherwise the idiom reads
+     * past the struct. */
+    ALBank             *unknown0;
+    ALBank             *unknown1;
+#else
     s32 unknown0; /* Added by HAL Laboratory? */
     s32 unknown1; /* Added by HAL Laboratory? */
+#endif
     s32                 uspt;           /* microseconds per tick            */
     s32                 nextDelta;      /* microseconds to next callback    */
     s32                 state;
@@ -223,8 +237,13 @@ typedef struct {
     ALCSeq             *target;         /* current sequence                 */
     ALMicroTime         curTime;
     ALBank             *bank;           /* current ALBank                   */
+#ifdef PORT
+    ALBank             *unknown0;
+    ALBank             *unknown1;
+#else
     s32 unknown0; /* Added by HAL Laboratory? */
     s32 unknown1; /* Added by HAL Laboratory? */
+#endif
     s32                 uspt;           /* microseconds per tick            */
     s32                 nextDelta;      /* microseconds to next callback    */
     s32                 state;

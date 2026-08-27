@@ -79,7 +79,12 @@ typedef struct SYTaskGfx
 {
     /* 0x00 */ SYTaskInfo info;
     /* 0x28 */ OSTask task;
+    #ifdef PORT
+    /* Pointer to a Gfx word field (segment F base), width must match Gwords.w1 on x64. */
+    /* 0x68 */ uintptr_t *unk68;
+    #else
     /* 0x68 */ u32 *unk68;
+    #endif
     /* 0x6C */ s32 *fb; // checked type? (-1 is meaningful)
     /* 0x70 */ s32 framebuffer_id; // frame buffer idx for D_80044F90
     /* 0x74 */ s32 unk74;
@@ -157,5 +162,7 @@ extern void sySchedulerAddClient(SYClient *arg0, OSMesgQueue *mq, OSMesg *msg, u
 extern s32 sySchedulerCheckReadyFramebuffer(SYTaskGfx *t);
 extern void sySchedulerThreadMain(void *arg);
 extern s32 func_80000B54(UNUSED SYTaskInfo *t);
+extern u32 sySchedulerGetTicCount(void);
+extern void sySchedulerSetTicCount(u32 tics);
 
 #endif /* SYS_THREAD_3_H */

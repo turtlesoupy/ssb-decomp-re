@@ -7,6 +7,9 @@
 
 extern void syTaskmanSetLoadScene();
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -15,7 +18,7 @@ extern u32 sySchedulerGetTicCount();
 // // // // // // // // // // // //
 
 // 0x801326D0
-u32 dMVOpeningCliffFileIDs[/* */] = { &llMVOpeningCliffFileID, &llMVOpeningStandoffWallpaperFileID };
+u32 dMVOpeningCliffFileIDs[/* */] = { llMVOpeningCliffFileID, llMVOpeningStandoffWallpaperFileID };
 
 // 0x801326D8
 Lights1 dMVOpeningCliffLights11 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x14, 0x14, 0x14);
@@ -145,7 +148,7 @@ void mvOpeningCliffMakeHills(void)
         (
             DObjDesc*,
             sMVOpeningCliffFiles[0],
-            &llMVOpeningCliffHillsDObjDesc
+            llMVOpeningCliffHillsDObjDesc
         ),
         NULL
     );
@@ -244,7 +247,7 @@ void mvOpeningCliffMakeWallpaper(void)
     gcAddGObjDisplay(wallpaper_gobj, lbCommonDrawSObjAttr, 27, GOBJ_PRIORITY_DEFAULT, ~0);
     gcAddGObjProcess(wallpaper_gobj, mvOpeningCliffWallpaperProcDisplay, nGCProcessKindFunc, 1);
 
-    wallpaper_sobj = lbCommonMakeSObjForGObj(wallpaper_gobj, lbRelocGetFileData(Sprite*, sMVOpeningCliffFiles[1], &llMVOpeningStandoffWallpaperSprite));
+    wallpaper_sobj = lbCommonMakeSObjForGObj(wallpaper_gobj, lbRelocGetFileData(Sprite*, sMVOpeningCliffFiles[1], llMVOpeningStandoffWallpaperSprite));
     wallpaper_sobj->sprite.attr &= ~SP_FASTCOPY;
 
     wallpaper_sobj->sprite.scalex = 2.0F;
@@ -253,7 +256,7 @@ void mvOpeningCliffMakeWallpaper(void)
     wallpaper_sobj->pos.x = 0.0F;
     wallpaper_sobj->pos.y = 0.0F;
 
-    wallpaper_sobj = lbCommonMakeSObjForGObj(wallpaper_gobj, lbRelocGetFileData(Sprite*, sMVOpeningCliffFiles[1], &llMVOpeningStandoffWallpaperSprite));
+    wallpaper_sobj = lbCommonMakeSObjForGObj(wallpaper_gobj, lbRelocGetFileData(Sprite*, sMVOpeningCliffFiles[1], llMVOpeningStandoffWallpaperSprite));
     wallpaper_sobj->sprite.attr &= ~SP_FASTCOPY;
 
     wallpaper_sobj->sprite.scalex = 2.0F;
@@ -276,7 +279,7 @@ void mvOpeningCliffMakeOcarina(void)
         (
             DObjDesc*,
             sMVOpeningCliffFiles[0],
-            &llMVOpeningCliffOcarinaDObjDesc
+            llMVOpeningCliffOcarinaDObjDesc
         ),
         NULL,
         nGCMatrixKindTraRotRpyRSca,
@@ -296,7 +299,7 @@ void mvOpeningCliffMakeOcarina(void)
         (
             AObjEvent32**,
             sMVOpeningCliffFiles[0],
-            &llMVOpeningCliffOcarinaAnimJoint
+            llMVOpeningCliffOcarinaAnimJoint
         ),
         0.0F
     );
@@ -347,7 +350,7 @@ void mvOpeningCliffMakeMainCamera(void)
         (
             AObjEvent32*,
             sMVOpeningCliffFiles[0],
-            &llMVOpeningCliffCamAnimJoint
+            llMVOpeningCliffCamAnimJoint
         ),
         0.0F
     );
@@ -386,7 +389,7 @@ void mvOpeningCliffMakeMainCamera(void)
         (
             AObjEvent32*,
             sMVOpeningCliffFiles[0],
-            &llMVOpeningCliffCamAnimJoint
+            llMVOpeningCliffCamAnimJoint
         ),
         0.0F
     );
@@ -467,7 +470,7 @@ void mvOpeningCliffFuncStart(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-    rl_setup.table_files_num = (u32)&llRelocFileCount;
+    rl_setup.table_files_num = (u32)llRelocFileCount;
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMVOpeningCliffStatusBuffer;
@@ -500,6 +503,9 @@ void mvOpeningCliffFuncStart(void)
 
     while (sySchedulerGetTicCount() < 2500)
     {
+#ifdef PORT
+		port_coroutine_yield();
+#endif
         continue;
     }
 }

@@ -75,6 +75,15 @@ s32 D_ovl1_80390E7C[] =
 
 FTMotionDesc dFTMarioSubMotionDescs[] =
 {
+#ifdef PORT
+	llFTMarioAnimWaitFileID, (intptr_t)&D_ovl1_80390DE4, 0x00000000,
+	ll_357_FileID, (intptr_t)&D_ovl1_80390E14, 0x00000000,
+	ll_358_FileID, (intptr_t)&D_ovl1_80390E34, 0x00000000,
+	ll_359_FileID, 0x80000000, 0x00000000,
+	ll_360_FileID, (intptr_t)&D_ovl1_80390E50, 0x00000000,
+	ll_361_FileID, (intptr_t)&D_ovl1_80390E70, 0x00000000,
+	ll_505_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTMarioAnimWaitFileID, &D_ovl1_80390DE4, 0x00000000,
 	&llFTMarioAnimWin2FileID, &D_ovl1_80390E14, 0x00000000,
 	&llFTMarioAnimWin3FileID, &D_ovl1_80390E34, 0x00000000,
@@ -82,7 +91,21 @@ FTMotionDesc dFTMarioSubMotionDescs[] =
 	&llFTMarioAnimWinBetaFileID, &D_ovl1_80390E50, 0x00000000,
 	&llFTMarioAnimClapsFileID, &D_ovl1_80390E70, 0x00000000,
 	&llFTMarioAnimRunFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_362_FileID, 0x80000000, 0x80000000,
+	ll_363_FileID, 0x80000000, 0x40000000,
+	ll_364_FileID, 0x80000000, 0x40000000,
+	ll_366_FileID, 0x80000000, 0x00000000,
+	ll_367_FileID, 0x80000000, 0x00000000,
+	ll_368_FileID, 0x80000000, 0x00000000,
+	ll_369_FileID, 0x80000000, 0x00000000,
+	ll_365_FileID, (intptr_t)&D_ovl1_80390E7C, 0x00000000,
+	ll_637_FileID, 0x80000000, 0x40000000,
+	ll_635_FileID, 0x80000000, 0x00000000,
+	ll_638_FileID, 0x80000000, 0x00000000
+#else
 	&llFTMarioAnimDollPickUpFileID, 0x80000000, 0x80000000,
 	&llFTMarioAnimDollFallsFileID, 0x80000000, 0x40000000,
 	&llFTMarioAnimDollRevivalFileID, 0x80000000, 0x40000000,
@@ -94,5 +117,6 @@ FTMotionDesc dFTMarioSubMotionDescs[] =
 	&llFTMarioAnimSuperJumpPunchAirFileID, 0x80000000, 0x40000000,
 	&llFTMarioAnimFireballGroundFileID, 0x80000000, 0x00000000,
 	&llFTMarioAnimMarioTornadoGroundFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTMarioSubMotionDescsCount = sizeof(dFTMarioSubMotionDescs)/sizeof(FTMotionDesc); // 0x00000013

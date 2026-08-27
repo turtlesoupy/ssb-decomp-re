@@ -1,5 +1,9 @@
 #include <ft/fighter.h>
 #include <sc/scene.h>
+#ifdef PORT
+#include <ft/ftmanager.h>
+#include <if/ifcommon.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //

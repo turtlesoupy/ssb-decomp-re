@@ -6,6 +6,9 @@
 #include <sys/rdp.h>
 #include <sys/controller.h>
 #include <reloc_data.h>
+#ifdef PORT
+#include <sys/audio.h>
+#endif
 
 extern void syAudioStopBGMAll();
 extern void* func_800269C0_275C0(u16);
@@ -38,7 +41,11 @@ mnCommonSetOptionChangeWaitN(sMNDataOptionChangeWait, is_button, stick_range, di
 // // // // // // // // // // // //
 
 // 0x80132F20
+#ifdef PORT
+u32 dMNDataFileIDs[/* */] = { llMNCommonFileID, llMNDataFileID };
+#else
 u32 dMNDataFileIDs[/* */] = { &llMNCommonFileID, &llMNDataFileID };
+#endif
 
 // 0x80132F28
 Lights1 dMNDataLights1 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x3C, 0x3C, 0x3C);
@@ -179,7 +186,11 @@ void mnDataSetOptionSpriteColors(GObj *gobj, s32 status)
 // 0x80131C24
 void mnDataMakeOptionTab(GObj *gobj, f32 pos_x, f32 pos_y, s32 lrs)
 {
+#ifdef PORT
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonOptionTabLeftSprite));
+#else
     SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonOptionTabLeftSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -187,7 +198,11 @@ void mnDataMakeOptionTab(GObj *gobj, f32 pos_x, f32 pos_y, s32 lrs)
     sobj->pos.x = pos_x;
     sobj->pos.y = pos_y;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonOptionTabMiddleSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonOptionTabMiddleSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -204,7 +219,11 @@ void mnDataMakeOptionTab(GObj *gobj, f32 pos_x, f32 pos_y, s32 lrs)
     sobj->lrs = lrs * 8;
     sobj->lrt = 29;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonOptionTabRightSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonOptionTabRightSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -246,7 +265,11 @@ void mnDataMakeCharacters(void)
 
     mnDataSetOptionSpriteColors(gobj, sMNDataOption == nMNDataOptionCharacters);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], llMNDataCharactersTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], &llMNDataCharactersTextSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -286,7 +309,11 @@ void mnDataMakeVSRecord(void)
 
     mnDataSetOptionSpriteColors(gobj, sMNDataOption == nMNDataOptionVSRecord);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], llMNDataVSRecordTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], &llMNDataVSRecordTextSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -313,7 +340,11 @@ void mnDataMakeSoundTest(void)
 
     mnDataSetOptionSpriteColors(gobj, sMNDataOption == nMNDataOptionSoundTest);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], llMNDataSoundTestTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], &llMNDataSoundTestTextSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -348,7 +379,11 @@ void mnDataMakeMenuGObj(void)
     SObj *sobj;
 
     // 0x80132F80 - Japanese descriptions
+#ifdef PORT
+    intptr_t offsets[/* */] = { llMNDataCharactersTextJapSprite, llMNDataVSRecordTextJapSprite, llMNDataSoundTestTextJapSprite };
+#else
     intptr_t offsets[/* */] = { &llMNDataCharactersTextJapSprite, &llMNDataVSRecordTextJapSprite, &llMNDataSoundTestTextJapSprite };
+#endif
 
     // 0x8013F28C
     Vec2f positions[/* */] =
@@ -363,7 +398,11 @@ void mnDataMakeMenuGObj(void)
 #if defined(REGION_JP)
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 3, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonFrameSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonFrameSprite));
+#endif
 
     sobj->pos.x = 93.0F;
     sobj->pos.y = 189.0F;
@@ -406,7 +445,11 @@ void mnDataMakeLabels(void)
 
     gcAddGObjDisplay(gobj, mnDataLabelsProcDisplay, 1, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonSmashLogoSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonSmashLogoSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -418,7 +461,11 @@ void mnDataMakeLabels(void)
     sobj->pos.x = 235.0F;
     sobj->pos.y = 158.0F;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], llMNDataDataTextSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], &llMNDataDataTextSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -440,12 +487,20 @@ void mnDataMakeDecals(void)
     gobj = gcMakeGObjSPAfter(0, NULL, 2, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 0, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonSmashBrosCollageSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonSmashBrosCollageSprite));
+#endif
 
     sobj->pos.x = 10.0F;
     sobj->pos.y = 10.0F;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonDecalPaperSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonDecalPaperSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -457,7 +512,11 @@ void mnDataMakeDecals(void)
     sobj->pos.x = 140.0F;
     sobj->pos.y = 143.0F;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], llMNCommonDecalPaperSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[0], &llMNCommonDecalPaperSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -469,7 +528,11 @@ void mnDataMakeDecals(void)
     sobj->pos.x = 225.0F;
     sobj->pos.y = 56.0F;
 
+#ifdef PORT
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], llMNDataDataIconDarkSprite));
+#else
     sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNDataFiles[1], &llMNDataDataIconDarkSprite));
+#endif
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -776,7 +839,11 @@ void mnDataFuncStart(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
+#ifdef PORT
+    rl_setup.table_files_num = (u32)llRelocFileCount;
+#else
     rl_setup.table_files_num = (u32)&llRelocFileCount;
+#endif
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMNDataStatusBuffer;

@@ -123,7 +123,11 @@ WPDesc dWPSamusChargeShotWeaponDesc =
     0x00,                                   // Render flags?
     nWPKindChargeShot,                     // Weapon Kind
     &gFTDataSamusSpecial1,                    // Pointer to character's loaded files?
+#ifdef PORT
+    llSamusSpecial1ChargeShotWeaponAttributes,    // Offset of weapon attributes in loaded files
+#else
     &llSamusSpecial1ChargeShotWeaponAttributes,    // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

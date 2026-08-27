@@ -7,6 +7,58 @@
 #include <sys/rdp.h>
 #include <stddef.h>
 
+extern void port_log(const char *fmt, ...);
+
+#ifdef PORT
+/* PORT diag: log GObj allocations for the kinds known to leak stale
+ * DObj.dl_link across scene boundaries (Ground=1010, Effect=1011).
+ * Resolves to the caller of the wrapper (gcMakeGObjSPAfter / SPBefore /
+ * After / Before), which is the user-level allocation site
+ * (efManagerMakeEffect, grCastleSetup, etc.) — addr2line on it pins the
+ * scene/effect that allocated this GObj. Cross-reference with the
+ * stale-dl_link bail log to identify which scene's GObj is surviving
+ * the scene-arena recycle. */
+#if defined(_MSC_VER)
+#include <intrin.h>
+#pragma intrinsic(_ReturnAddress)
+#define PORT_CALLER_RA() _ReturnAddress()
+#else
+#define PORT_CALLER_RA() __builtin_return_address(0)
+#endif
+#define PORT_LOG_GOBJ_ALLOC(gobj, _id, _link)                                  \
+	do                                                                         \
+	{                                                                          \
+		if ((gobj) != NULL && ((_id) == 1010 || (_id) == 1011))                \
+		{                                                                      \
+			port_log("SSB64: gobj_alloc gobj=%p id=%u link=%u caller=%p "      \
+			         "frame=%u\n",                                             \
+			         (void *) (gobj), (unsigned) (_id), (unsigned) (_link),    \
+			         PORT_CALLER_RA(),                                         \
+			         (unsigned) dSYTaskmanFrameCount);                         \
+		}                                                                      \
+	} while (0)
+#else
+#define PORT_LOG_GOBJ_ALLOC(gobj, _id, _link) ((void) 0)
+#endif
+
+/* Issue #128 follow-on (item-side variant): a stale GObj* from BSS-stored
+ * handles is being injected into gGCCommonDLLinks[] *after* gcSetupObjman
+ * cleared the array. Catching the injection (here) names the caller — the
+ * deferred discovery in gcCaptureTaggedGObjs only sees the consequence.
+ * Same gate as libultraship/src/fast/interpreter.cpp:50-56. */
+#ifdef PORT
+#if defined(__SANITIZE_ADDRESS__)
+#define PORT_DIAG_HAVE_ASAN 1
+#elif defined(__has_feature)
+#  if __has_feature(address_sanitizer)
+#    define PORT_DIAG_HAVE_ASAN 1
+#  endif
+#endif
+#ifdef PORT_DIAG_HAVE_ASAN
+#include <sanitizer/asan_interface.h>
+#endif
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //   GLOBAL / STATIC VARIABLES   //
@@ -406,6 +458,11 @@ GObj* gcGetGObjSetNextAlloc(void)
 		if (gobj == NULL)
 		{
 			sGCCommonHead = syTaskmanMalloc(sGCCommonSize, 0x8);
+			if (sGCCommonHead == NULL)
+			{
+				syDebugPrintf("om : couldn't get GObj (size=%d)\n", sGCCommonSize);
+				while (TRUE);
+			}
 			sGCCommonHead->link_next = NULL;
 			gobj = sGCCommonHead;
 		}
@@ -501,6 +558,21 @@ void gcRemoveGObjFromLinkedList(GObj *this_gobj)
 // 0x80007B98
 void gcAppendGObjToDLLinkedList(GObj *this_gobj, GObj *dl_link_gobj)
 {
+#ifdef PORT_DIAG_HAVE_ASAN
+	/* Catch the stale-GObj injection at write-time, not at first-draw read.
+	 * If this_gobj points into freed/poisoned heap, the next deref below
+	 * (this_gobj->dl_link_prev = ...) will trip ASan with a use-after-free
+	 * report whose stack trace names the caller — the BSS holder of the
+	 * stale pointer. The describe_address dump above the report names the
+	 * original allocation + free sites. */
+	if (__asan_region_is_poisoned((void *)this_gobj, sizeof(GObj)) != NULL) {
+		port_log("SSB64: gcAppendGObjToDLLinkedList: POISONED this_gobj=%p "
+		         "(caller injected stale GObj* from freed prior-scene heap). "
+		         "ASan should halt on the next deref.\n",
+		         (void *)this_gobj);
+		__asan_describe_address((void *)this_gobj);
+	}
+#endif
 	this_gobj->dl_link_prev = dl_link_gobj;
 
 	if (dl_link_gobj != NULL)
@@ -1590,6 +1662,18 @@ SObj* gcAddSObjForGObj(GObj *gobj, Sprite *sprite)
 	{
 		new_sobj->sprite = *sprite;
 	}
+#ifdef PORT
+	else
+	{
+		/* gcGetSObjSetNextAlloc pulls from the recycled-SObj freelist
+		 * with no zero-init, so the embedded Sprite carries whatever the
+		 * previous occupant wrote (including `nbitmaps` and `bitmap`
+		 * token). Zero it on the NULL-sprite path (e.g. ifcommon.c:1003)
+		 * so the next caller's `attr = SP_HIDDEN` is the only field
+		 * driving the renderer rather than leaking stale data. */
+		bzero(&new_sobj->sprite, sizeof(new_sobj->sprite));
+	}
+#endif
 	new_sobj->user_data.p = NULL;
 
 	return new_sobj;
@@ -1731,6 +1815,7 @@ GObj* gcMakeGObjSPAfter(u32 id, void (*func_run)(GObj*), u8 link, u32 priority)
 	}
 	gcLinkGObjSPAfter(new_gobj);
 
+	PORT_LOG_GOBJ_ALLOC(new_gobj, id, link);
 	return new_gobj;
 }
 
@@ -1745,6 +1830,7 @@ GObj* gcMakeGObjSPBefore(u32 id, void (*func_run)(GObj*), u8 link, u32 priority)
 	}
 	gcLinkGObjSPBefore(new_gobj);
 
+	PORT_LOG_GOBJ_ALLOC(new_gobj, id, link);
 	return new_gobj;
 }
 
@@ -1759,6 +1845,7 @@ GObj* gcMakeGObjAfter(u32 id, void (*func_run)(GObj*), GObj *link_gobj)
 	}
 	gcLinkGObjAfter(new_gobj, link_gobj);
 
+	PORT_LOG_GOBJ_ALLOC(new_gobj, id, link_gobj->link_id);
 	return new_gobj;
 }
 
@@ -1773,10 +1860,18 @@ GObj* gcMakeGObjBefore(u32 id, void (*func_run)(GObj*), GObj *link_gobj)
 	}
 	gcLinkGObjAfter(new_gobj, link_gobj->link_prev);
 
+	PORT_LOG_GOBJ_ALLOC(new_gobj, id, link_gobj->link_id);
 	return new_gobj;
 }
 
 // 0x80009A84
+/* PORT: 0xFE is a sentinel written into obj_kind after a successful eject.
+ * Decomp sets obj_kind to {0,1,2,3} (None/DObj/SObj/CObj); gcInitGObjCommon
+ * resets it to 0 on every re-alloc (see line ~1719), so a live gobj can
+ * never legitimately observe 0xFE. Detecting it tells us the caller is
+ * double-ejecting a freed gobj — which corrupts the free list and
+ * surfaces later as a zombie pointer deref. */
+#define GOBJ_PORT_EJECTED_SENTINEL 0xFE
 void gcEjectGObj(GObj *gobj)
 {
 	if ((gobj == NULL) || (gobj == gGCCurrentCommon))
@@ -1784,6 +1879,28 @@ void gcEjectGObj(GObj *gobj)
 		sGCRunStatus = 2;
 		return;
 	}
+
+	/* PORT: guard against double-eject. If we see the sentinel, the gobj
+	 * is already on the free list. Walking the list again would remove a
+	 * different gobj from its linked list (stale link_prev/link_next) and
+	 * push this gobj onto the free list a second time. Log loudly and
+	 * bail so the game stays alive long enough to diagnose the caller. */
+	if (gobj->obj_kind == GOBJ_PORT_EJECTED_SENTINEL) {
+		port_log("SSB64: gcEjectGObj DOUBLE-EJECT DETECTED gobj=%p id=%u "
+		         "link_id=%u dl_link_id=%u link_prev=%p link_next=%p — bailing\n",
+		         (void*)gobj, gobj->id,
+		         (unsigned)gobj->link_id, (unsigned)gobj->dl_link_id,
+		         (void*)gobj->link_prev, (void*)gobj->link_next);
+		return;
+	}
+
+	/* PORT crash-diag: log eject so we can correlate with a later crash. */
+	port_log("SSB64: gcEjectGObj ENTER gobj=%p id=%u kind=%u link_id=%u dl_link_id=%u "
+	         "gpr_head=%p obj=%p link_next=%p link_prev=%p\n",
+	         (void*)gobj, gobj->id, (unsigned)gobj->obj_kind,
+	         (unsigned)gobj->link_id, (unsigned)gobj->dl_link_id,
+	         (void*)gobj->gobjproc_head, gobj->obj,
+	         (void*)gobj->link_next, (void*)gobj->link_prev);
 
 	gcEndProcessAll(gobj);
 
@@ -1801,6 +1918,12 @@ void gcEjectGObj(GObj *gobj)
 
 	gcRemoveGObjFromLinkedList(gobj);
 	gcSetGObjPrevAlloc(gobj);
+
+	/* PORT: stamp sentinel AFTER the gobj is safely on the free list so
+	 * any subsequent eject attempt is detected above. */
+	gobj->obj_kind = GOBJ_PORT_EJECTED_SENTINEL;
+
+	port_log("SSB64: gcEjectGObj EXIT gobj=%p\n", (void*)gobj);
 }
 
 // 0x80009B48
@@ -2159,6 +2282,15 @@ GObjProcess* gcRunGObjProcess(GObjProcess *gobjproc)
 	{
 	case nGCProcessKindThread:
 		osStartThread(&gobjproc->exec.gobjthread->thread);
+#ifdef PORT
+		/* If the GObj thread's coroutine ran to completion (entry function
+		 * returned) without yielding via gcSleepCurrentGObjThread, no
+		 * message was sent to gGCMesgQueue — skip the blocking recv. */
+		if (gobjproc->exec.gobjthread->thread.state == OS_STATE_STOPPED)
+		{
+			break;
+		}
+#endif
 		osRecvMesg(&gGCMesgQueue, NULL, OS_MESG_BLOCK);
 		break;
 

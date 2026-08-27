@@ -78,6 +78,16 @@ f32 dFTCommonDataHandicapTable[/* */][2] =
 #endif
 };
 
+#ifdef PORT
+/* PORT: the table's row count is region-dependent (US carries extra rows)
+ * and its extern declaration has an unspecified bound, so callers cannot
+ * ARRAY_COUNT it. Export it from the definition site so
+ * portValidateBattleState() can range-check handicap values before they
+ * reach the dFTCommonDataHandicapTable[handicap - 1] indexing in
+ * ftParamGetCommonKnockback(); a handicap of 0 there reads index -1. */
+const s32 dFTCommonDataHandicapTableCount = ARRAY_COUNT(dFTCommonDataHandicapTable);
+#endif
+
 // 0x8012C970
 u16 dFTCommonDataDownBounceSFX[/* */] =
 {

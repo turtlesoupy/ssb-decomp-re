@@ -1,5 +1,8 @@
 #include <it/item.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -12,7 +15,11 @@ ITDesc dITTosakintoItemDesc =
 {
     nITKindTosakinto,                       // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataTosakintoItemAttributes, // Offset of item attributes in file?
+#else
     &llITCommonDataTosakintoItemAttributes, // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -173,11 +180,19 @@ void itTosakintoBounceInitVars(GObj *item_gobj)
 
     if (ip->kind == nITKindTosakinto)
     {
+#ifdef PORT
+        anim_joint = itGetPData(ip, llITCommonDataTosakintoDataStart, llITCommonDataTosakintoAnimJoint);
+#else
         anim_joint = itGetPData(ip, &llITCommonDataTosakintoDataStart, &llITCommonDataTosakintoAnimJoint);
+#endif
 
         gcAddDObjAnimJoint(dobj->child, anim_joint, 0.0F);
 
+#ifdef PORT
+        matanim_joint = itGetPData(ip, llITCommonDataTosakintoDataStart, llITCommonDataTosakintoMatAnimJoint);
+#else
         matanim_joint = itGetPData(ip, &llITCommonDataTosakintoDataStart, &llITCommonDataTosakintoMatAnimJoint);
+#endif
 
         gcAddMObjMatAnimJoint(dobj->child->mobj, matanim_joint, 0.0F);
 
@@ -247,7 +262,11 @@ GObj* itTosakintoMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataTosakintoDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataTosakintoDataStart), 0.0F);
+#endif
     }
     return item_gobj;
 }

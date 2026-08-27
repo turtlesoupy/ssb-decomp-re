@@ -7,6 +7,10 @@
 #include <reloc_data.h>
 
 extern u32 sySchedulerGetTicCount();
+extern void *func_800269C0_275C0(u16 id);
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -15,7 +19,7 @@ extern u32 sySchedulerGetTicCount();
 // // // // // // // // // // // //
 
 // 0x801325D0
-u32 dMVOpeningRunFileIDs[/* */] = { &llMVOpeningRunFileID, &llMVOpeningRunMainFileID, &llMVOpeningRunCrashFileID };
+u32 dMVOpeningRunFileIDs[/* */] = { llMVOpeningRunFileID, llMVOpeningRunMainFileID, llMVOpeningRunCrashFileID };
 
 // 0x801325DC
 Lights1 dMVOpeningRunLights11 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x14, 0x14, 0x14);
@@ -110,14 +114,14 @@ void mvOpeningRunMakeFighters(void)
 	// 0x80132630
 	intptr_t offsets[/* */] =
 	{
-		&llMVOpeningRunMarioAnimJoint,
-		&llMVOpeningRunFoxAnimJoint,
-		&llMVOpeningRunDonkeyAnimJoint,
-		&llMVOpeningRunSamusAnimJoint,
-		&llMVOpeningRunLinkAnimJoint,
-		&llMVOpeningRunYoshiAnimJoint,
-		&llMVOpeningRunKirbyAnimJoint,
-		&llMVOpeningRunPikachuAnimJoint
+		llMVOpeningRunMarioAnimJoint,
+		llMVOpeningRunFoxAnimJoint,
+		llMVOpeningRunDonkeyAnimJoint,
+		llMVOpeningRunSamusAnimJoint,
+		llMVOpeningRunLinkAnimJoint,
+		llMVOpeningRunYoshiAnimJoint,
+		llMVOpeningRunKirbyAnimJoint,
+		llMVOpeningRunPikachuAnimJoint
 	};
 
 	for (i = 0; i < ARRAY_COUNT(fkinds); i++)
@@ -177,7 +181,7 @@ void mvOpeningRunMakeWallpaper(void)
 	gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 28, GOBJ_PRIORITY_DEFAULT, ~0);
 
-	left_sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningRunFiles[0], &llMVOpeningRunWallpaperSprite));
+	left_sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningRunFiles[0], llMVOpeningRunWallpaperSprite));
 
 	left_sobj->sprite.attr &= ~SP_FASTCOPY;
 
@@ -187,7 +191,7 @@ void mvOpeningRunMakeWallpaper(void)
 	left_sobj->pos.x = -320.0F;
 	left_sobj->pos.y = 0.0F;
 
-	right_sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningRunFiles[0], &llMVOpeningRunWallpaperSprite));
+	right_sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningRunFiles[0], llMVOpeningRunWallpaperSprite));
 
 	right_sobj->sprite.attr &= ~SP_FASTCOPY;
 
@@ -205,7 +209,7 @@ void mvOpeningRunMakeCrash(void)
 {
 	GObj *gobj = gcMakeGObjSPAfter(0, NULL, 19, GOBJ_PRIORITY_DEFAULT);
 
-	gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVOpeningRunFiles[2], &llMVOpeningRunCrashDObjDesc), NULL);
+	gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVOpeningRunFiles[2], llMVOpeningRunCrashDObjDesc), NULL);
 	gcAddGObjDisplay(gobj, gcDrawDObjTreeForGObj, 6, GOBJ_PRIORITY_DEFAULT, ~0);
 
 	DObjGetStruct(gobj)->translate.vec.f.x = 960.0F;
@@ -218,8 +222,8 @@ void mvOpeningRunMakeCrash(void)
 	DObjGetStruct(gobj)->scale.vec.f.y = 0.9F;
 	DObjGetStruct(gobj)->scale.vec.f.z = 0.9F;
 
-	gcAddMObjAll(gobj, lbRelocGetFileData(MObjSub***, sMVOpeningRunFiles[2], &llMVOpeningRunCrashMObjSub));
-	gcAddMatAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32***, sMVOpeningRunFiles[2], &llMVOpeningRunCrashMatAnimJoint), 0.0F);
+	gcAddMObjAll(gobj, lbRelocGetFileData(MObjSub***, sMVOpeningRunFiles[2], llMVOpeningRunCrashMObjSub));
+	gcAddMatAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32***, sMVOpeningRunFiles[2], llMVOpeningRunCrashMatAnimJoint), 0.0F);
 	gcAddGObjProcess(gobj, gcPlayAnimAll, nGCProcessKindFunc, 1);
 	gcPlayAnimAll(gobj);
 }
@@ -229,7 +233,7 @@ void mvOpeningRunInitMainCamera(GObj *camera_gobj)
 {
 	CObj* cobj = CObjGetStruct(camera_gobj);
 	syRdpSetViewport(&cobj->viewport, 10.0F, 10.0F, 310.0F, 230.0F);
-	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningRunFiles[1], &llMVOpeningRunMainCamAnimJoint), 0.0F);
+	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningRunFiles[1], llMVOpeningRunMainCamAnimJoint), 0.0F);
 	gcAddGObjProcess(camera_gobj, gcPlayCamAnim, nGCProcessKindFunc, 1);
 }
 
@@ -320,7 +324,27 @@ void mvOpeningRunFuncRun(GObj *gobj)
 		{
 			mvOpeningRunMakeCrash();
 			func_800269C0_275C0(nSYAudioFGMExplodeL);
+#ifdef PORT
+			/* Issue #73 restored the impact-flash mesh, but that mesh's
+			 * world geometry spans ~480 Z units of depth (parent rotate.y
+			 * = 90° swings the local-XY-planar starburst into the YZ plane).
+			 * In 4:3 the depth foreshortening is hidden behind the scissor
+			 * crop; in widescreen the extra horizontal frustum exposes a
+			 * perspective trapezoid. Tighten the scissor to the original
+			 * 4:3 sub-region for the 30-tic explosion window so the mesh
+			 * renders the same in widescreen as in 4:3, including the
+			 * 26-frame bitmap animation cycling through the rays. */
+			extern void GfxSetTight4_3ScissorWindow(int active);
+			GfxSetTight4_3ScissorWindow(1);
+#endif
 		}
+#ifdef PORT
+		if (sMVOpeningRunTotalTimeTics == 220)
+		{
+			extern void GfxSetTight4_3ScissorWindow(int active);
+			GfxSetTight4_3ScissorWindow(0);
+		}
+#endif
 		if (sMVOpeningRunTotalTimeTics == 220)
 		{
 			gSCManagerSceneData.scene_prev = gSCManagerSceneData.scene_curr;
@@ -338,7 +362,7 @@ void mvOpeningRunFuncStart(void)
 	LBRelocSetup rl_setup;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-	rl_setup.table_files_num = (u32)&llRelocFileCount;
+	rl_setup.table_files_num = (u32)llRelocFileCount;
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sMVOpeningRunStatusBuffer;
@@ -378,6 +402,9 @@ void mvOpeningRunFuncStart(void)
 
 	while (sySchedulerGetTicCount() < 2250)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	};
 }

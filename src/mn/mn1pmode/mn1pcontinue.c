@@ -5,6 +5,11 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <sys/audio.h>
+extern void *func_800269C0_275C0(u16 id);
+#ifdef PORT
+#include "fighter_registry.h"
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -36,11 +41,11 @@ mnCommonCheckGetOptionStickInputLR(sMN1PContinueOptionChangeWait, stick_range, m
 // 0x80134160
 u32 dMN1PContinueFileIDs[/* */] =
 {
-    &llMN1PContinueFileID,
-    &llSC1PStageClear2FileID,
-    &llIFCommonAnnounceCommonFileID,
-    &llIFCommonPlayerDamageFileID,
-    &llSC1PStageClear1FileID
+    llMN1PContinueFileID,
+    llSC1PStageClear2FileID,
+    llIFCommonAnnounceCommonFileID,
+    llIFCommonPlayerDamageFileID,
+    llSC1PStageClear1FileID
 };
 
 // 0x80134178
@@ -224,16 +229,16 @@ Sprite* mnPlayers1PGameContinueScoreDigitGetSprite(s32 digit)
     // 0x80134534
     intptr_t offsets[/* */] =
     {
-        &llIFCommonPlayerDamageDigit0Sprite,
-        &llIFCommonPlayerDamageDigit1Sprite,
-        &llIFCommonPlayerDamageDigit2Sprite,
-        &llIFCommonPlayerDamageDigit3Sprite,
-        &llIFCommonPlayerDamageDigit4Sprite,
-        &llIFCommonPlayerDamageDigit5Sprite,
-        &llIFCommonPlayerDamageDigit6Sprite,
-        &llIFCommonPlayerDamageDigit7Sprite,
-        &llIFCommonPlayerDamageDigit8Sprite,
-        &llIFCommonPlayerDamageDigit9Sprite
+        llIFCommonPlayerDamageDigit0Sprite,
+        llIFCommonPlayerDamageDigit1Sprite,
+        llIFCommonPlayerDamageDigit2Sprite,
+        llIFCommonPlayerDamageDigit3Sprite,
+        llIFCommonPlayerDamageDigit4Sprite,
+        llIFCommonPlayerDamageDigit5Sprite,
+        llIFCommonPlayerDamageDigit6Sprite,
+        llIFCommonPlayerDamageDigit7Sprite,
+        llIFCommonPlayerDamageDigit8Sprite,
+        llIFCommonPlayerDamageDigit9Sprite
     };
     return lbRelocGetFileData(Sprite*, sMN1PContinueFiles[3], offsets[digit]);
 }
@@ -291,7 +296,7 @@ void mnPlayers1PGameContinueMakeScoreDisplay(s32 points)
     sMN1PContinueScoreGObj = gobj = gcMakeGObjSPAfter(0, NULL, 20, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 28, GOBJ_PRIORITY_DEFAULT, ~0);
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[1], &llSC1PStageClear2ScoreTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[1], llSC1PStageClear2ScoreTextSprite));
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -319,9 +324,16 @@ void func_ovl55_80132094(void)
 // 0x8013209C
 void mnPlayers1PGameContinueSetFighterScale(GObj *gobj, s32 fkind)
 {
+#ifdef PORT
+    f32 scale = port_fighter_scale(fkind);
+    DObjGetStruct(gobj)->scale.vec.f.x = scale;
+    DObjGetStruct(gobj)->scale.vec.f.y = scale;
+    DObjGetStruct(gobj)->scale.vec.f.z = scale;
+#else
     DObjGetStruct(gobj)->scale.vec.f.x = dSCSubsysFighterScales[fkind];
     DObjGetStruct(gobj)->scale.vec.f.y = dSCSubsysFighterScales[fkind];
     DObjGetStruct(gobj)->scale.vec.f.z = dSCSubsysFighterScales[fkind];
+#endif
 }
 
 // 0x801320D4
@@ -454,7 +466,7 @@ void mnPlayers1PGameContinueMakeRoom(void)
     sMN1PContinueRoomGObj = gobj = gcMakeGObjSPAfter(0, NULL, 19, GOBJ_PRIORITY_DEFAULT);
 
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 29, GOBJ_PRIORITY_DEFAULT, ~0);
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], &llMN1PContinueRoomSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], llMN1PContinueRoomSprite));
 
     sobj->pos.x = 30.0F;
     sobj->pos.y = 28.0F;
@@ -468,7 +480,7 @@ void mnPlayers1PGameContinueMakeSpotlight(void)
 
     sMN1PContinueShadowGObj = gobj = gcMakeGObjSPAfter(0, NULL, 21, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 30, GOBJ_PRIORITY_DEFAULT, ~0);
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], &llMN1PContinueShadowSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], llMN1PContinueShadowSprite));
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -482,7 +494,7 @@ void mnPlayers1PGameContinueMakeSpotlight(void)
 
     sMN1PContinueSpotlightGObj = gobj = gcMakeGObjSPAfter(0, NULL, 21, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 30, GOBJ_PRIORITY_DEFAULT, ~0);
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], &llMN1PContinueSpotlightSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], llMN1PContinueSpotlightSprite));
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -503,7 +515,7 @@ void mnPlayers1PGameContinueMakeContinue(void)
 
     sMN1PContinueContinueGObj = gobj = gcMakeGObjSPAfter(0, NULL, 20, GOBJ_PRIORITY_DEFAULT);
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 28, GOBJ_PRIORITY_DEFAULT, ~0);
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], &llMN1PContinueContinueTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], llMN1PContinueContinueTextSprite));
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -574,7 +586,7 @@ void mnPlayers1PGameContinueMakeOptions(void)
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 28, GOBJ_PRIORITY_DEFAULT, ~0);
     gcAddGObjProcess(gobj, MN1PContinueOptionProcUpdate, nGCProcessKindFunc, 1);
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], &llMN1PContinueYesTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], llMN1PContinueYesTextSprite));
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -582,7 +594,7 @@ void mnPlayers1PGameContinueMakeOptions(void)
     sobj->pos.x = 84.0F;
     sobj->pos.y = 129.0F;
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], &llMN1PContinueNoTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], llMN1PContinueNoTextSprite));
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -626,7 +638,7 @@ void mnPlayers1PGameContinueMakeCursor(void)
 
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 28, GOBJ_PRIORITY_DEFAULT, ~0);
     gcAddGObjProcess(gobj, mnPlayers1PGameContinueCursorProcUpdate, nGCProcessKindFunc, 1);
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], &llMN1PContinueCursorSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMN1PContinueFiles[0], llMN1PContinueCursorSprite));
 
     sobj->sprite.attr &= ~SP_FASTCOPY;
     sobj->sprite.attr |= SP_TRANSPARENT;
@@ -697,14 +709,14 @@ void mnPlayers1PGameContinueMakeGameOverText(void)
     // 0x801341F8
     intptr_t letters[/* */] =
     { 
-        &llIFCommonAnnounceCommonLetterGSprite,
-        &llIFCommonAnnounceCommonLetterASprite,
-        &llIFCommonAnnounceCommonLetterMSprite,
-        &llIFCommonAnnounceCommonLetterESprite,
-        &llIFCommonAnnounceCommonLetterOSprite,
-        &llIFCommonAnnounceCommonLetterVSprite,
-        &llIFCommonAnnounceCommonLetterESprite,
-        &llIFCommonAnnounceCommonLetterRSprite
+        llIFCommonAnnounceCommonLetterGSprite,
+        llIFCommonAnnounceCommonLetterASprite,
+        llIFCommonAnnounceCommonLetterMSprite,
+        llIFCommonAnnounceCommonLetterESprite,
+        llIFCommonAnnounceCommonLetterOSprite,
+        llIFCommonAnnounceCommonLetterVSprite,
+        llIFCommonAnnounceCommonLetterESprite,
+        llIFCommonAnnounceCommonLetterRSprite
     };
 
     // 0x80134218
@@ -750,9 +762,18 @@ void mnPlayers1PGameContinueGameOverProcUpdate(GObj *gobj)
 
         DObjGetStruct(sMN1PContinueFighterGObj)->translate.vec.f.y += 3.0F;
 
+#ifdef PORT
+        {
+            f32 base_scale = port_fighter_scale(sMN1PContinueFighterDemoDesc.fkind) * sMN1PContinueGameOverFadeOutScale;
+            DObjGetStruct(sMN1PContinueFighterGObj)->scale.vec.f.x = base_scale;
+            DObjGetStruct(sMN1PContinueFighterGObj)->scale.vec.f.y = base_scale;
+            DObjGetStruct(sMN1PContinueFighterGObj)->scale.vec.f.z = base_scale;
+        }
+#else
         DObjGetStruct(sMN1PContinueFighterGObj)->scale.vec.f.x = dSCSubsysFighterScales[sMN1PContinueFighterDemoDesc.fkind] * sMN1PContinueGameOverFadeOutScale;
         DObjGetStruct(sMN1PContinueFighterGObj)->scale.vec.f.y = dSCSubsysFighterScales[sMN1PContinueFighterDemoDesc.fkind] * sMN1PContinueGameOverFadeOutScale;
         DObjGetStruct(sMN1PContinueFighterGObj)->scale.vec.f.z = dSCSubsysFighterScales[sMN1PContinueFighterDemoDesc.fkind] * sMN1PContinueGameOverFadeOutScale;
+#endif
     }
 }
 
@@ -992,6 +1013,19 @@ void mnPlayers1PGameContinueInitVars(void)
     sMN1PContinueStatus = 0;
     sMN1PContinueUnknown0x80134354 = 0;
     sMN1PContinueOptionNoGameOverAutoWait = -1;
+
+#ifdef PORT
+    /* Overlay BSS persists across re-entries on the static-link port; on N64
+     * these were re-zeroed by the overlay DMA. Without resetting
+     * sMN1PContinueOptionYesRetryTic, the unconditional tic==retryTic check in
+     * FuncRun fires when tics catch up to the prior session's value, exits to
+     * title with sMN1PContinueIsSelectContinue=TRUE, and sc1pmanager treats
+     * that as "Yes" — replaying the stage even when the player picked No. */
+    sMN1PContinueOptionYesRetryTic = 0;
+    sMN1PContinueOptionNoGameOverInputWait = 0;
+    sMN1PContinueOptionChangeWait = 0;
+    sMN1PContinueIsSelectContinue = FALSE;
+#endif
 }
 
 // 0x80133990 - real
@@ -1189,8 +1223,17 @@ void mnPlayers1PGameContinueFuncStart(void)
     s32 unused;
     LBRelocSetup rl_setup;
 
+#ifdef PORT
+    /* Issue #103: sMN1PContinueFighterGObj and sMN1PContinueFigatreeHeap are
+     * static globals that survive scene transitions; the previous instance
+     * left them holding pointers into a now-freed scene arena. Clear before
+     * mnPlayers1PGameContinueFuncRun assigns the new fighter at line 348. */
+    sMN1PContinueFighterGObj = NULL;
+    sMN1PContinueFigatreeHeap = NULL;
+#endif
+
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-    rl_setup.table_files_num = (u32)&llRelocFileCount;
+    rl_setup.table_files_num = (u32)llRelocFileCount;
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMN1PContinueStatusBuffer;

@@ -2,6 +2,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -14,7 +17,11 @@ ITDesc dITLizardonItemDesc =
 {
     nITKindLizardon,                        // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataLizardonItemAttributes,  // Offset of item attributes in file?
+#else
     &llITCommonDataLizardonItemAttributes,  // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -80,7 +87,11 @@ WPDesc dITLizardonWeaponFlameWeaponDesc =
     0x00,                                   // Render flags?
     nWPKindLizardonFlame,                   // Weapon Kind
     &gITManagerCommonData,                    // Pointer to character's loaded files?
+#ifdef PORT
+    llITCommonDataLizardonFlameWeaponAttributes,// Offset of weapon attributes in loaded files
+#else
     &llITCommonDataLizardonFlameWeaponAttributes,// Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -152,6 +163,9 @@ sb32 itLizardonFallUnusedSetStatus(GObj *item_gobj) // Unused
 
     itMapSetAir(ip);
     itMainSetStatus(item_gobj, dITLizardonStatusDescs, nITLizardonStatusFallUnused);
+#ifdef PORT
+    return FALSE;
+#endif
 }
 
 // 0x8017F53C
@@ -268,10 +282,19 @@ void itLizardonAttackInitVars(GObj *item_gobj)
 
     if (ip->kind == nITKindLizardon)
     {
+#ifdef PORT
+        addr = (void*) ((uintptr_t)PORT_RESOLVE(ip->attr->data) - (intptr_t)llITCommonDataLizardonDataStart);
+#else
         addr = (void*) ((uintptr_t)ip->attr->data - (intptr_t)&llITCommonDataLizardonDataStart);
+#endif
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, lbRelocGetFileData(AObjEvent32*, addr, llITCommonDataLizardonAnimJoint), 0.0F);
+        gcAddMObjMatAnimJoint(dobj->mobj, lbRelocGetFileData(AObjEvent32*, addr, llITCommonDataLizardonMatAnimJoint), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, lbRelocGetFileData(AObjEvent32*, addr, &llITCommonDataLizardonAnimJoint), 0.0F);
         gcAddMObjMatAnimJoint(dobj->mobj, lbRelocGetFileData(AObjEvent32*, addr, &llITCommonDataLizardonMatAnimJoint), 0.0F);
+#endif
         gcPlayAnimAll(item_gobj);
     }
 }
@@ -341,7 +364,11 @@ GObj* itLizardonMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataLizardonDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataLizardonDataStart), 0.0F);
+#endif
     }
     return item_gobj;
 }

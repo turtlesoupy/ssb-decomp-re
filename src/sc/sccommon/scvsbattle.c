@@ -1,9 +1,41 @@
 #include <ft/fighter.h>
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 #include <if/interface.h>
 #include <gr/ground.h>
 #include <sc/scene.h>
+#include <sys/netinput.h>
+#include <sys/netpeer.h>
+#include <sys/netreplay.h>
 #include <sys/video.h>
 #include <reloc_data.h>
+#include <gm/gmcamera.h>
+#include <it/itmanager.h>
+#include <sys/audio.h>
+#include <wp/wpmanager.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void func_800266A0_272A0(void);
+
+#ifdef PORT
+/* VS on Final Destination is a port addition — the N64 game never offered
+ * FD outside the 1P final battle. The FD map file's bgm_id is the one-shot
+ * Master Hand entrance sting (nSYAudioBGMBossEntry), which the 1P flow
+ * depends on (sc1pgame.c switches to the real FD theme after the entrance
+ * cutscene), so the data file can't change. In VS there is no entrance —
+ * mpCollisionSetPlayBGM played the sting once and the match went silent
+ * (issue #228). Re-aim the default at the FD battle theme right after the
+ * map BGM starts. Metal Cavern / Battlefield carry looping themes in their
+ * map files and need no remap. */
+static void scVSBattlePortFixupFDMusic(void)
+{
+	if (gSCManagerSceneData.gkind == nGRKindLast)
+	{
+		gMPCollisionBGMCurrent = gMPCollisionBGMDefault = nSYAudioBGMLast;
+		syAudioPlayBGM(0, nSYAudioBGMLast);
+	}
+}
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -40,7 +72,7 @@ SYTaskmanSetup dSCVSBattleTaskmanSetup =
         2,                              // ???
         0xC000,                         // RDP Output Buffer Size
         scVSBattleFuncLights,       	// Pre-render function
-        syControllerFuncRead,           // Controller I/O function
+        syNetInputFuncRead,             // Controller I/O function
     },
 
     0,                                  // Number of GObjThreads
@@ -74,7 +106,100 @@ SYTaskmanSetup dSCVSBattleTaskmanSetup =
 // 0x8018D0C0
 void scVSBattleFuncUpdate(void)
 {
+	syNetPeerUpdateBattleGate();
+
+	if (syNetPeerCheckBattleExecutionReady() == FALSE)
+	{
+		return;
+	}
 	ifCommonBattleUpdateInterfaceAll();
+	syNetReplayUpdate();
+	syNetPeerUpdate();
+}
+
+// neutral spawn interceptor
+void port_comp_ruleset_get_spawn(s32 player, Vec3f* pos)
+{
+	extern int port_enhancement_neutral_spawns(void);
+	s32 total_players;
+
+	// 1. Default Behavior (Vanilla map lookup)
+	mpCollisionGetPlayerMapObjPosition(player, pos);
+
+	if (!port_enhancement_neutral_spawns()) return;
+
+	total_players = gSCManagerBattleState->pl_count + gSCManagerBattleState->cp_count;
+
+	// 2. 1v1 Neutral Spawns (Platform vs Platform)
+	if (total_players == 2)
+	{
+		s32 active_idx = 0;
+		s32 i;
+		for (i = 0; i < player; i++)
+		{
+			if (gSCManagerBattleState->players[i].pkind != nFTPlayerKindNot) active_idx++;
+		}
+		if (active_idx == 0) mpCollisionGetPlayerMapObjPosition(1, pos); // Left Plat
+		if (active_idx == 1) mpCollisionGetPlayerMapObjPosition(3, pos); // Right Plat
+	}
+
+	// 3. 2v2 Team Spawns (Plat + Ground Hook)
+	// By strictly checking is_team_battle here, 3-Player and 4-Player FFAs
+	// will just ignore this block and use the vanilla Default Behavior!
+	else if ((total_players == 4) && gSCManagerBattleState->is_team_battle)
+	{
+		Vec3f ground_spawn;
+		Vec3f left_plat;
+		Vec3f right_plat;
+
+		// Query the stage for the reference coordinates
+		mpCollisionGetPlayerMapObjPosition(0, &ground_spawn); // Gets Ground Y
+		mpCollisionGetPlayerMapObjPosition(1, &left_plat);    // Gets Left X
+		mpCollisionGetPlayerMapObjPosition(3, &right_plat);   // Gets Right X
+
+		s32 my_team = gSCManagerBattleState->players[player].team;
+		s32 team_left = -1;
+		s32 team_right = -1;
+		s32 my_team_member_idx = 0; // 0 = first member, 1 = second member
+		s32 i;
+
+		// Figure out which team goes on the left, and which goes on the right
+		for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+		{
+			if (gSCManagerBattleState->players[i].pkind != nFTPlayerKindNot)
+			{
+				s32 this_team = gSCManagerBattleState->players[i].team;
+
+				if (team_left == -1) team_left = this_team;
+				else if ((team_left != this_team) && (team_right == -1)) team_right = this_team;
+
+				if (i == player) break; // Stop counting when we reach ourselves
+				if (this_team == my_team) my_team_member_idx++;
+			}
+		}
+
+		// Assign Coordinates!
+		if (my_team == team_left)
+		{
+			if (my_team_member_idx == 0) *pos = left_plat; // Teammate 1 -> Plat
+			else
+			{
+				pos->x = left_plat.x;
+				pos->y = ground_spawn.y; // Teammate 2 -> Ground Hook
+				pos->z = left_plat.z;
+			}
+		}
+		else
+		{
+			if (my_team_member_idx == 0) *pos = right_plat; // Teammate 1 -> Plat
+			else
+			{
+				pos->x = right_plat.x;
+				pos->y = ground_spawn.y; // Teammate 2 -> Ground Hook
+				pos->z = right_plat.z;
+			}
+		}
+	}
 }
 
 // 0x8018D0E0 - Get player's initial facing direction for battle start
@@ -91,7 +216,8 @@ s32 scVSBattleGetStartPlayerLR(s32 this_player)
 	near_dist = 65536.0F;
 	near_spawn = 0.0F;
 
-	mpCollisionGetPlayerMapObjPosition(this_player, &this_spawn_pos);
+	//mpCollisionGetPlayerMapObjPosition(this_player, &this_spawn_pos);
+	port_comp_ruleset_get_spawn(this_player, &this_spawn_pos);
 
 	for (loop_player = 0; loop_player < ARRAY_COUNT(gSCManagerBattleState->players); loop_player++)
 	{
@@ -105,7 +231,8 @@ s32 scVSBattleGetStartPlayerLR(s32 this_player)
 		}
 		else if (gSCManagerBattleState->players[loop_player].player != gSCManagerBattleState->players[this_player].player)
 		{
-			mpCollisionGetPlayerMapObjPosition(loop_player, &loop_spawn_pos);
+			//mpCollisionGetPlayerMapObjPosition(loop_player, &loop_spawn_pos);
+			port_comp_ruleset_get_spawn(loop_player, &loop_spawn_pos);
 
 			distx = (loop_spawn_pos.x < this_spawn_pos.x) ? -(loop_spawn_pos.x - this_spawn_pos.x) : (loop_spawn_pos.x - this_spawn_pos.x);
 
@@ -131,24 +258,48 @@ void scVSBattleStartBattle(void)
 	FTDesc desc;
 	SYColorRGBA color;
 
+	syNetInputStartVSSession();
+	syNetReplayStartVSSession(gSCManagerBattleState);
+	syNetPeerStartVSSession();
+
 	gSCManagerSceneData.is_reset = FALSE;
 	gSCManagerSceneData.is_suddendeath = FALSE;
 
+#ifdef PORT
+	/* Handoff diagnostic for the "battle starts with no fighters" bug:
+	 * dump every slot's registration as received from the CSS/menu path. */
+	{
+		extern void port_log(const char *fmt, ...);
+		s32 dbg;
+		port_log("SSB64: VSBattle handoff gkind=%d type=%d pl=%d cp=%d\n",
+		         (int)gSCManagerBattleState->gkind, (int)gSCManagerBattleState->game_type,
+		         (int)gSCManagerBattleState->pl_count, (int)gSCManagerBattleState->cp_count);
+		for (dbg = 0; dbg < GMCOMMON_PLAYERS_MAX; dbg++)
+		{
+			SCPlayerData *pd = &gSCManagerBattleState->players[dbg];
+			port_log("SSB64: VSBattle slot=%d pkind=%d fkind=%d costume=%d stock=%d\n",
+			         (int)dbg, (int)pd->pkind, (int)pd->fkind, (int)pd->costume, (int)pd->stock_count);
+		}
+	}
+#endif
+
 	scVSBattleSetupFiles();
 
+#ifndef PORT
 	if (!(gSCManagerBackupData.error_flags & LBBACKUP_ERROR_1PGAMEMARIO) && (gSCManagerBackupData.boot > 68))
 	{
-		file = lbRelocGetExternHeapFile((u32)&llSYKseg1ValidateFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)&llSYKseg1ValidateFileID), 0x10));
-		func_kseg1 = lbRelocGetFileData(sb32 (*)(void), file, &llSYKseg1ValidateFunc);
+		file = lbRelocGetExternHeapFile((u32)llSYKseg1ValidateFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)llSYKseg1ValidateFileID), 0x10));
+		func_kseg1 = lbRelocGetFileData(sb32 (*)(void), file, llSYKseg1ValidateFunc);
 
-		osWritebackDCache(func_kseg1, *lbRelocGetFileData(s32*, file, &llSYKseg1ValidateNBytes));
-		osInvalICache(func_kseg1, *lbRelocGetFileData(s32*, file, &llSYKseg1ValidateNBytes));
+		osWritebackDCache(func_kseg1, *lbRelocGetFileData(s32*, file, llSYKseg1ValidateNBytes));
+		osInvalICache(func_kseg1, *lbRelocGetFileData(s32*, file, llSYKseg1ValidateNBytes));
 
 		if (func_kseg1() == FALSE)
 		{
 			gSCManagerBackupData.error_flags |= LBBACKUP_ERROR_1PGAMEMARIO;
 		}
 	}
+#endif
 	gcMakeDefaultCameraGObj(nGCCommonLinkIDCamera, GOBJ_PRIORITY_DEFAULT, 100, COBJ_FLAG_ZBUFFER, GPACK_RGBA8888(0x00, 0x00, 0x00, 0xFF));
 	efParticleInitAll();
 	ftParamInitGame();
@@ -178,7 +329,8 @@ void scVSBattleStartBattle(void)
 
 		desc.fkind = gSCManagerBattleState->players[player].fkind;
 
-		mpCollisionGetPlayerMapObjPosition(player, &desc.pos);
+		//mpCollisionGetPlayerMapObjPosition(player, &desc.pos);
+		port_comp_ruleset_get_spawn(player, &desc.pos);
 
 		desc.lr = scVSBattleGetStartPlayerLR(player);
 
@@ -215,6 +367,9 @@ void scVSBattleStartBattle(void)
 	ifCommonPlayerStockInitInterface();
 	ifCommonEntryAllMakeInterface();
 	mpCollisionSetPlayBGM();
+#ifdef PORT
+	scVSBattlePortFixupFDMusic();
+#endif
 	func_800269C0_275C0(nSYAudioVoicePublicExcited);
 	ifCommonTimerMakeInterface(ifCommonAnnounceTimeUpInitInterface);
 	ifCommonTimerMakeDigits();
@@ -450,7 +605,8 @@ void scVSBattleStartSuddenDeath(void)
 
 		desc.fkind = gSCManagerBattleState->players[player].fkind;
 
-		mpCollisionGetPlayerMapObjPosition(player, &desc.pos);
+		//mpCollisionGetPlayerMapObjPosition(player, &desc.pos);
+		port_comp_ruleset_get_spawn(player, &desc.pos);
 
 		desc.lr = scVSBattleGetStartPlayerLR(player);
 
@@ -492,6 +648,9 @@ void scVSBattleStartSuddenDeath(void)
 	ifCommonPlayerStockInitInterface();
 	ifCommonSuddenDeathMakeInterface();
 	mpCollisionSetPlayBGM();
+#ifdef PORT
+	scVSBattlePortFixupFDMusic();
+#endif
 	func_800269C0_275C0(nSYAudioVoicePublicExcited);
 	ifCommonTimerMakeInterface(ifCommonAnnounceTimeUpInitInterface);
 	ifCommonTimerMakeDigits();
@@ -531,6 +690,9 @@ void scVSBattleStartScene(void)
 
 	while (syAudioCheckBGMPlaying(0) != FALSE)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 	syAudioSetBGMVolume(0, 0x7800);
@@ -550,12 +712,27 @@ void scVSBattleStartScene(void)
 
 		while (syAudioCheckBGMPlaying(0) != FALSE)
 		{
+#ifdef PORT
+			port_coroutine_yield();
+#endif
 			continue;
 		}
 		syAudioSetBGMVolume(0, 0x7800);
 		func_800266A0_272A0();
 		gmRumbleInitPlayers();
 	}
+	syNetReplayFinishVSSession();
+	syNetPeerStopVSSession();
 	gSCManagerSceneData.scene_prev = gSCManagerSceneData.scene_curr;
 	gSCManagerSceneData.scene_curr = nSCKindVSResults;
+
+	// skip results (if enabled)
+	{
+		extern int port_enhancement_skip_results_screen(void);
+		if (port_enhancement_skip_results_screen())
+		{
+			// Override the next scene to immediately boot back to Character Select!
+			gSCManagerSceneData.scene_curr = nSCKindPlayersVS;
+		}
+	}
 }

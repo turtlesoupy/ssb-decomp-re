@@ -50,14 +50,19 @@ void syDmaCreateMesgQueue(void)
 
 void syDmaCopy(OSPiHandle *handle, uintptr_t phys, uintptr_t virtual, size_t size, u8 direction)
 {
+#ifdef PORT
+    /* On PC there is no ROM cartridge.  All asset data comes from the O2R
+     * resource system, so ROM DMA is a complete no-op. */
+    (void)handle; (void)phys; (void)virtual; (void)size; (void)direction;
+#else
     OSIoMesg mesg;
 
     if (direction == OS_WRITE)
     {
         osWritebackDCache((void*)virtual, size);
-    } 
+    }
     else osInvalDCache((void*)virtual, size);
-    
+
     mesg.hdr.pri      = OS_MESG_PRI_NORMAL;
     mesg.hdr.retQueue = &sSYDmaMesgQueue;
     mesg.size         = 0x10000;
@@ -76,23 +81,31 @@ void syDmaCopy(OSPiHandle *handle, uintptr_t phys, uintptr_t virtual, size_t siz
         phys += 0x10000;
         virtual += 0x10000;
     }
-    if (size != 0) 
+    if (size != 0)
     {
         mesg.dramAddr = (void*)virtual;
         mesg.devAddr  = phys;
         mesg.size     = size;
 
-        if (!(gSYSchedulerIsSoftReset)) 
-        { 
+        if (!(gSYSchedulerIsSoftReset))
+        {
             osEPiStartDma(handle, &mesg, direction);
         }
         osRecvMesg(&sSYDmaMesgQueue, NULL, OS_MESG_BLOCK);
     }
+#endif
 }
 
 // 0x80002BE4
 void syDmaLoadOverlay(SYOverlay *ovl)
 {
+#ifdef PORT
+    /* On PC all overlay code is statically linked.  The overlay addresses
+     * in the SYOverlay struct are addresses of zero-initialized stub
+     * variables, not real VRAM regions — operating on them would corrupt
+     * the data segment.  No-op the entire function. */
+    (void)ovl;
+#else
     if ((ovl->ram_text_end - ovl->ram_text_start) != 0)
     {
         osInvalICache((void*) ovl->ram_text_start, ovl->ram_text_end - ovl->ram_text_start);
@@ -110,6 +123,7 @@ void syDmaLoadOverlay(SYOverlay *ovl)
     {
         bzero((void*) ovl->ram_noload_start, ovl->ram_noload_end - ovl->ram_noload_start);
     }
+#endif
 }
 
 // 0x80002CA0
@@ -125,12 +139,12 @@ void syDmaWriteRom(void *ram_src, uintptr_t rom_dst, size_t size)
 
 OSPiHandle* syDmaSramPiInit(void)
 {
-    if (sSYDmaSramPiHandle.baseAddress == PHYS_TO_K1(PI_DOM2_ADDR2))
-    { 
-        return &sSYDmaSramPiHandle; 
+    if (sSYDmaSramPiHandle.baseAddress == (u32)(uintptr_t)PHYS_TO_K1(PI_DOM2_ADDR2))
+    {
+        return &sSYDmaSramPiHandle;
     }
     sSYDmaSramPiHandle.type        = DEVICE_TYPE_SRAM;
-    sSYDmaSramPiHandle.baseAddress = PHYS_TO_K1(PI_DOM2_ADDR2);
+    sSYDmaSramPiHandle.baseAddress = (u32)(uintptr_t)PHYS_TO_K1(PI_DOM2_ADDR2);
     sSYDmaSramPiHandle.latency     = 5;
     sSYDmaSramPiHandle.pulse       = 12;
     sSYDmaSramPiHandle.pageSize    = 13;
@@ -147,13 +161,23 @@ OSPiHandle* syDmaSramPiInit(void)
 // 0x80002DA4
 void syDmaReadSram(uintptr_t rom_src, void *ram_dst, size_t size)
 {
+#ifdef PORT
+    extern int port_save_read(uintptr_t, void*, size_t);
+    port_save_read(rom_src, ram_dst, size);
+#else
     syDmaCopy(&sSYDmaSramPiHandle, rom_src, (uintptr_t)ram_dst, size, OS_READ);
+#endif
 }
 
 // 0x80002DE0
 void syDmaWriteSram(void *ram_src, uintptr_t rom_dst, size_t size)
 {
+#ifdef PORT
+    extern int port_save_write(uintptr_t, const void*, size_t);
+    port_save_write(rom_dst, ram_src, size);
+#else
     syDmaCopy(&sSYDmaSramPiHandle, rom_dst, (uintptr_t)ram_src, size, OS_WRITE);
+#endif
 }
 
 // 0x80002E18 - vpk0 decoder

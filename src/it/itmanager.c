@@ -6,6 +6,14 @@
 #include <lb/library.h>
 #include <reloc_data.h>
 
+#ifdef PORT
+#include <config.h>
+#include <sys/debug.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+extern void port_log(const char *fmt, ...);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       INITIALIZED DATA        //
@@ -145,14 +153,14 @@ void itManagerInitItems(void) // Many linker things here
     {
         ip[i].next = NULL;
     }
-    gITManagerCommonData = lbRelocGetExternHeapFile((u32)&llITCommonDataFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)&llITCommonDataFileID), 0x10));
+    gITManagerCommonData = lbRelocGetExternHeapFile((u32)llITCommonDataFileID, syTaskmanMalloc(lbRelocGetFileSize((u32)llITCommonDataFileID), 0x10));
 
     gITManagerParticleBankID = efParticleGetLoadBankID
     (
-        &lITManagerParticleScriptBankLo,
-        &lITManagerParticleScriptBankHi,
-        &lITManagerParticleTextureBankLo,
-        &lITManagerParticleTextureBankHi
+        (uintptr_t)&lITManagerParticleScriptBankLo,
+        (uintptr_t)&lITManagerParticleScriptBankHi,
+        (uintptr_t)&lITManagerParticleTextureBankLo,
+        (uintptr_t)&lITManagerParticleTextureBankHi
     );
     itManagerSetupContainerDrops();
     itManagerInitMonsterVars();
@@ -202,9 +210,9 @@ void itManagerSetupItemDObjs(GObj *gobj, DObjDesc *dobjdesc, DObj **dobjs, u8 tr
 
         if (id != 0)
         {
-            dobj = array_dobjs[id] = gcAddChildForDObj(array_dobjs[id - 1], dobjdesc->dl);
+            dobj = array_dobjs[id] = gcAddChildForDObj(array_dobjs[id - 1], PORT_RESOLVE(dobjdesc->dl));
         }
-        else dobj = array_dobjs[0] = gcAddDObjForGObj(gobj, dobjdesc->dl);
+        else dobj = array_dobjs[0] = gcAddDObjForGObj(gobj, PORT_RESOLVE(dobjdesc->dl));
         
         if (i == 1)
         {
@@ -247,6 +255,14 @@ GObj* itManagerMakeItem(GObj *parent_gobj, ITDesc *item_desc, Vec3f *pos, Vec3f 
         return NULL;
     }
     attr = lbRelocGetFileData(ITAttributes*, *item_desc->p_file, item_desc->o_attributes);
+#ifdef PORT
+    // Plain s16/u16 half-words live in the eight u32 words spanning 0x14..0x33
+    // (attack_offset0_y..size). pass1 BSWAP32 swapped each u32's u16 halves;
+    // rotate them back. Combat bitfields at 0x34..0x47 don't need this — bitfield
+    // extraction operates on the u32 numeric value directly, which pass1 already
+    // restored.
+    portFixupStructU16(attr, 0x14, 8);
+#endif
 
     if (attr->is_display_colanim)
     {
@@ -312,19 +328,34 @@ GObj* itManagerMakeItem(GObj *parent_gobj, ITDesc *item_desc, Vec3f *pos, Vec3f 
     ip->attack_coll.throw_mul        = 1.0F;
     ip->attack_coll.stale            = 1.0F;
     ip->attack_coll.element          = attr->element;
+    // attack_offset0_x is still a u32:16 bitfield on LE (signed in ROM) and needs
+    // explicit sign extension. The other five offsets are plain s16 in the new
+    // struct layout — implicit promotion already sign-extends them to s32.
+#ifdef PORT
+    ip->attack_coll.offsets[0].x     = BITFIELD_SEXT16(attr->attack_offset0_x);
+#else
     ip->attack_coll.offsets[0].x     = attr->attack_offset0_x;
+#endif
     ip->attack_coll.offsets[0].y     = attr->attack_offset0_y;
     ip->attack_coll.offsets[0].z     = attr->attack_offset0_z;
     ip->attack_coll.offsets[1].x     = attr->attack_offset1_x;
     ip->attack_coll.offsets[1].y     = attr->attack_offset1_y;
     ip->attack_coll.offsets[1].z     = attr->attack_offset1_z;
     ip->attack_coll.size             = attr->size * 0.5F;
+#ifdef PORT
+    ip->attack_coll.angle            = BITFIELD_SEXT10(attr->angle);
+#else
     ip->attack_coll.angle            = attr->angle;
+#endif
     ip->attack_coll.knockback_scale  = attr->knockback_scale;
     ip->attack_coll.knockback_weight = attr->knockback_weight;
     ip->attack_coll.knockback_base   = attr->knockback_base;
     ip->attack_coll.can_setoff       = attr->can_setoff;
+#ifdef PORT
+    ip->attack_coll.shield_damage    = BITFIELD_SEXT8(attr->shield_damage);
+#else
     ip->attack_coll.shield_damage    = attr->shield_damage;
+#endif
     ip->attack_coll.fgm_id           = attr->hit_sfx;
     ip->attack_coll.priority         = attr->priority;
     ip->attack_coll.can_rehit_item   = attr->can_rehit_item;
@@ -365,15 +396,15 @@ GObj* itManagerMakeItem(GObj *parent_gobj, ITDesc *item_desc, Vec3f *pos, Vec3f 
 
     ip->reflect_gobj = NULL;
 
-    if (attr->data != NULL)
+    if (PORT_RESOLVE(attr->data) != NULL)
     {
         if (!(attr->is_item_dobjs))
         {
             gcSetupCustomDObjsWithMObj
             (
                 item_gobj,
-                attr->data,
-                attr->p_mobjsubs,
+                PORT_RESOLVE(attr->data),
+                (MObjSub***)PORT_RESOLVE(attr->p_mobjsubs),
                 NULL,
                 item_desc->transform_types.tk1,
                 item_desc->transform_types.tk2,
@@ -382,16 +413,16 @@ GObj* itManagerMakeItem(GObj *parent_gobj, ITDesc *item_desc, Vec3f *pos, Vec3f 
         }
         else
         {
-            itManagerSetupItemDObjs(item_gobj, attr->data, NULL, item_desc->transform_types.tk1);
+            itManagerSetupItemDObjs(item_gobj, PORT_RESOLVE(attr->data), NULL, item_desc->transform_types.tk1);
 
-            if (attr->p_mobjsubs != NULL)
+            if (PORT_RESOLVE(attr->p_mobjsubs) != NULL)
             {
-                gcAddMObjAll(item_gobj, attr->p_mobjsubs);
+                gcAddMObjAll(item_gobj, (MObjSub***)PORT_RESOLVE(attr->p_mobjsubs));
             }
         }
-        if ((attr->anim_joints != NULL) || (attr->p_matanim_joints != NULL))
+        if ((PORT_RESOLVE(attr->anim_joints) != NULL) || (PORT_RESOLVE(attr->p_matanim_joints) != NULL))
         {
-            gcAddAnimAll(item_gobj, attr->anim_joints, attr->p_matanim_joints, 0.0F);
+            gcAddAnimAll(item_gobj, (AObjEvent32**)PORT_RESOLVE(attr->anim_joints), (AObjEvent32***)PORT_RESOLVE(attr->p_matanim_joints), 0.0F);
             gcPlayAnimAll(item_gobj);
         }
         lbCommonEjectTreeDObj(DObjGetStruct(item_gobj));
@@ -547,7 +578,7 @@ GObj* itManagerMakeAppearActor(void)
         {
             if (gMPCollisionGroundData->item_weights != NULL)
             {
-                p_any_weights = gMPCollisionGroundData->item_weights;
+                p_any_weights = (MPItemWeights*)PORT_RESOLVE(gMPCollisionGroundData->item_weights);
                 item_any_toggles = gSCManagerBattleState->item_toggles;
 
                 item_any_weights = 0;
@@ -593,7 +624,7 @@ GObj* itManagerMakeAppearActor(void)
                 gcAddGObjProcess(gobj, itManagerAppearActorProcUpdate, nGCProcessKindFunc, 3);
 
                 item_valid_toggles = gSCManagerBattleState->item_toggles;
-                p_valid_weights = gMPCollisionGroundData->item_weights;
+                p_valid_weights = (MPItemWeights*)PORT_RESOLVE(gMPCollisionGroundData->item_weights);
 
                 for (i = nITKindCommonStart, item_valid_weights = 0; i <= nITKindCommonEnd; i++, item_valid_toggles >>= 1)
                 {
@@ -646,7 +677,7 @@ void itManagerSetupContainerDrops(void)
     if ((gSCManagerBattleState->item_appearance_rate != nSCBattleItemSwitchNone) && (gSCManagerBattleState->item_toggles != 0) && (gMPCollisionGroundData->item_weights != NULL))
     {
         item_any_toggles = gSCManagerBattleState->item_toggles >> nITKindUtilityStart;
-        p_any_weights = gMPCollisionGroundData->item_weights;
+        p_any_weights = (MPItemWeights*)PORT_RESOLVE(gMPCollisionGroundData->item_weights);
 
         item_any_weights = 0;
 
@@ -662,7 +693,7 @@ void itManagerSetupContainerDrops(void)
         if (item_any_weights != 0)
         {
             item_valid_toggles = gSCManagerBattleState->item_toggles >> nITKindUtilityStart;
-            p_valid_weights = gMPCollisionGroundData->item_weights;
+            p_valid_weights = (MPItemWeights*)PORT_RESOLVE(gMPCollisionGroundData->item_weights);
 
             for (item_valid_weights = 0, i = nITKindUtilityStart; i <= nITKindUtilityEnd; i++, item_valid_toggles >>= 1)
             {

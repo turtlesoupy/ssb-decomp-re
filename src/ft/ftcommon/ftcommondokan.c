@@ -1,4 +1,8 @@
 #include <ft/fighter.h>
+#ifdef PORT
+#include <gr/grcommon/grinishie.h>
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //

@@ -13,7 +13,11 @@ ITDesc dITPakkunItemDesc =
 {
     nITKindPakkun,                          // Item Kind
     &gGRCommonStruct.inishie.item_head,     // Pointer to item file data?
+#ifdef PORT
+    llGRInishieMapPakkunItemAttributes,    // Offset of item attributes in file?
+#else
     &llGRInishieMapPakkunItemAttributes,    // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -175,8 +179,13 @@ sb32 itPakkunWaitProcUpdate(GObj *item_gobj)
         {
             DObj *dobj = DObjGetStruct(item_gobj);
 
+#ifdef PORT
+            gcAddDObjAnimJoint(dobj, lbRelocGetFileData(AObjEvent32*, gGRCommonStruct.inishie.map_head, llGRInishieMapPakkunAppearAnimJoint), 0.0F);
+            gcAddMObjMatAnimJoint(dobj->mobj, lbRelocGetFileData(AObjEvent32*, gGRCommonStruct.inishie.map_head, llGRInishieMapPakkunAppearMatAnimJoint), 0.0F);
+#else
             gcAddDObjAnimJoint(dobj, lbRelocGetFileData(AObjEvent32*, gGRCommonStruct.inishie.map_head, &llGRInishieMapPakkunAppearAnimJoint), 0.0F);
             gcAddMObjMatAnimJoint(dobj->mobj, lbRelocGetFileData(AObjEvent32*, gGRCommonStruct.inishie.map_head, &llGRInishieMapPakkunAppearMatAnimJoint), 0.0F);
+#endif
             gcPlayAnimAll(item_gobj);
 
             dobj->translate.vec.f.y += ip->item_vars.pakkun.pos.y;
@@ -281,7 +290,11 @@ sb32 itPakkunAppearProcDamage(GObj *item_gobj)
 
         dobj->anim_wait = AOBJ_ANIM_NULL;
 
+#ifdef PORT
+        gcAddMObjMatAnimJoint(dobj->mobj, lbRelocGetFileData(AObjEvent32*, gGRCommonStruct.inishie.map_head, llGRInishieMapPakkunDamagedMatAnimJoint), 0.0F);
+#else
         gcAddMObjMatAnimJoint(dobj->mobj, lbRelocGetFileData(AObjEvent32*, gGRCommonStruct.inishie.map_head, &llGRInishieMapPakkunDamagedMatAnimJoint), 0.0F);
+#endif
         gcPlayAnimAll(item_gobj);
     }
     return FALSE;

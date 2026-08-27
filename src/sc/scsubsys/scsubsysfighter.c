@@ -1,5 +1,9 @@
 #include <ft/fighter.h>
 
+#ifdef PORT
+extern void port_log(const char *fmt, ...);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //   GLOBAL / STATIC VARIABLES   //
@@ -68,12 +72,32 @@ void scSubsysFighterProcUpdate(GObj *fighter_gobj)
     {
         fp->proc_update(fighter_gobj);
     }
+
+#ifdef PORT
+    /* OSB5 CPU skinning also runs for Demo-kind fighters (character
+     * select, VS screen, results) — they animate through this proc
+     * instead of ftMainProcParams, so without this the injected mesh's
+     * vertex buffer stays at its all-zero load state and the fighter
+     * is invisible on those screens. */
+    {
+        extern void port_osb5_skin_update(GObj *fighter_gobj);
+        extern void port_osb5_copy_windows(void);
+        port_osb5_skin_update(fighter_gobj);
+        port_osb5_copy_windows();
+    }
+#endif
 }
 
 // 0x803905CC
 void scSubsysFighterSetStatus(GObj *fighter_gobj, s32 status_id)
 {
+#ifdef PORT
+    port_log("SSB64: scSubsysFighterSetStatus - begin status=0x%x gobj=%p\n", status_id, fighter_gobj);
+#endif
     ftMainSetStatus(fighter_gobj, status_id, FTSTATUS_PRESERVE_NONE, 1.0F, 0.0F);
+#ifdef PORT
+    port_log("SSB64: scSubsysFighterSetStatus - end status=0x%x gobj=%p\n", status_id, fighter_gobj);
+#endif
 }
 
 // 0x803905F4 - Is this to attach models to Master Hand in the opening movie?

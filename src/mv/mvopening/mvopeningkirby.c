@@ -6,8 +6,14 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <it/itmanager.h>
+#include <sys/debug.h>
+#include <wp/wpmanager.h>
 
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -30,7 +36,7 @@ FTKeyEvent dMVOpeningKirbyKeyEvents[/* */] =
 };
 
 // 0x8018E0F4
-u32 dMVOpeningKirbyFileIDs[/* */] = { &llIFCommonAnnounceCommonFileID, &llMVOpeningCommonFileID };
+u32 dMVOpeningKirbyFileIDs[/* */] = { llIFCommonAnnounceCommonFileID, llMVOpeningCommonFileID };
 
 // // // // // // // // // // // //
 //                               //
@@ -95,7 +101,7 @@ void mvOpeningKirbySetupFiles(void)
 	LBRelocSetup rl_setup;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-	rl_setup.table_files_num = (u32)&llRelocFileCount;
+	rl_setup.table_files_num = (u32)llRelocFileCount;
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sMVOpeningKirbyStatusBuffer;
@@ -131,11 +137,11 @@ void mvOpeningKirbyMakeName(void)
 	// 0x8018E0FC
 	intptr_t offsets[/* */] =
 	{
-		&llIFCommonAnnounceCommonLetterKSprite,
-		&llIFCommonAnnounceCommonLetterISprite,
-		&llIFCommonAnnounceCommonLetterRSprite,
-		&llIFCommonAnnounceCommonLetterBSprite,
-		&llIFCommonAnnounceCommonLetterYSprite,
+		llIFCommonAnnounceCommonLetterKSprite,
+		llIFCommonAnnounceCommonLetterISprite,
+		llIFCommonAnnounceCommonLetterRSprite,
+		llIFCommonAnnounceCommonLetterBSprite,
+		llIFCommonAnnounceCommonLetterYSprite,
 		0x0
 	};
 
@@ -425,7 +431,7 @@ void mvOpeningKirbyMakePosedFighterCamera(void)
 	
 	cobj->projection.persp.aspect = 5.0F / 11.0F;
 
-	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningKirbyFiles[1], &llMVOpeningCommonKirbyCamAnimJoint), 0.0F);
+	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningKirbyFiles[1], llMVOpeningCommonKirbyCamAnimJoint), 0.0F);
 	gcAddGObjProcess(camera_gobj, gcPlayCamAnim, nGCProcessKindFunc, 1);
 }
 
@@ -530,6 +536,9 @@ void mvOpeningKirbyFuncStart(void)
 
 	while (sySchedulerGetTicCount() < 1965)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	};
 }

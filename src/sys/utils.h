@@ -14,6 +14,10 @@ extern f32 syUtilsCot(f32 x);
 extern f32 __sinf(f32);
 extern f32 __cosf(f32);
 
+#ifdef PORT
+extern void syUtilsSetRandomSeed(s32 seed);
+extern s32 syUtilsRandSeed(void);
+#endif
 extern void syUtilsSetRandomSeedPtr(s32 *seedptr);
 extern u16 syUtilsRandUShort(void);
 extern f32 syUtilsRandFloat(void);

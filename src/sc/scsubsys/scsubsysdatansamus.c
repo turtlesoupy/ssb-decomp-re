@@ -4,7 +4,11 @@
 
 FTMotionDesc dFTNSamusSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_953_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTSamusAnimEggLayFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
@@ -18,6 +22,10 @@ FTMotionDesc dFTNSamusSubMotionDescs[] =
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_492_FileID, 0x80000000, 0x00000000
+#else
 	&llFTNSamusAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTNSamusSubMotionDescsCount = sizeof(dFTNSamusSubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

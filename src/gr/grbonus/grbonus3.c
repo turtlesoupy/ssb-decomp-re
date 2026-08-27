@@ -3,18 +3,23 @@
 #include <ft/fighter.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#include <sys/debug.h>
 
 // 0x8010B4D0
 void grBonus3InitHeaders(void)
 {
-    gGRCommonStruct.bonus3.map_head = (void*) ((uintptr_t)gMPCollisionGroundData->map_nodes - (intptr_t)&llGRBonus3MapMapHead);
-    gGRCommonStruct.bonus3.item_head = (void*) ((uintptr_t)gMPCollisionGroundData - (intptr_t)&llGRBonus3MapItemHead);
+    gGRCommonStruct.bonus3.map_head = (void*) ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->map_nodes) - (intptr_t)llGRBonus3MapMapHead);
+    gGRCommonStruct.bonus3.item_head = (void*) ((uintptr_t)gMPCollisionGroundData - (intptr_t)llGRBonus3MapItemHead);
 }
 
 // 0x8010B508
 void grBonus3MakeBumpers(void)
 {
+#ifdef PORT
+    u32 *anim_joint;
+#else
     AObjEvent32 **anim_joint;
+#endif
     GObj *item_gobj;
     Vec3f vel;
     DObjDesc *dobjdesc;
@@ -22,8 +27,12 @@ void grBonus3MakeBumpers(void)
 
     vel.x = vel.y = vel.z = 0.0F;
 
-    dobjdesc = (DObjDesc*) ((uintptr_t)gGRCommonStruct.bonus3.map_head + (intptr_t)&llGRBonus3MapBumpersDObjDesc);
-    anim_joint = (AObjEvent32**) ((uintptr_t)gGRCommonStruct.bonus3.map_head + (intptr_t)&llGRBonus3MapBumpersAnimJoint);
+    dobjdesc = (DObjDesc*) ((uintptr_t)gGRCommonStruct.bonus3.map_head + (intptr_t)llGRBonus3MapBumpersDObjDesc);
+#ifdef PORT
+    anim_joint = (u32*) ((uintptr_t)gGRCommonStruct.bonus3.map_head + (intptr_t)llGRBonus3MapBumpersAnimJoint);
+#else
+    anim_joint = (AObjEvent32**) ((uintptr_t)gGRCommonStruct.bonus3.map_head + (intptr_t)llGRBonus3MapBumpersAnimJoint);
+#endif
 
     anim_joint++, dobjdesc++;
 
@@ -31,11 +40,22 @@ void grBonus3MakeBumpers(void)
     {
         item_gobj = itManagerMakeItemSetupCommon(NULL, nITKindGBumper, &dobjdesc->translate, &vel, ITEM_FLAG_PARENT_GROUND);
 
+#ifdef PORT
+        {
+            AObjEvent32 *aj = (AObjEvent32*)PORT_RESOLVE(*anim_joint);
+            if ((aj != NULL) && (item_gobj != NULL))
+            {
+                gcAddDObjAnimJoint(DObjGetStruct(item_gobj), aj, 0.0F);
+                gcPlayAnimAll(item_gobj);
+            }
+        }
+#else
         if ((*anim_joint != NULL) && (item_gobj != NULL))
         {
             gcAddDObjAnimJoint(DObjGetStruct(item_gobj), *anim_joint, 0.0F);
             gcPlayAnimAll(item_gobj);
         }
+#endif
     }
 }
 

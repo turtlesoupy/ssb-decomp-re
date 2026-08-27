@@ -1,6 +1,9 @@
 #include <ft/fighter.h>
 #include <wp/weapon.h>
 #include <it/item.h>
+#ifdef PORT
+#include <ft/ftcommon/ftcommonfunctions.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //

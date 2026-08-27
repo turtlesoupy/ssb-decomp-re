@@ -13,7 +13,7 @@ WPDesc dWPPikachuThunderJoltAirWeaponDesc =
     0x00,                                               // Render flags?
     nWPKindThunderJoltAir,                             // Weapon Kind
     &gFTDataPikachuSpecial1,                              // Pointer to character's loaded files?
-    &llPikachuSpecial1ThunderJoltAirWeaponAttributes,          // Offset of weapon attributes in loaded files
+    llPikachuSpecial1ThunderJoltAirWeaponAttributes,          // Offset of weapon attributes in loaded files
 
     // DObj transformation struct
     {
@@ -37,7 +37,7 @@ WPDesc dWPPikachuThunderJoltGroundWeaponDesc =
     0x03,                                               // Render flags?
     nWPKindThunderJoltGround,                          // Weapon Kind
     &gFTDataPikachuSpecial1,                              // Pointer to character's loaded files?
-    &llPikachuSpecial1ThunderJoltGroundWeaponAttributes,       // Offset of weapon attributes in loaded files
+    llPikachuSpecial1ThunderJoltGroundWeaponAttributes,       // Offset of weapon attributes in loaded files
 
     // DObj transformation struct
     {
@@ -190,8 +190,8 @@ void wpPikachuThunderJoltGroundAddAnim(GObj *weapon_gobj)
     gcAddAnimAll
     (
         weapon_gobj, 
-        lbRelocGetFileData(AObjEvent32**, gFTDataPikachuSpecial3, &llPikachuSpecial3ThunderJoltBAnimJoint), 
-        lbRelocGetFileData(AObjEvent32***, gFTDataPikachuSpecial3, &llPikachuSpecial3ThunderJoltBMatAnimJoint), 
+        lbRelocGetFileData(AObjEvent32**, gFTDataPikachuSpecial3, llPikachuSpecial3ThunderJoltBAnimJoint), 
+        lbRelocGetFileData(AObjEvent32***, gFTDataPikachuSpecial3, llPikachuSpecial3ThunderJoltBMatAnimJoint), 
         0.0F
     );
     gcPlayAnimAll(weapon_gobj);
@@ -248,7 +248,11 @@ s32 wpPikachuThunderJoltGroundGetStatus(GObj *weapon_gobj)
     WPStruct *wp = wpGetStruct(weapon_gobj);
     Vec3f pos;
     Vec3f rotate;
+#ifdef PORT
+    s32 line_id = -1;
+#else
     s32 line_id;
+#endif
 
     switch (wp->weapon_vars.thunder_jolt.line_type)
     {
@@ -413,10 +417,18 @@ sb32 wpPikachuThunderJoltGroundCheckDestroy(GObj *weapon_gobj)
 sb32 wpPikachuThunderJoltGroundProcMap(GObj *weapon_gobj)
 {
     WPStruct *wp = wpGetStruct(weapon_gobj);
+#ifdef PORT
+    s32 coll_type = 0;
+#else
     s32 coll_type;
+#endif
     f32 unused2[2];
     f32 dist;
+#ifdef PORT
+    s32 line_id = -1;
+#else
     s32 line_id;
+#endif
     s32 unused;
 
     switch (wp->weapon_vars.thunder_jolt.line_type)

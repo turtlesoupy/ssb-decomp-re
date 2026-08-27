@@ -161,7 +161,13 @@ typedef struct SYAudioConfig
     void *inst_sound_array;
     void *fgm_ucode_data;
     void *fgm_table_data;
+#ifdef PORT
+    /* PORT: see N_ALUnk80026204.unk_80026204_0x1C — widened to native
+     * pointer so the FGM unk44 array address survives LP64. */
+    void *unk_80026204_0x1C;
+#else
     s32 unk_80026204_0x1C;
+#endif
     ALHeap *heap;
     u8 unk_80026204_0x24;
     u16 unk_80026204_0x26;
@@ -174,13 +180,15 @@ typedef struct SYAudioConfig
 } SYAudioConfig;
 
 extern SYAudioSettings dSYAudioPublicSettings;
-#if defined(REGION_US)
+#ifdef PORT
+extern u8 gSYAudioHeapBuffer[0x100000];
+#elif defined(REGION_US)
 extern u8 gSYAudioHeapBuffer[0x56000];
 #else
 extern u8 gSYAudioHeapBuffer[0x53000];
 #endif
 extern u32 gSYAudioThreadTimeDelta;
-extern ALCSPlayer *gSYAudioCSPlayers[/* */];
+extern N_ALCSPlayer *gSYAudioCSPlayers[/* */];
 
 extern void alHeapInit(ALHeap *hp, u8 *base, s32 len);
 extern void* alHeapDBAlloc(u8 *file, s32 line, ALHeap *hp, s32 num, s32 size);
@@ -191,7 +199,11 @@ extern void syAudioBnkfPatchInst(ALInstrument *inst, uintptr_t offset, uintptr_t
 extern void syAudioBnkfPatchSound(ALSound *sound, uintptr_t offset, uintptr_t table);
 extern void syAudioBnkfPatchWaveTable(ALWaveTable *wav, uintptr_t offset, uintptr_t table);
 extern void syAudioReadRom(uintptr_t rom, void *vram, size_t size);
+#ifdef PORT
+extern uintptr_t syAudioDma(uintptr_t addr, s32 len, void *state);
+#else
 extern s32 syAudioDma(s32 addr, s32 len, void *state);
+#endif
 extern ALDMAproc syAudioDmaNew(AMDMAState **state);
 extern f32 syAudioDepth2Cents(u8 depth);
 extern ALMicroTime syAudioInitOsc(void **oscState, f32 *initVal, u8 oscType, u8 oscRate, u8 oscDepth, u8 oscDelay);

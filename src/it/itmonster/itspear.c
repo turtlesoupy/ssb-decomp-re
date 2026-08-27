@@ -2,6 +2,9 @@
 #include <wp/weapon.h>
 #include <gr/ground.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -14,7 +17,11 @@ ITDesc dITSpearItemDesc =
 {
     nITKindSpear,                           // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataSpearItemAttributes,     // Offset of item attributes in file?
+#else
     &llITCommonDataSpearItemAttributes,     // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -68,7 +75,11 @@ WPDesc dITSpearWeaponSwarmWeaponDesc =
     0x01,                                     // Render flags?
     nWPKindSpearSwarm,                        // Weapon Kind
     &gITManagerCommonData,                    // Pointer to character's loaded files?
+#ifdef PORT
+    llITCommonDataSpearSwarmWeaponAttributes,// Offset of weapon attributes in loaded files
+#else
     &llITCommonDataSpearSwarmWeaponAttributes,// Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -93,7 +104,11 @@ WPDesc dITPippiWeaponSwarmWeaponDesc =
     0x01,                                     // Render flags?
     nWPKindSpearSwarm,                        // Weapon Kind
     &gITManagerCommonData,                    // Pointer to character's loaded files?
+#ifdef PORT
+    llITCommonDataPippiSwarmWeaponAttributes,// Offset of weapon attributes in loaded files
+#else
     &llITCommonDataPippiSwarmWeaponAttributes,// Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -182,11 +197,19 @@ void itSpearAppearInitVars(GObj *item_gobj)
         void *anim_joint; 
         void *matanim_joint;
 
+#ifdef PORT
+        anim_joint = itGetPData(ip, llITCommonDataSpearDataStart, llITCommonDataSpearAnimJoint);
+#else
         anim_joint = itGetPData(ip, &llITCommonDataSpearDataStart, &llITCommonDataSpearAnimJoint);
+#endif
 
         gcAddDObjAnimJoint(dobj->child, anim_joint, 0.0F);
 
+#ifdef PORT
+        matanim_joint = itGetPData(ip, llITCommonDataSpearDataStart, llITCommonDataSpearMatAnimJoint);
+#else
         matanim_joint = itGetPData(ip, &llITCommonDataSpearDataStart, &llITCommonDataSpearMatAnimJoint);
+#endif
 
         gcAddMObjMatAnimJoint(dobj->child->mobj, matanim_joint, 0.0F);
         gcPlayAnimAll(item_gobj);
@@ -333,7 +356,11 @@ GObj* itSpearMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj->child, itGetMonsterAnimNode(ip, llITCommonDataSpearDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj->child, itGetMonsterAnimNode(ip, &llITCommonDataSpearDataStart), 0.0F);
+#endif
     }
     return item_gobj;
 }

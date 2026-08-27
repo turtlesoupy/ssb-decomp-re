@@ -117,7 +117,17 @@ struct SC1PStageClearScore
 struct SC1PTrainingModeSprites
 {
 	Vec2h pos;
+#ifdef PORT
+	// On N64 this is Sprite* (4 bytes). Port struct must stay 8 bytes
+	// to match the on-disk array stride in the reloc file; otherwise
+	// ts[i].sprite reads 8 bytes spanning into the next entry and
+	// lbCommonMakeSObjForGObj sees a bogus "pointer" like 0x1fe00140024
+	// (two adjacent u32 tokens concatenated as u64).
+	// The intra-file reloc chain has already tokenized this slot.
+	u32 sprite;
+#else
 	Sprite *sprite;
+#endif
 };
 
 struct SC1PTrainingModeFiles
@@ -140,9 +150,21 @@ struct SC1PTrainingModeMenu
 	s32 view_menu_option;					  // Option selected in "View" settings
 	s32 dummy;							 	  // Dummy fighter's port ID
 	SC1PTrainingModeSprites *display_label_sprites; // "DAMAGE", "COMBO", "ENEMY", "SPEED" text
+#ifdef PORT
+	// On N64: Sprite** (array of 4-byte pointers in the reloc file).
+	// On LP64 Sprite** would stride 8B and read two tokens per slot.
+	// Each slot holds a u32 reloc token (already registered by the
+	// intra-file reloc chain). Use SC1P_SPRITE_RESOLVE(arr, i) to read.
+	u32 *display_option_sprites;
+#else
 	Sprite **display_option_sprites;
+#endif
 	SC1PTrainingModeSprites *menu_label_sprites; // Orange text describing what each option is?
+#ifdef PORT
+	u32 *menu_option_sprites;
+#else
 	Sprite **menu_option_sprites;
+#endif
 	SC1PTrainingModeSprites *unk_trainmenu_0x34;
 	SC1PTrainingModeSprites *unk_trainmenu_0x38;
 	GObj *damage_display_gobj; // Interface GObj of damage stat display
@@ -184,7 +206,23 @@ struct SC1PTrainingModeMenu
 
 struct SCStaffrollMatrix
 {
+	/* This struct is a type pun over SCStaffrollName (gobj->user_data.p in the
+	 * staff roll). On N64 the leading SCStaffrollName *next pointer is 4 bytes,
+	 * so the float trio that the credits projection reads happens to land at
+	 * offsets 0xC / 0x10 / 0x14 — which is what the field names below encode.
+	 *
+	 * On LP64 the pointer is 8 bytes, so every SCStaffrollName field after
+	 * `next` shifts +4. Without an extra 4 bytes of filler here, this struct
+	 * would land its three floats on (job_or_name, offset_x,
+	 * unkgmcreditsstruct0x10) instead of the intended (offset_x,
+	 * unkgmcreditsstruct0x10, interpolation), and the credits cursor lock-on
+	 * test reads a garbage "name height" → projected quad is nonsense → A
+	 * never registers as overlapping a name. */
+#ifdef PORT
+	u8 filler_0x0[0x10];
+#else
 	u8 filler_0x0[0xC];
+#endif
 	f32 unk_gmcreditsmtx_0xC;
 	f32 unk_gmcreditsmtx_0x10;
 	f32 unk_gmcreditsmtx_0x14;
@@ -274,17 +312,42 @@ struct SCExplainMain
 struct SCExplainArgs
 {
     u16 sprite_pos_x;
+#ifdef PORT
+    /* SCExplainMain is in the u16-halfswap file list. A {u16, u8, u8}
+     * word halfswaps to {u16, u8_hi, u8_lo} with the two u8s swapped
+     * relative to their N64 positions. Swap the struct fields so LE
+     * reads land on the original bytes. */
+    u8 sprite_status;
+    u8 sprite_pos_y;
+#else
     u8 sprite_pos_y;
     u8 sprite_status;
+#endif
 };
 
 struct SCExplainPhase
 {
     u16 phase_time;                     // Time the given explanation phase of the How to Play tutorial should last
     u16 unused;
+#ifdef PORT
+    /* Same halfswap u8-pair issue as SCExplainArgs (see above). This
+     * is the {tb_x, tb_y, pad, pad} u32 word — the two u8s swap after
+     * halfswap on LE. */
+    u8 textbox_pos_y;
+    u8 textbox_pos_x;
+#else
     u8 textbox_pos_x;
     u8 textbox_pos_y;
+#endif
+#ifdef PORT
+    /* Relocation token (4 bytes) — matches the N64 file layout. A native
+     * `Sprite *` would be 8 bytes on LP64, shifting every subsequent
+     * field by 4 and turning `sSCExplainPhase++` into a 48-byte stride
+     * through 44-byte file entries. Use PORT_RESOLVE() at access sites. */
+    u32 sprite;
+#else
     Sprite *sprite;
+#endif
     SCExplainArgs control_stick_args;
     SCExplainArgs phase_args0;
     SCExplainArgs phase_args1;
@@ -413,6 +476,22 @@ struct SCCommonData
 	u8 maps_training_gkind;							// Training Mode stage selected
 	u8 challenger_level_drop;						// Subtract from default CP level
 	ub8 is_title_anim_viewed;						// Has the title screen animation been viewed?
+#ifdef PORT
+	/* Classic Co-op handoff, written by the VS CSS when it serves Classic
+	 * mode (mnPlayersVSSetSceneDataClassicCoop). coop_player2 == 0xFF means
+	 * no P2 — the run is a stock solo 1P game. Appended at the struct tail
+	 * so every original field keeps its offset. */
+	u8 coop_player2;								// P2's controller port (0-3), or SCCOMMON_COOP_NO_PLAYER2
+	u8 coop_fkind2;									// P2's character
+	u8 coop_costume2;								// P2's costume
+	u8 coop_shade2;									// P2's duplicate-costume shade
+	u8 coop_pkind2;									// P2's player kind
+	u8 coop_level2;									// P2's CPU level
+#endif
 };
+
+#ifdef PORT
+#define SCCOMMON_COOP_NO_PLAYER2 0xFF
+#endif
 
 #endif

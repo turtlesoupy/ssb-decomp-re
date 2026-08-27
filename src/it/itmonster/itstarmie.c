@@ -2,6 +2,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -14,7 +17,11 @@ ITDesc dITStarmieItemDesc =
 {
     nITKindStarmie,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataStarmieItemAttributes,   // Offset of item attributes in file?
+#else
     &llITCommonDataStarmieItemAttributes,   // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -68,7 +75,11 @@ WPDesc dITStarmieWeaponSwiftWeaponDesc =
     0x03,                                   // Render flags?
     nWPKindStarmieSwift,                    // Weapon Kind
     &gITManagerCommonData,                    // Pointer to character's loaded files?
+#ifdef PORT
+    llITCommonDataStarmieSwiftWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llITCommonDataStarmieSwiftWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -242,7 +253,11 @@ void itStarmieNFollowFindFollowPlayerLR(GObj *item_gobj, GObj *fighter_gobj)
     }
     if (ip->kind == nITKindStarmie)
     {
+#ifdef PORT
+        gcAddMObjMatAnimJoint(item_dobj->mobj, itGetPData(ip, llITCommonDataStarmieDataStart, llITCommonDataStarmieMatAnimJoint), 0);
+#else
         gcAddMObjMatAnimJoint(item_dobj->mobj, itGetPData(ip, &llITCommonDataStarmieDataStart, &llITCommonDataStarmieMatAnimJoint), 0);
+#endif
 
         gcPlayAnimAll(item_gobj);
     }
@@ -371,7 +386,11 @@ GObj* itStarmieMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataStarmieDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataStarmieDataStart), 0.0F);
+#endif
 
         gcMoveGObjDLHead(item_gobj, 18, item_gobj->dl_link_priority);
     }

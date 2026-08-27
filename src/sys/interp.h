@@ -7,15 +7,38 @@
 
 typedef struct SYInterpDesc
 {
+#if IS_BIG_ENDIAN
+    u8 kind;
+    /* implicit 1-byte pad to 2-align points_num */
+    s16 points_num;
+#else
+    /* PORT/LE: syInterp's accessors normalize file-loaded descriptor
+     * word 0 to this byte order for both normal pass1-swapped resources
+     * and fighter figatree halfswapped resources. */
+    u8 _pad0;
     u8 kind;
     s16 points_num;
+#endif
     f32 unk04;          // CR scale? count?
+#ifdef PORT
+    u32 points;         // Relocation token — use PORT_RESOLVE()
+#else
     Vec3f *points;
+#endif
     f32 length;
+#ifdef PORT
+    u32 keyframes;      // Relocation token — use PORT_RESOLVE()
+    u32 quartics;       // Relocation token — use PORT_RESOLVE()
+#else
     f32 *keyframes;     // maybe keyframes as fraction t?
     f32 *quartics;      // quartic coef
+#endif
 
 } SYInterpDesc;
+
+#ifdef PORT
+_Static_assert(sizeof(SYInterpDesc) == 24, "SYInterpDesc must be 24 bytes to match file data layout");
+#endif
 
 typedef enum SYInterpKind
 {

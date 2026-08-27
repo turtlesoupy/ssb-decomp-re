@@ -13,7 +13,11 @@ ITDesc dITNessPKFireItemDesc =
 {
     nITKindNessPKFire,                      // Item Kind
     &gFTNessFileSpecial1,                   // Pointer to item file data?
+#ifdef PORT
+    llNessSpecial1PKFireItemAttributes,    // Offset of item attributes in file?
+#else
     &llNessSpecial1PKFireItemAttributes,    // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {

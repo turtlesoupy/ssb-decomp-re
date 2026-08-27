@@ -1,5 +1,8 @@
 #include <it/item.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -11,7 +14,11 @@ ITDesc dITEggItemDesc =
 {
     nITKindEgg,                             // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataEggItemAttributes,       // Offset of item attributes in file?
+#else
     &llITCommonDataEggItemAttributes,       // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -292,7 +299,11 @@ sb32 itEggExplodeProcUpdate(GObj *item_gobj)
 
         return TRUE;
     }
+#ifdef PORT
+    itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITEggItemDesc, llITCommonDataEggAttackEvents));
+#else
     itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITEggItemDesc, &llITCommonDataEggAttackEvents));
+#endif
 
     return FALSE;
 }
@@ -356,7 +367,11 @@ void itEggExplodeInitVars(GObj *item_gobj)
 
     itMainClearOwnerStats(item_gobj);
     itMainRefreshAttackColl(item_gobj);
+#ifdef PORT
+    itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITEggItemDesc, llITCommonDataCapsuleAttackEvents)); // Should this be llITCommonDataEggAttackEvents?
+#else
     itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITEggItemDesc, &llITCommonDataCapsuleAttackEvents)); // Should this be llITCommonDataEggAttackEvents?
+#endif
 }
 
 // 0x80181B5C

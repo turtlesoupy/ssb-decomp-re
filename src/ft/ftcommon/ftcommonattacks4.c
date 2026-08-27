@@ -122,7 +122,11 @@ void ftCommonAttackS4SetStatus(GObj *fighter_gobj)
 
     case nFTKindNess:
     case nFTKindNNess:
+#ifdef PORT
+        fp->special_coll = (FTSpecialColl*) ((uintptr_t)gFTNessFileMainMotion + (intptr_t)llNessMainMotionAttackS4ReflectorFTSpecialColl);
+#else
         fp->special_coll = (FTSpecialColl*) ((uintptr_t)gFTNessFileMainMotion + (intptr_t)&llNessMainMotionAttackS4ReflectorFTSpecialColl);
+#endif
         break;
     }
 }

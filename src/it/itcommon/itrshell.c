@@ -1,5 +1,8 @@
 #include <it/item.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -11,7 +14,11 @@ ITDesc dITRShellItemDesc =
 {
     nITKindRShell,                          // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataRShellItemAttributes,    // Offset of item attributes in file?
+#else
     &llITCommonDataRShellItemAttributes,    // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -249,8 +256,13 @@ void itRShellSpinAddAnim(GObj *item_gobj) // Identical to Green Shell function
     DObj *dobj = DObjGetStruct(item_gobj);
     s32 unused[2];
 
+#ifdef PORT
+    gcAddDObjAnimJoint(dobj, itGetPData(ip, llITCommonDataShellDataStart, llITCommonDataShellAnimJoint), 0.0F);
+    gcAddMObjMatAnimJoint(dobj->mobj, itGetPData(ip, llITCommonDataShellDataStart, llITCommonDataShellMatAnimJoint), 0.0F);
+#else
     gcAddDObjAnimJoint(dobj, itGetPData(ip, &llITCommonDataShellDataStart, &llITCommonDataShellAnimJoint), 0.0F);
     gcAddMObjMatAnimJoint(dobj->mobj, itGetPData(ip, &llITCommonDataShellDataStart, &llITCommonDataShellMatAnimJoint), 0.0F);
+#endif
     gcPlayAnimAll(item_gobj);
 }
 

@@ -1,9 +1,18 @@
 #include <ft/fighter.h>
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 #include <gr/ground.h>
 #include <if/interface.h>
 #include <sc/scene.h>
 #include <sys/video.h>
 #include <reloc_data.h>
+#include <gm/gmcamera.h>
+#include <it/itmanager.h>
+#include <sys/audio.h>
+#include <wp/wpmanager.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void func_800266A0_272A0(void);
 
 // // // // // // // // // // // //
 //                               //
@@ -105,18 +114,18 @@ f32 dSCAutoDemoZoomEyeY[/* */] = { 2.0F, 0.0F, -6.0F, -9.0F, -30.0F };
 // 0x8018E200
 intptr_t dSCAutoDemoFighterNameSpriteOffsets[/* */] =
 {
-	&llCharacterNamesMarioSprite,      // Mario
-	&llCharacterNamesFoxSprite,        // Fox
-	&llCharacterNamesDonkeySprite,     // Donkey Kong
-	&llCharacterNamesSamusSprite,      // Samus
-	&llCharacterNamesLuigiSprite,      // Luigi
-	&llCharacterNamesLinkSprite,       // Link
-	&llCharacterNamesYoshiSprite,      // Yoshi
-	&llCharacterNamesCaptainSprite,    // Captain Falcon
-	&llCharacterNamesKirbySprite,      // Kirby
-	&llCharacterNamesPikachuSprite,    // Pikachu
-	&llCharacterNamesPurinSprite,      // Jigglypuff
-	&llCharacterNamesNessSprite        // Ness
+	llCharacterNamesMarioSprite,      // Mario
+	llCharacterNamesFoxSprite,        // Fox
+	llCharacterNamesDonkeySprite,     // Donkey Kong
+	llCharacterNamesSamusSprite,      // Samus
+	llCharacterNamesLuigiSprite,      // Luigi
+	llCharacterNamesLinkSprite,       // Link
+	llCharacterNamesYoshiSprite,      // Yoshi
+	llCharacterNamesCaptainSprite,    // Captain Falcon
+	llCharacterNamesKirbySprite,      // Kirby
+	llCharacterNamesPikachuSprite,    // Pikachu
+	llCharacterNamesPurinSprite,      // Jigglypuff
+	llCharacterNamesNessSprite        // Ness
 };
 
 // 0x8018E230
@@ -223,6 +232,7 @@ void scAutoDemoStartBattle(void)
 // 0x8018D134
 void scAutoDemoDetectExit(void)
 {
+#ifndef PORT_STAGE_CYCLE_DEMO
 	s32 player;
 
 	for (player = 0; player < ARRAY_COUNT(gSYControllerDevices); player++)
@@ -238,6 +248,7 @@ void scAutoDemoDetectExit(void)
 			break;
 		}
 	}
+#endif
 }
 
 // 0x8018D19C
@@ -384,7 +395,9 @@ void scAutoDemoSetMagnifyDisplayOn(void)
 void scAutoDemoExit(void)
 {
 	gSCManagerSceneData.scene_prev = gSCManagerSceneData.scene_curr;
-#if defined(REGION_US)        
+#if defined(PORT_STAGE_CYCLE_DEMO)
+    gSCManagerSceneData.scene_curr = nSCKindAutoDemo;
+#elif defined(REGION_US)
     gSCManagerSceneData.scene_curr = nSCKindStartup;
 #else
     gSCManagerSceneData.scene_curr = nSCKindOpeningRoom;
@@ -559,7 +572,22 @@ void scAutoDemoInitDemo(void)
 	{
 		gSCManagerSceneData.demo_gkind_order = 0;
 	}
+#ifdef PORT
+	/* CE's title demo hook can put synth fkinds in demo_fkind; they're never
+	 * in the u16 mask and a shift by >= 32 is UB */
+	sSCAutoDemoFighterMask = 0;
+
+	if (gSCManagerSceneData.demo_fkind[0] < GMCOMMON_FIGHTERS_PLAYABLE_NUM)
+	{
+		sSCAutoDemoFighterMask |= (1 << gSCManagerSceneData.demo_fkind[0]);
+	}
+	if (gSCManagerSceneData.demo_fkind[1] < GMCOMMON_FIGHTERS_PLAYABLE_NUM)
+	{
+		sSCAutoDemoFighterMask |= (1 << gSCManagerSceneData.demo_fkind[1]);
+	}
+#else
 	sSCAutoDemoFighterMask = (1 << gSCManagerSceneData.demo_fkind[0]) | (1 << gSCManagerSceneData.demo_fkind[1]);
+#endif
 
 	for (i = 0; i < ARRAY_COUNT(gSCManagerBattleState->players); i++)
 	{
@@ -587,10 +615,10 @@ void scAutoDemoInitSObjs(void)
 
 	file = lbRelocGetExternHeapFile
 	(
-		(uintptr_t)&llCharacterNamesFileID,
+		(uintptr_t)llCharacterNamesFileID,
 		syTaskmanMalloc
 		(
-			lbRelocGetFileSize((uintptr_t)&llCharacterNamesFileID),
+			lbRelocGetFileSize((uintptr_t)llCharacterNamesFileID),
 			0x10
 		)
 	);
@@ -722,6 +750,9 @@ void scAutoDemoStartScene(void)
 
 	while (syAudioCheckBGMPlaying(0) != FALSE)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 

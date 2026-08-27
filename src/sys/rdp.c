@@ -2,6 +2,9 @@
 
 #include "config.h"
 #include <sys/video.h>
+#ifdef PORT
+#include <sys/taskman.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //

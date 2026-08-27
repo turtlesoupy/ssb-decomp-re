@@ -2,6 +2,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -14,7 +17,11 @@ ITDesc dITNyarsItemDesc =
 {
     nITKindNyars,                           // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataNyarsItemAttributes,     // Offset of item attributes in file?
+#else
     &llITCommonDataNyarsItemAttributes,     // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -56,7 +63,11 @@ WPDesc dITNyarsWeaponCoinWeaponDesc =
     0x01,                                     // Render flags?
     nWPKindNyarsCoin,                         // Weapon Kind
     &gITManagerCommonData,                    // Pointer to character's loaded files?
+#ifdef PORT
+    llITCommonDataNyarsCoinWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llITCommonDataNyarsCoinWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -196,7 +207,11 @@ GObj* itNyarsMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataNyarsAnimJoint), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataNyarsAnimJoint), 0.0F);
+#endif
     }
     return item_gobj;
 }

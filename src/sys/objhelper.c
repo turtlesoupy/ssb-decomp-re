@@ -1,4 +1,9 @@
 #include <sys/obj.h>
+#ifdef PORT
+#include <sys/debug.h>
+
+extern void port_log(const char *fmt, ...);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -7,7 +12,11 @@
 // // // // // // // // // // // //
 
 // 0x8000AEF0
+#ifdef PORT
+void gcFuncGObjByLink(s32 link, void (*func)(GObj*, uintptr_t), uintptr_t param)
+#else
 void gcFuncGObjByLink(s32 link, void (*func)(GObj*, u32), u32 param)
+#endif
 {
     GObj *current_gobj = gGCCommonLinks[link];
 
@@ -22,7 +31,11 @@ void gcFuncGObjByLink(s32 link, void (*func)(GObj*, u32), u32 param)
 }
 
 // 0x8000AF58
+#ifdef PORT
+void gcFuncGObjAll(void (*func)(GObj*, uintptr_t), uintptr_t param)
+#else
 void gcFuncGObjAll(void (*func)(GObj*, u32), u32 param)
+#endif
 {
     s32 link;
 
@@ -42,7 +55,11 @@ void gcFuncGObjAll(void (*func)(GObj*, u32), u32 param)
 }
 
 // 0x8000AFE4
+#ifdef PORT
+GObj* gcFuncGObjByLinkEx(s32 link, GObj* (*func)(GObj*, uintptr_t), uintptr_t param, sb32 is_return_immediate)
+#else
 GObj* gcFuncGObjByLinkEx(s32 link, GObj* (*func)(GObj*, u32), u32 param, sb32 is_return_immediate)
+#endif
 {
     GObj *current_gobj;
     GObj *next_gobj;
@@ -72,7 +89,11 @@ GObj* gcFuncGObjByLinkEx(s32 link, GObj* (*func)(GObj*, u32), u32 param, sb32 is
 }
 
 // 0x8000B08C
+#ifdef PORT
+GObj* gcFuncGObjAllEx(GObj* (*func)(GObj*, uintptr_t), uintptr_t param, sb32 is_return_immediate)
+#else
 GObj* gcFuncGObjAllEx(GObj* (*func)(GObj*, u32), u32 param, sb32 is_return_immediate)
+#endif
 {
     GObj *current_gobj;
     GObj *next_gobj;
@@ -106,9 +127,17 @@ GObj* gcFuncGObjAllEx(GObj* (*func)(GObj*, u32), u32 param, sb32 is_return_immed
 }
 
 // 0x8000B14C
+#ifdef PORT
+GObj* gcGetGObjByID(GObj *gobj, uintptr_t id)
+#else
 GObj* gcGetGObjByID(GObj *gobj, u32 id)
+#endif
 {
+#ifdef PORT
+    return (gobj->id == (u32)id) ? gobj : NULL;
+#else
     return (gobj->id == id) ? gobj : NULL;
+#endif
 }
 
 // 0x8000B16C
@@ -253,8 +282,21 @@ void gcEndProcessAll(GObj *gobj)
     }
     current_gobjproc = gobj->gobjproc_head;
 
+#ifdef PORT
+    /* PORT crash-diag: warn if any proc pointer looks like a zombie before
+     * we dereference it (low address or misaligned). Non-blocking. */
+#endif
     while (current_gobjproc != NULL)
     {
+#ifdef PORT
+        uintptr_t p = (uintptr_t)current_gobjproc;
+        if (p < (uintptr_t)0x100000000ULL || (p & 0x7) != 0) {
+            port_log("SSB64: gcEndProcessAll SUSPECT proc=%p gobj=%p "
+                     "(low addr or unaligned)\n",
+                     (void*)current_gobjproc, (void*)gobj);
+        }
+
+#endif
         next_gobjproc = current_gobjproc->link_next;
 
         gcEndGObjProcess(current_gobjproc);
@@ -370,10 +412,18 @@ void unref_8000B618(GObj *gobj, DObjTraDesc *dobjtra, DObj **dobjs)
             dobj = array_dobjs[dobjtra->id] = gcAddDObjChildRpyD
             (
                 array_dobjs[dobjtra->id - 1],
+#ifdef PORT
+                PORT_RESOLVE_GFX(dobjtra->dl)
+#else
                 dobjtra->dl
+#endif
             );
         }
+#ifdef PORT
+        else dobj = array_dobjs[0] = gcAddDObjRpyD(gobj, PORT_RESOLVE_GFX(dobjtra->dl));
+#else
         else dobj = array_dobjs[0] = gcAddDObjRpyD(gobj, dobjtra->dl);
+#endif
         
         dobj->translate.vec.f = dobjtra->translate;
 

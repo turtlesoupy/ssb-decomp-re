@@ -12,6 +12,43 @@ extern alSoundEffect* func_800269C0_275C0(u16);
 
 extern void syAudioSetBGMVolume(u32, u32);
 
+#ifdef PORT
+#include <stddef.h>
+#include <stdbool.h>
+#include <sys/scheduler.h>
+extern void func_800266A0_272A0(void);
+extern s32 func_80026594_27194(void);
+extern s32 func_800264A4_270A4(void);
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, unsigned int count);
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+extern void portFixupRawTextureBSWAP32(void *base, size_t bytes);
+extern float port_widescreen_clip_x_scale(void);
+
+/* Ensure a Sprite* read from reloc file data has its header, bitmap
+ * array, and texel data in the correct byte order for LE rendering.
+ * Idempotent — portFixupSprite / portFixupBitmap use visited sets to
+ * avoid double-applying. Matches the sequence inside
+ * lbCommonMakeSObjForGObj so file-data Sprites that are copied
+ * byte-for-byte into SObjs (instead of being attached via
+ * lbCommonMakeSObjForGObj) still get the same treatment. */
+static void ifCommonPortFixupSpriteFull(Sprite *sprite)
+{
+    if (sprite == NULL) return;
+    portFixupSprite(sprite);
+    {
+        Bitmap *bitmaps = (Bitmap*)PORT_RESOLVE(sprite->bitmap);
+        if (bitmaps != NULL)
+        {
+            portFixupBitmapArray(bitmaps, sprite->nbitmaps);
+            portFixupSpriteBitmapData(sprite, bitmaps);
+        }
+    }
+}
+
+extern bool port_enhancement_is_hud_disabled(void);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       INITIALIZED DATA        //
@@ -106,34 +143,34 @@ IFTraffic dIFCommonTrafficSpriteData[/* */] =
 // 0x8012ED40
 intptr_t dIFCommonTrafficSpriteOffsets[/* */] =
 {
-    &llIFCommonGameStatusLampRedDimSprite,     &llIFCommonGameStatusLampYellowDimSprite,     &llIFCommonGameStatusLampBlueDimSprite,
-    &llIFCommonGameStatusLampRedContourSprite, &llIFCommonGameStatusLampYellowContourSprite, &llIFCommonGameStatusLampBlueContourSprite,
-    &llIFCommonGameStatusLampRedLightSprite,   &llIFCommonGameStatusLampYellowLightSprite,   &llIFCommonGameStatusLampBlueLightSprite
+    llIFCommonGameStatusLampRedDimSprite,     llIFCommonGameStatusLampYellowDimSprite,     llIFCommonGameStatusLampBlueDimSprite,
+    llIFCommonGameStatusLampRedContourSprite, llIFCommonGameStatusLampYellowContourSprite, llIFCommonGameStatusLampBlueContourSprite,
+    llIFCommonGameStatusLampRedLightSprite,   llIFCommonGameStatusLampYellowLightSprite,   llIFCommonGameStatusLampBlueLightSprite
 };
 
 // 0x8012ED64 - Announcer text: "GO!"
 IFACharacter dIFCommonAnnounceGoSpriteData[/* */] =
 {
-    {  82, 93, &llIFCommonGameStatusOrangeLetterGSprite         },
-    { 144, 93, &llIFCommonGameStatusOrangeLetterOSprite         },
-    { 214, 93, &llIFCommonGameStatusOrangeExclamationMarkSprite }
+    {  82, 93, llIFCommonGameStatusOrangeLetterGSprite         },
+    { 144, 93, llIFCommonGameStatusOrangeLetterOSprite         },
+    { 214, 93, llIFCommonGameStatusOrangeExclamationMarkSprite }
 };
 
 // 0x8012ED7C
 IFACharacter dIFCommonAnnounceSuddenDeathSpriteData[/* */] =
 {
-    {  74,  67, &llIFCommonAnnounceCommonLetterSSprite       },
-    { 102,  67, &llIFCommonAnnounceCommonLetterUSprite       },
-    { 132,  67, &llIFCommonAnnounceCommonLetterDSprite       },
-    { 163,  67, &llIFCommonAnnounceCommonLetterDSprite       },
-    { 193,  67, &llIFCommonAnnounceCommonLetterESprite       },
-    { 217,  67, &llIFCommonAnnounceCommonLetterNSprite       },
-    {  83, 113, &llIFCommonAnnounceCommonLetterDSprite       },
-    { 113, 113, &llIFCommonAnnounceCommonLetterESprite       },
-    { 135, 113, &llIFCommonAnnounceCommonLetterASprite       },
-    { 165, 113, &llIFCommonAnnounceCommonLetterTSprite       },
-    { 192, 113, &llIFCommonAnnounceCommonLetterHSprite       },
-    { 227, 113, &llIFCommonAnnounceCommonSymbolExclaimSprite }
+    {  74,  67, llIFCommonAnnounceCommonLetterSSprite       },
+    { 102,  67, llIFCommonAnnounceCommonLetterUSprite       },
+    { 132,  67, llIFCommonAnnounceCommonLetterDSprite       },
+    { 163,  67, llIFCommonAnnounceCommonLetterDSprite       },
+    { 193,  67, llIFCommonAnnounceCommonLetterESprite       },
+    { 217,  67, llIFCommonAnnounceCommonLetterNSprite       },
+    {  83, 113, llIFCommonAnnounceCommonLetterDSprite       },
+    { 113, 113, llIFCommonAnnounceCommonLetterESprite       },
+    { 135, 113, llIFCommonAnnounceCommonLetterASprite       },
+    { 165, 113, llIFCommonAnnounceCommonLetterTSprite       },
+    { 192, 113, llIFCommonAnnounceCommonLetterHSprite       },
+    { 227, 113, llIFCommonAnnounceCommonSymbolExclaimSprite }
 };
 
 // 0x8012EDDC
@@ -142,24 +179,24 @@ SYColorRGBPair dIFCommonAnnounceSuddenDeathSpriteColors = { { 0xFF, 0xFF, 0xFF }
 // 0x8012EDE4
 IFACharacter dIFCommonAnnounceTimeUpSpriteData[/* */] =
 {
-    {  45, 95, &llIFCommonGameStatusBlueLetterTSprite },
-    {  82, 95, &llIFCommonGameStatusBlueLetterISprite },
-    { 100, 95, &llIFCommonGameStatusBlueLetterMSprite },
-    { 151, 95, &llIFCommonGameStatusBlueLetterESprite },
-    { 195, 95, &llIFCommonGameStatusBlueLetterUSprite },
-    { 238, 95, &llIFCommonGameStatusBlueLetterPSprite }
+    {  45, 95, llIFCommonGameStatusBlueLetterTSprite },
+    {  82, 95, llIFCommonGameStatusBlueLetterISprite },
+    { 100, 95, llIFCommonGameStatusBlueLetterMSprite },
+    { 151, 95, llIFCommonGameStatusBlueLetterESprite },
+    { 195, 95, llIFCommonGameStatusBlueLetterUSprite },
+    { 238, 95, llIFCommonGameStatusBlueLetterPSprite }
 };
 
 // 0x8012EE14
 IFACharacter dIFCommonAnnounceGameSetSpriteData[/* */] =
 {
-    {  22, 95, &llIFCommonGameStatusBlueLetterGSprite },
-    {  62, 95, &llIFCommonGameStatusBlueLetterASprite },
-    { 104, 95, &llIFCommonGameStatusBlueLetterMSprite },
-    { 154, 95, &llIFCommonGameStatusBlueLetterESprite },
-    { 191, 95, &llIFCommonGameStatusBlueLetterSSprite },
-    { 230, 95, &llIFCommonGameStatusBlueLetterESprite },
-    { 262, 95, &llIFCommonGameStatusBlueLetterTSprite }
+    {  22, 95, llIFCommonGameStatusBlueLetterGSprite },
+    {  62, 95, llIFCommonGameStatusBlueLetterASprite },
+    { 104, 95, llIFCommonGameStatusBlueLetterMSprite },
+    { 154, 95, llIFCommonGameStatusBlueLetterESprite },
+    { 191, 95, llIFCommonGameStatusBlueLetterSSprite },
+    { 230, 95, llIFCommonGameStatusBlueLetterESprite },
+    { 262, 95, llIFCommonGameStatusBlueLetterTSprite }
 };
 
 // 0x8012EE4C
@@ -179,52 +216,52 @@ s32 dIFCommonTimerDigitsSpritePositionsX[/* */] =
 // 0x8012EE64 - Offset of twelve digits: numbers 0 through 9, % sign and H.P. text
 intptr_t dIFCommonPlayerDamageDigitSpriteOffsets[/* */] =
 {
-    &llIFCommonPlayerDamageDigit0Sprite,
-    &llIFCommonPlayerDamageDigit1Sprite,
-    &llIFCommonPlayerDamageDigit2Sprite,
-    &llIFCommonPlayerDamageDigit3Sprite,
-    &llIFCommonPlayerDamageDigit4Sprite,
-    &llIFCommonPlayerDamageDigit5Sprite,
-    &llIFCommonPlayerDamageDigit6Sprite,
-    &llIFCommonPlayerDamageDigit7Sprite,
-    &llIFCommonPlayerDamageDigit8Sprite,
-    &llIFCommonPlayerDamageDigit9Sprite,
-    &llIFCommonPlayerDamageSymbolPercentSprite,
-    &llIFCommonPlayerDamageSymbolHPSprite
+    llIFCommonPlayerDamageDigit0Sprite,
+    llIFCommonPlayerDamageDigit1Sprite,
+    llIFCommonPlayerDamageDigit2Sprite,
+    llIFCommonPlayerDamageDigit3Sprite,
+    llIFCommonPlayerDamageDigit4Sprite,
+    llIFCommonPlayerDamageDigit5Sprite,
+    llIFCommonPlayerDamageDigit6Sprite,
+    llIFCommonPlayerDamageDigit7Sprite,
+    llIFCommonPlayerDamageDigit8Sprite,
+    llIFCommonPlayerDamageDigit9Sprite,
+    llIFCommonPlayerDamageSymbolPercentSprite,
+    llIFCommonPlayerDamageSymbolHPSprite
 };
 
 // 0x8012EE94
 intptr_t dIFCommonTimerDigitSpriteOffsets[/* */] =
 {
-    &llIFCommonTimerDigit0Sprite,
-    &llIFCommonTimerDigit1Sprite,
-    &llIFCommonTimerDigit2Sprite,
-    &llIFCommonTimerDigit3Sprite,
-    &llIFCommonTimerDigit4Sprite,
-    &llIFCommonTimerDigit5Sprite,
-    &llIFCommonTimerDigit6Sprite,
-    &llIFCommonTimerDigit7Sprite,
-    &llIFCommonTimerDigit8Sprite,
-    &llIFCommonTimerDigit9Sprite,
-    &llIFCommonTimerSymbolColonSprite,
-    &llIFCommonTimerSymbolSecSprite,
-    &llIFCommonTimerSymbolCSecSprite
+    llIFCommonTimerDigit0Sprite,
+    llIFCommonTimerDigit1Sprite,
+    llIFCommonTimerDigit2Sprite,
+    llIFCommonTimerDigit3Sprite,
+    llIFCommonTimerDigit4Sprite,
+    llIFCommonTimerDigit5Sprite,
+    llIFCommonTimerDigit6Sprite,
+    llIFCommonTimerDigit7Sprite,
+    llIFCommonTimerDigit8Sprite,
+    llIFCommonTimerDigit9Sprite,
+    llIFCommonTimerSymbolColonSprite,
+    llIFCommonTimerSymbolSecSprite,
+    llIFCommonTimerSymbolCSecSprite
 };
 
 // 0x8012EEC8
 intptr_t dIFCommonPlayerStockDigitSpriteOffsets[/* */] =
 {
-    &llIFCommonDigits0Sprite,
-    &llIFCommonDigits1Sprite,
-    &llIFCommonDigits2Sprite,
-    &llIFCommonDigits3Sprite,
-    &llIFCommonDigits4Sprite,
-    &llIFCommonDigits5Sprite,
-    &llIFCommonDigits6Sprite,
-    &llIFCommonDigits7Sprite,
-    &llIFCommonDigits8Sprite,
-    &llIFCommonDigits9Sprite,
-    &llIFCommonDigitsCrossSprite
+    llIFCommonDigits0Sprite,
+    llIFCommonDigits1Sprite,
+    llIFCommonDigits2Sprite,
+    llIFCommonDigits3Sprite,
+    llIFCommonDigits4Sprite,
+    llIFCommonDigits5Sprite,
+    llIFCommonDigits6Sprite,
+    llIFCommonDigits7Sprite,
+    llIFCommonDigits8Sprite,
+    llIFCommonDigits9Sprite,
+    llIFCommonDigitsCrossSprite
 };
 
 // 0x8012EEF8
@@ -265,10 +302,10 @@ u16 dIFCommonAnnounceTimerVoiceIDs[/* */] =
 // 0x8012EF54
 intptr_t dIFCommonBattlePausePlayerNumSpriteOffsets[/* */] =
 {
-    &llIFCommonBattlePausePlayerNum1PSprite,
-    &llIFCommonBattlePausePlayerNum2PSprite,
-    &llIFCommonBattlePausePlayerNum3PSprite,
-    &llIFCommonBattlePausePlayerNum4PSprite
+    llIFCommonBattlePausePlayerNum1PSprite,
+    llIFCommonBattlePausePlayerNum2PSprite,
+    llIFCommonBattlePausePlayerNum3PSprite,
+    llIFCommonBattlePausePlayerNum4PSprite
 };
 
 // 0x8012EF64
@@ -301,31 +338,31 @@ u8 dIFCommonPlayerTagEnvColorsB[/* */] = { 0x00, 0x00, 0x00, 0x00, 0x00 };
 // 0x8012EFAC
 intptr_t dIFCommonPlayerTagSpriteOffsets[/* */] =
 {
-    &llIFCommonPlayerTags1PSprite,
-    &llIFCommonPlayerTags2PSprite,
-    &llIFCommonPlayerTags3PSprite,
-    &llIFCommonPlayerTags4PSprite,
-    &llIFCommonPlayerTagsCPSprite,
-    &llIFCommonPlayerTagsAllySprite
+    llIFCommonPlayerTags1PSprite,
+    llIFCommonPlayerTags2PSprite,
+    llIFCommonPlayerTags3PSprite,
+    llIFCommonPlayerTags4PSprite,
+    llIFCommonPlayerTagsCPSprite,
+    llIFCommonPlayerTagsAllySprite
 };
 
 // 0x8012EFC4
 IFPauseDecal dIFCommonBattlePauseDecalsSpriteData[/* */] =
 {
-    { &llIFCommonBattlePauseDecalPauseSprite,          { 232, 191 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
-    { &llIFCommonBattlePauseDecalAButtonSprite,        {  99, 203 }, { { 0x00, 0x95, 0xFF }, { 0x00, 0x05, 0xC7 } } },
-    { &llIFCommonBattlePauseDecalBButtonSprite,        { 122, 203 }, { { 0x36, 0xBF, 0x00 }, { 0x00, 0x30, 0x00 } } },
-    { &llIFCommonBattlePauseDecalZTriggerSprite,       { 145, 202 }, { { 0x80, 0x80, 0x80 }, { 0x21, 0x21, 0x21 } } },
-    { &llIFCommonBattlePauseDecalRTriggerSprite,       { 164, 203 }, { { 0x80, 0x80, 0x80 }, { 0x21, 0x21, 0x21 } } },
-    { &llIFCommonBattlePauseDecalPlusSprite,           { 113, 206 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
-    { &llIFCommonBattlePauseDecalPlusSprite,           { 136, 206 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
-    { &llIFCommonBattlePauseDecalPlusSprite,           { 155, 206 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
-    { &llIFCommonBattlePauseDecalResetSprite,          { 182, 205 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
-    { &llIFCommonBattlePauseDecalSmashBallSprite,      { 198, 191 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
-    { &llIFCommonBattlePauseDecalArrowsSprite,         {  21,  19 }, { { 0xFF, 0x00, 0x00 }, { 0x00, 0x00, 0x00 } } },
-    { &llIFCommonBattlePauseDecalControlStickSprite,   {  31,  29 }, { { 0xFF, 0xFF, 0xFF }, { 0x14, 0x18, 0x11 } } },
-    { &llIFCommonBattlePauseDecalLTriggerSprite,       {  34, 203 }, { { 0x80, 0x80, 0x80 }, { 0x21, 0x21, 0x21 } } },
-    { &llIFCommonBattlePauseDecalRetrySprite,          {  51, 205 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } }
+    { llIFCommonBattlePauseDecalPauseSprite,          { 232, 191 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
+    { llIFCommonBattlePauseDecalAButtonSprite,        {  99, 203 }, { { 0x00, 0x95, 0xFF }, { 0x00, 0x05, 0xC7 } } },
+    { llIFCommonBattlePauseDecalBButtonSprite,        { 122, 203 }, { { 0x36, 0xBF, 0x00 }, { 0x00, 0x30, 0x00 } } },
+    { llIFCommonBattlePauseDecalZTriggerSprite,       { 145, 202 }, { { 0x80, 0x80, 0x80 }, { 0x21, 0x21, 0x21 } } },
+    { llIFCommonBattlePauseDecalRTriggerSprite,       { 164, 203 }, { { 0x80, 0x80, 0x80 }, { 0x21, 0x21, 0x21 } } },
+    { llIFCommonBattlePauseDecalPlusSprite,           { 113, 206 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
+    { llIFCommonBattlePauseDecalPlusSprite,           { 136, 206 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
+    { llIFCommonBattlePauseDecalPlusSprite,           { 155, 206 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
+    { llIFCommonBattlePauseDecalResetSprite,          { 182, 205 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
+    { llIFCommonBattlePauseDecalSmashBallSprite,      { 198, 191 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } },
+    { llIFCommonBattlePauseDecalArrowsSprite,         {  21,  19 }, { { 0xFF, 0x00, 0x00 }, { 0x00, 0x00, 0x00 } } },
+    { llIFCommonBattlePauseDecalControlStickSprite,   {  31,  29 }, { { 0xFF, 0xFF, 0xFF }, { 0x14, 0x18, 0x11 } } },
+    { llIFCommonBattlePauseDecalLTriggerSprite,       {  34, 203 }, { { 0x80, 0x80, 0x80 }, { 0x21, 0x21, 0x21 } } },
+    { llIFCommonBattlePauseDecalRetrySprite,          {  51, 205 }, { { 0xFF, 0xFF, 0xFF }, { 0x00, 0x00, 0x00 } } }
 };
 
 // 0x8012F0A4
@@ -341,13 +378,13 @@ SYRectangle dIFCommonBattlePauseBorderRectangle[/* */] =
 // 0x8012F0F4
 IFACharacter dIFCommonAnnounceFailureSpriteData[/* */] =
 {
-    {  77, 101, &llIFCommonAnnounceCommonLetterFSprite },
-    {  97, 101, &llIFCommonAnnounceCommonLetterASprite },
-    { 130, 101, &llIFCommonAnnounceCommonLetterISprite },
-    { 145, 101, &llIFCommonAnnounceCommonLetterLSprite },
-    { 167, 101, &llIFCommonAnnounceCommonLetterUSprite },
-    { 197, 101, &llIFCommonAnnounceCommonLetterRSprite },
-    { 225, 101, &llIFCommonAnnounceCommonLetterESprite }
+    {  77, 101, llIFCommonAnnounceCommonLetterFSprite },
+    {  97, 101, llIFCommonAnnounceCommonLetterASprite },
+    { 130, 101, llIFCommonAnnounceCommonLetterISprite },
+    { 145, 101, llIFCommonAnnounceCommonLetterLSprite },
+    { 167, 101, llIFCommonAnnounceCommonLetterUSprite },
+    { 197, 101, llIFCommonAnnounceCommonLetterRSprite },
+    { 225, 101, llIFCommonAnnounceCommonLetterESprite }
 };
 
 // 0x8012F12C
@@ -356,15 +393,15 @@ SYColorRGBPair dIFCommonAnnounceFailureSpriteColors = { { 0xFF, 0xFF, 0xFF }, { 
 // 0x8012F134
 IFACharacter dIFCommonAnnounceCompleteSpriteData[/* */] =
 {
-    {  46, 101, &llIFCommonAnnounceCommonLetterCSprite       },
-    {  71, 101, &llIFCommonAnnounceCommonLetterOSprite       },
-    { 104, 100, &llIFCommonAnnounceCommonLetterMSprite       },
-    { 143, 101, &llIFCommonAnnounceCommonLetterPSprite       },
-    { 168, 101, &llIFCommonAnnounceCommonLetterLSprite       },
-    { 189, 101, &llIFCommonAnnounceCommonLetterESprite       },
-    { 212, 101, &llIFCommonAnnounceCommonLetterTSprite       },
-    { 237, 101, &llIFCommonAnnounceCommonLetterESprite       },
-    { 267, 101, &llIFCommonAnnounceCommonSymbolExclaimSprite }
+    {  46, 101, llIFCommonAnnounceCommonLetterCSprite       },
+    {  71, 101, llIFCommonAnnounceCommonLetterOSprite       },
+    { 104, 100, llIFCommonAnnounceCommonLetterMSprite       },
+    { 143, 101, llIFCommonAnnounceCommonLetterPSprite       },
+    { 168, 101, llIFCommonAnnounceCommonLetterLSprite       },
+    { 189, 101, llIFCommonAnnounceCommonLetterESprite       },
+    { 212, 101, llIFCommonAnnounceCommonLetterTSprite       },
+    { 237, 101, llIFCommonAnnounceCommonLetterESprite       },
+    { 267, 101, llIFCommonAnnounceCommonSymbolExclaimSprite }
 };
 
 // 0x8012F17C
@@ -771,6 +808,9 @@ void ifCommonPlayerDamageProcUpdate(GObj *interface_gobj)
 // 0x8010EEFC
 void ifCommonPlayerDamageProcDisplay(GObj *interface_gobj)
 {
+#ifdef PORT
+    if (port_enhancement_is_hud_disabled()) return;
+#endif
     f32 pos_x;
     f32 scale;
     f32 pos_y;
@@ -885,6 +925,16 @@ void ifCommonPlayerDamageSetDigitAttr(void)
 
     for (i = 0; i < ARRAY_COUNT(dIFCommonPlayerDamageDigitSpriteOffsets); i++)
     {
+#ifdef PORT
+        /* Only digit 0 ever goes through lbCommonMakeSObjForGObj, so
+         * digits 1-9, %, and HP would otherwise never get byte-order
+         * fixup applied to their Sprite/Bitmap headers or texel data.
+         * That left their attr write below landing at the wrong halfword
+         * and runtime copies (ifcommon.c:828/856) reading garbled fields,
+         * showing the % symbol as blank and digits with broken
+         * transparency. */
+        ifCommonPortFixupSpriteFull(lbRelocGetFileData(Sprite*, gGMCommonFiles[2], dIFCommonPlayerDamageDigitSpriteOffsets[i]));
+#endif
         lbRelocGetFileData(Sprite*, gGMCommonFiles[2], dIFCommonPlayerDamageDigitSpriteOffsets[i])->attr = SP_TEXSHUF | SP_TRANSPARENT;
     }
 }
@@ -924,11 +974,15 @@ void ifCommonPlayerDamageInitInterface(void)
 
             fp = ftGetStruct(gSCManagerBattleState->players[player].fighter_gobj);
 
+#ifdef PORT
+            ft_sprites = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+#else
             ft_sprites = fp->attr->sprites;
+#endif
 
-            if ((ft_sprites != NULL) && (ft_sprites->emblem != NULL))
+            if ((ft_sprites != NULL) && (PORT_RESOLVE(ft_sprites->emblem) != NULL))
             {
-                sobj = lbCommonMakeSObjForGObj(interface_gobj, ft_sprites->emblem);
+                sobj = lbCommonMakeSObjForGObj(interface_gobj, (Sprite*)PORT_RESOLVE(ft_sprites->emblem));
 
                 sobj->pos.x = (s32)
                 (
@@ -955,10 +1009,10 @@ void ifCommonPlayerDamageInitInterface(void)
             {
                 gcAddSObjForGObj(interface_gobj, NULL)->sprite.attr = SP_HIDDEN;
             }
-            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], &llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[0];
-            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], &llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[1];
-            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], &llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[2];
-            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], &llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[3];
+            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[0];
+            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[1];
+            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[2];
+            lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[2], llIFCommonPlayerDamageDigit0Sprite))->user_data.p = &sIFCommonPlayerDamageInterface[player].chars[3];
 
             // The above functions should all return SObj*
 
@@ -1007,6 +1061,9 @@ void ifCommonPlayerDamageStopBreakAnim(FTStruct *fp)
 // 0x8010F878
 void ifCommonPlayerStockMultiProcDisplay(GObj *interface_gobj)
 {
+#ifdef PORT
+    if (port_enhancement_is_hud_disabled()) return;
+#endif
     s32 player;
     FTStruct *fp;
     s32 unused;
@@ -1048,9 +1105,18 @@ void ifCommonPlayerStockMultiProcDisplay(GObj *interface_gobj)
                 {
                     if (stock_order < stock_count)
                     {
+#ifdef PORT
+                        {
+                            FTSprites *_spr = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+                            lt_sobj->sprite = *(Sprite*)PORT_RESOLVE(_spr->stock_sprite);
+                            u32 *_luts = (u32*)PORT_RESOLVE(_spr->stock_luts);
+                            lt_sobj->sprite.LUT = _luts[fp->costume];
+                        }
+#else
                         lt_sobj->sprite = *fp->attr->sprites->stock_sprite;
 
                         lt_sobj->sprite.LUT = fp->attr->sprites->stock_luts[fp->costume];
+#endif
 
                         lt_sobj->pos.x = ((gIFCommonPlayerInterface.player_pos_x[player] + dIFCommonPlayerStocksIconOffsetsX[player] + (stock_order * 10)) - (lt_sobj->sprite.width * 0.5F));
                         lt_sobj->pos.y = ((gIFCommonPlayerInterface.player_pos_y - (s32)(lt_sobj->sprite.height * 0.5F)) - 20);
@@ -1072,9 +1138,18 @@ void ifCommonPlayerStockMultiProcDisplay(GObj *interface_gobj)
 
                 gt_sobj = SObjGetStruct(interface_gobj);
 
+#ifdef PORT
+                {
+                    FTSprites *_spr = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+                    gt_sobj->sprite = *(Sprite*)PORT_RESOLVE(_spr->stock_sprite);
+                    u32 *_luts = (u32*)PORT_RESOLVE(_spr->stock_luts);
+                    gt_sobj->sprite.LUT = _luts[fp->costume];
+                }
+#else
                 gt_sobj->sprite = *fp->attr->sprites->stock_sprite;
 
                 gt_sobj->sprite.LUT = fp->attr->sprites->stock_luts[fp->costume];
+#endif
 
                 gt_sobj->pos.x = ((trunc_pos_x - 22) - (gt_sobj->sprite.width * 0.5F));
                 gt_sobj->pos.y = ((gIFCommonPlayerInterface.player_pos_y - (s32)(gt_sobj->sprite.height * 0.5F)) - 20);
@@ -1125,6 +1200,9 @@ void ifCommonPlayerStockSetIconAttr(void)
 
     for (i = 0; i < ARRAY_COUNT(dIFCommonPlayerStockDigitSpriteOffsets); i++)
     {
+#ifdef PORT
+        ifCommonPortFixupSpriteFull(lbRelocGetFileData(Sprite*, gGMCommonFiles[4], dIFCommonPlayerStockDigitSpriteOffsets[i]));
+#endif
         lbRelocGetFileData(Sprite*, gGMCommonFiles[4], dIFCommonPlayerStockDigitSpriteOffsets[i])->attr = SP_TEXSHUF | SP_TRANSPARENT;
     }
 }
@@ -1135,30 +1213,47 @@ void ifCommonPlayerStockMultiMakeInterface(s32 player)
     FTStruct *fp = ftGetStruct(gSCManagerBattleState->players[player].fighter_gobj);
     Sprite *sprite;
 
+#ifdef PORT
+    {
+        FTSprites *_spr = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+        if ((_spr != NULL) && (PORT_RESOLVE(_spr->stock_sprite) != NULL))
+#else
     if ((fp->attr->sprites != NULL) && (fp->attr->sprites->stock_sprite != NULL))
+#endif
     {
         GObj *interface_gobj = gcMakeGObjSPAfter(nGCCommonKindInterface, NULL, nGCCommonLinkIDInterface, GOBJ_PRIORITY_DEFAULT);
         gcAddGObjDisplay(interface_gobj, ifCommonPlayerStockMultiProcDisplay, 23, GOBJ_PRIORITY_DEFAULT, ~0);
 
-        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], &llIFCommonDigits0Sprite));
-        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], &llIFCommonDigits0Sprite));
-        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], &llIFCommonDigits0Sprite));
-        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], &llIFCommonDigits0Sprite));
-        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], &llIFCommonDigits0Sprite));
-        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], &llIFCommonDigits0Sprite));
+        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], llIFCommonDigits0Sprite));
+        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], llIFCommonDigits0Sprite));
+        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], llIFCommonDigits0Sprite));
+        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], llIFCommonDigits0Sprite));
+        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], llIFCommonDigits0Sprite));
+        lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[4], llIFCommonDigits0Sprite));
 
         sIFCommonPlayerStocksNum[player] = S8_MAX;
 
+#ifdef PORT
+        sprite = (Sprite*)PORT_RESOLVE(_spr->stock_sprite);
+        ifCommonPortFixupSpriteFull(sprite);
+#else
         sprite = fp->attr->sprites->stock_sprite;
+#endif
         sprite->attr = SP_TEXSHUF | SP_TRANSPARENT;
 
         ifSetPlayer(interface_gobj, player);
     }
+#ifdef PORT
+    }
+#endif
 }
 
 // 0x8010FF24
 void ifCommonPlayerStockSingleProcDisplay(GObj *interface_gobj)
 {
+#ifdef PORT
+    if (port_enhancement_is_hud_disabled()) return;
+#endif
     s32 player = ifGetPlayer(interface_gobj);
     s32 stocks = gSCManagerBattleState->players[player].stock_count;
 
@@ -1171,7 +1266,15 @@ void ifCommonPlayerStockSingleProcDisplay(GObj *interface_gobj)
 // 0x8010FF78
 void ifCommonPlayerStockSetLUT(s32 player, s32 lut_id, FTAttributes *attr)
 {
+#ifdef PORT
+    {
+        FTSprites *_spr = (FTSprites*)PORT_RESOLVE(attr->sprites);
+        u32 *_luts = (u32*)PORT_RESOLVE(_spr->stock_luts);
+        SObjGetStruct(sIFCommonPlayerStocksGObj[player])->sprite.LUT = _luts[lut_id];
+    }
+#else
     SObjGetStruct(sIFCommonPlayerStocksGObj[player])->sprite.LUT = attr->sprites->stock_luts[lut_id];
+#endif
 }
 
 // 0x8010FFA8
@@ -1181,22 +1284,42 @@ void ifCommonPlayerStockSingleMakeInterface(s32 player)
     GObj *interface_gobj;
     SObj *sobj;
 
+#ifdef PORT
+    {
+        FTSprites *_spr = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+        if ((_spr != NULL) && (PORT_RESOLVE(_spr->stock_sprite) != NULL))
+#else
     if ((fp->attr->sprites != NULL) && (fp->attr->sprites->stock_sprite != NULL))
+#endif
     {
         sIFCommonPlayerStocksGObj[player] = interface_gobj = gcMakeGObjSPAfter(nGCCommonKindInterface, NULL, nGCCommonLinkIDInterface, GOBJ_PRIORITY_DEFAULT);
 
         gcAddGObjDisplay(interface_gobj, ifCommonPlayerStockSingleProcDisplay, 23, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+        sobj = lbCommonMakeSObjForGObj(interface_gobj, (Sprite*)PORT_RESOLVE(_spr->stock_sprite));
+#else
         sobj = lbCommonMakeSObjForGObj(interface_gobj, fp->attr->sprites->stock_sprite);
+#endif
 
         sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
+#ifdef PORT
+        {
+            u32 *_luts = (u32*)PORT_RESOLVE(_spr->stock_luts);
+            sobj->sprite.LUT = _luts[fp->costume];
+        }
+#else
         sobj->sprite.LUT = fp->attr->sprites->stock_luts[fp->costume];
+#endif
 
         sobj->pos.x = ((gIFCommonPlayerInterface.player_pos_x[player] + dIFCommonPlayerStocksIconOffsetsX[player]) - (s32)(sobj->sprite.width * 0.5F));
         sobj->pos.y = ((gIFCommonPlayerInterface.player_pos_y - (s32)(sobj->sprite.height * 0.5F)) - 20);
 
         ifSetPlayer(interface_gobj, player);
     }
+#ifdef PORT
+    }
+#endif
 }
 
 // 0x80110138
@@ -1251,7 +1374,14 @@ void ifCommonPlayerStockStealMakeInterface(s32 thief, s32 stolen)
         gcAddGObjDisplay(interface_gobj, lbCommonDrawSObjAttr, 23, GOBJ_PRIORITY_DEFAULT, ~0);
         gcAddGObjProcess(interface_gobj, ifCommonPlayerStockStealProcUpdate, nGCProcessKindFunc, 0);
 
+#ifdef PORT
+        {
+            FTSprites *_spr = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+            check_sobj = lbCommonMakeSObjForGObj(interface_gobj, (Sprite*)PORT_RESOLVE(_spr->stock_sprite));
+        }
+#else
         check_sobj = lbCommonMakeSObjForGObj(interface_gobj, fp->attr->sprites->stock_sprite);
+#endif
 
         if (check_sobj == NULL)
         {
@@ -1264,7 +1394,15 @@ void ifCommonPlayerStockStealMakeInterface(s32 thief, s32 stolen)
             sobj = check_sobj;
 
             sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
+#ifdef PORT
+            {
+                FTSprites *_spr = (FTSprites*)PORT_RESOLVE(fp->attr->sprites);
+                u32 *_luts = (u32*)PORT_RESOLVE(_spr->stock_luts);
+                sobj->sprite.LUT = _luts[fp->costume];
+            }
+#else
             sobj->sprite.LUT = fp->attr->sprites->stock_luts[fp->costume];
+#endif
 
             sIFCommonPlayerStealInterface[thief].steal_pos_x = ((gIFCommonPlayerInterface.player_pos_x[stolen] + dIFCommonPlayerStocksIconOffsetsX[stolen]) - (s32)(sobj->sprite.width * 0.5F));
             sIFCommonPlayerStealInterface[thief].steal_pos_y = ((gIFCommonPlayerInterface.player_pos_y - (s32)(sobj->sprite.height * 0.5F)) - 20);
@@ -1415,7 +1553,7 @@ void ifCommonPlayerMagnifyUpdateRender(Gfx **dls, s32 color_id, f32 ulx, f32 uly
     gSPClearGeometryMode(dl++, G_ZBUFFER);
 
     // This is a compound macro but I cannot find anything that would correspond to this
-    gDPSetTextureImage(dl++, G_IM_FMT_IA, G_IM_SIZ_16b, 1, lbRelocGetFileData(Sprite*, gGMCommonFiles[0], &llIFCommonPlayerMagnifyFrameImage));
+    gDPSetTextureImage(dl++, G_IM_FMT_IA, G_IM_SIZ_16b, 1, lbRelocGetFileData(Sprite*, gGMCommonFiles[0], llIFCommonPlayerMagnifyFrameImage));
 
     // NEEDS TO BE ALL ON THE SAME LINE OR GLUED, OTHERWISE IT DOESN'T MATCH
     gDPSetTile(dl++, G_IM_FMT_IA, G_IM_SIZ_16b, 0, 0x0000, G_TX_LOADTILE, 0, G_TX_MIRROR | G_TX_WRAP, 4, G_TX_NOLOD, G_TX_MIRROR | G_TX_WRAP, 4, G_TX_NOLOD);\
@@ -1574,6 +1712,9 @@ void ifCommonPlayerMagnifyUpdateViewport(Gfx **dls, FTStruct *fp)
 // 0x801111A0
 void ifCommonPlayerMagnifyProcDisplay(FTStruct *fp)
 {
+#ifdef PORT
+    if (port_enhancement_is_hud_disabled()) return;
+#endif
     GObj *interface_gobj;
     DObj *dobj;
     IFPlayerMagnify *ifmag;
@@ -1589,6 +1730,28 @@ void ifCommonPlayerMagnifyProcDisplay(FTStruct *fp)
 
         dobj->translate.vec.f.x = ifmag->pos.x;
         dobj->translate.vec.f.y = ifmag->pos.y;
+
+#ifdef PORT
+        /* Widescreen: the magnify bubble is composed of two pieces drawn via
+         * different paths — the frame border via gSPTextureRectangle (which
+         * libultraship leaves at authored 4:3 NDC, no AdjX) and this arrow
+         * DObj rendered through the standard 3D path (which gets AdjX clip-X
+         * compression). Without compensation the arrow drifts toward
+         * screen-center relative to the frame, appearing offset inside the
+         * bubble. Pre-divide translate.x by the same scale AdjX applies so
+         * after AdjX compresses on the way to the FB, the arrow lands at the
+         * same NDC as in 4:3 — restoring its authored visual position inside
+         * the bubble. ftdisplaymain.c already undoes the func_ovl2_800EB924
+         * compression on fp->magnify_pos so ifmag->pos here is in 4:3
+         * coords. */
+        {
+            f32 scale = port_widescreen_clip_x_scale();
+            if (scale > 0.0F && scale < 1.0F)
+            {
+                dobj->translate.vec.f.x /= scale;
+            }
+        }
+#endif
 
         dobj->rotate.vec.f.z = syUtilsArcTan2(fp->magnify_pos.y, fp->magnify_pos.x) - F_CST_DTOR32(90.0F);
 
@@ -1613,12 +1776,28 @@ void ifCommonPlayerMagnifyMakeInterface(void)
 {
     GObj *fighter_gobj = gGCCommonLinks[nGCCommonLinkIDFighter];
 
+#ifdef PORT
+    /* The magnify-frame IA16 texels are raw in the file and only ever
+     * get loaded via a runtime-built SETTIMG in ifCommonPlayerMagnifyUpdateRender.
+     * pass2's DL scan can't see that SETTIMG (it isn't in a stored DL)
+     * so the blob is left with pass1's blanket BSWAP32 applied, which
+     * byte-reverses each 4-byte group — for IA16 that swaps intensity/
+     * alpha per-texel AND swaps adjacent texel pairs.  Result on LE:
+     * the magnifying-glass border appears opaque black instead of
+     * transparent at its alpha-zero edge.  Undo BSWAP32 once. Size = 128
+     * texels * 2 bytes/IA16 = 256 bytes, matching the gDPLoadBlock
+     * (texels=127, DXT=1024) in ifCommonPlayerMagnifyUpdateRender. */
+    portFixupRawTextureBSWAP32(
+        lbRelocGetFileData(void*, gGMCommonFiles[0], llIFCommonPlayerMagnifyFrameImage),
+        256);
+#endif
+
     while (fighter_gobj != NULL)
     {
         FTStruct *fp = ftGetStruct(fighter_gobj);
         GObj *interface_gobj = gcMakeGObjSPAfter(nGCCommonKindInterface, NULL, nGCCommonLinkIDMagnify, GOBJ_PRIORITY_DEFAULT);
 
-        gcAddXObjForDObjFixed(gcAddDObjForGObj(interface_gobj, lbRelocGetFileData(void*, gGMCommonFiles[0], &llIFCommonPlayerMagnifyDisplayList)), nGCMatrixKindTraRotRpyRSca, 0);
+        gcAddXObjForDObjFixed(gcAddDObjForGObj(interface_gobj, lbRelocGetFileData(void*, gGMCommonFiles[0], llIFCommonPlayerMagnifyDisplayList)), nGCMatrixKindTraRotRpyRSca, 0);
 
         sIFCommonPlayerMagnifyInterface[fp->player].interface_gobj = interface_gobj;
         sIFCommonPlayerMagnifyInterface[fp->player].color_id = gSCManagerBattleState->players[fp->player].color;
@@ -1649,7 +1828,7 @@ void ifCommonPlayerArrowsRightProcDisplay(GObj *interface_gobj)
 // 0x801115BC
 void ifCommonPlayerArrowsAddAnim(GObj *interface_gobj)
 {
-    gcAddAnimJointAll(interface_gobj, lbRelocGetFileData(AObjEvent32**, gGMCommonFiles[0], &llIFCommonPlayerArrowsAnimJoint), 0.0F);
+    gcAddAnimJointAll(interface_gobj, lbRelocGetFileData(AObjEvent32**, gGMCommonFiles[0], llIFCommonPlayerArrowsAnimJoint), 0.0F);
     gcPlayAnimAll(interface_gobj);
 }
 
@@ -1696,7 +1875,7 @@ GObj* ifCommonPlayerArrowsMakeInterface(void (*proc_display)(GObj*), void (*proc
     gcSetupCustomDObjs
     (
         interface_gobj,
-        lbRelocGetFileData(DObjDesc*, gGMCommonFiles[0], &llIFCommonPlayerArrowsDObjDesc),
+        lbRelocGetFileData(DObjDesc*, gGMCommonFiles[0], llIFCommonPlayerArrowsDObjDesc),
         NULL,
         nGCMatrixKindTraRotRpyR,
         nGCMatrixKindNull,
@@ -1820,6 +1999,9 @@ void ifCommonPlayerArrowsUpdateFlags(f32 x, f32 y)
 // 0x80111A3C
 void ifCommonPlayerTagProcDisplay(GObj *interface_gobj)
 {
+#ifdef PORT
+    if (port_enhancement_is_hud_disabled()) return;
+#endif
     s32 player = ifGetPlayer(interface_gobj);
     FTStruct *fp;
     f32 x;
@@ -1887,6 +2069,9 @@ void ifCommonPlayerTagMakeInterface(void)
 // 0x80111D64
 void ifCommonItemArrowProcDisplay(GObj *interface_gobj)
 {
+#ifdef PORT
+    if (port_enhancement_is_hud_disabled()) return;
+#endif
     ITStruct *ip = itGetStruct(interface_gobj); // So I'm guessing this copies the corresponding item's user_data? Its classifier is 0x3F8.
     SObj *sobj;
     f32 x;
@@ -1897,6 +2082,17 @@ void ifCommonItemArrowProcDisplay(GObj *interface_gobj)
     {
         sobj = SObjGetStruct(interface_gobj);
 
+#ifdef PORT
+        /* PORT: defensive null-check for orphaned arrow_gobj. If the
+         * parent item was destroyed but this arrow leaked (the LP64
+         * truncation skip-path in itMainDestroyItem can do that), the
+         * stale ip->item_gobj points at a recycled or empty GObj whose
+         * DObjGetStruct returns NULL. Just skip render for that tic so
+         * the game keeps running. */
+        if (ip->item_gobj == NULL || DObjGetStruct(ip->item_gobj) == NULL) {
+            return;
+        }
+#endif
         pos = DObjGetStruct(ip->item_gobj)->translate.vec.f;
 
         pos.y += ip->coll_data.map_coll.top + 100.0F;
@@ -1942,8 +2138,11 @@ void ifCommonItemArrowSetAttr(void)
 {
     Sprite *sprite = sIFCommonItemArrowSprite =
 
-    lbRelocGetFileData(Sprite*, lbRelocGetExternHeapFile((intptr_t)&llIFCommonItemFileID, syTaskmanMalloc(lbRelocGetFileSize((intptr_t)&llIFCommonItemFileID), 0x10)), &llIFCommonItemArrowSprite);
+    lbRelocGetFileData(Sprite*, lbRelocGetExternHeapFile((intptr_t)llIFCommonItemFileID, syTaskmanMalloc(lbRelocGetFileSize((intptr_t)llIFCommonItemFileID), 0x10)), llIFCommonItemArrowSprite);
 
+#ifdef PORT
+    ifCommonPortFixupSpriteFull(sprite);
+#endif
     sprite->attr = SP_TEXSHUF | SP_TRANSPARENT;
 
     sprite->red   = 0xFF;
@@ -2201,14 +2400,14 @@ SObj* ifCommonCountdownMakeInterface(void)
     gcAddGObjDisplay(interface_gobj, lbCommonDrawSObjAttr, 23, GOBJ_PRIORITY_DEFAULT, ~0);
     gcAddGObjProcess(interface_gobj, ifCommonCountdownThread, nGCProcessKindThread, 5);
 
-    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[1], &llIFCommonGameStatusRodSprite));
+    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[1], llIFCommonGameStatusRodSprite));
 
     sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
 
     sobj->pos.x = 103.0F;
     sobj->pos.y = -57.0F;
 
-    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[1], &llIFCommonGameStatusFrameSprite));
+    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[1], llIFCommonGameStatusFrameSprite));
 
     sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
 
@@ -2223,7 +2422,7 @@ SObj* ifCommonCountdownMakeInterface(void)
 
     ifCommonTrafficMakeSObj(interface_gobj, 10);
 
-    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[1], &llIFCommonGameStatusRodShadowSprite));
+    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[1], llIFCommonGameStatusRodShadowSprite));
 
     sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
 
@@ -2370,6 +2569,9 @@ void ifCommonSuddenDeathMakeInterface(void)
 // 0x80112C18
 void ifCommonTimerProcDisplay(GObj *interface_gobj)
 {
+#ifdef PORT
+    if (port_enhancement_is_hud_disabled()) return;
+#endif
     s32 digit;
     s32 i;
     s32 time;
@@ -2421,6 +2623,9 @@ void ifCommonTimerSetAttr(void)
 
     for (i = 0; i < ARRAY_COUNT(dIFCommonTimerDigitSpriteOffsets); i++)
     {
+#ifdef PORT
+        ifCommonPortFixupSpriteFull(lbRelocGetFileData(Sprite*, gGMCommonFiles[3], dIFCommonTimerDigitSpriteOffsets[i]));
+#endif
         lbRelocGetFileData(Sprite*, gGMCommonFiles[3], dIFCommonTimerDigitSpriteOffsets[i])->attr = SP_TEXSHUF | SP_TRANSPARENT;
     }
 }
@@ -2442,7 +2647,16 @@ SObj* ifCommonTimerMakeDigits(void)
     GObj *interface_gobj;
     SObj *sobj;
 
+    /*
     if (!(gSCManagerBattleState->game_rules & SCBATTLE_GAMERULE_TIME) || (gSCManagerBattleState->time_limit == SCBATTLE_TIMELIMIT_INFINITE))
+    {
+        return NULL;
+    }
+    */
+
+    // Decouple timer HUD for Competitive Ruleset
+    extern int port_get_comp_ruleset(void);
+    if ((!(gSCManagerBattleState->game_rules & SCBATTLE_GAMERULE_TIME) && !(port_get_comp_ruleset() && gSCManagerSceneData.scene_curr == nSCKindVSBattle)) || (gSCManagerBattleState->time_limit == SCBATTLE_TIMELIMIT_INFINITE))
     {
         return NULL;
     }
@@ -2453,12 +2667,12 @@ SObj* ifCommonTimerMakeDigits(void)
 
     gcAddGObjDisplay(interface_gobj, ifCommonTimerProcDisplay, 23, GOBJ_PRIORITY_DEFAULT, ~0);
 
-    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)&llIFCommonTimerDigit0Sprite));
-    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)&llIFCommonTimerDigit0Sprite));
-    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)&llIFCommonTimerDigit0Sprite));
-    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)&llIFCommonTimerDigit0Sprite));
+    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)llIFCommonTimerDigit0Sprite));
+    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)llIFCommonTimerDigit0Sprite));
+    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)llIFCommonTimerDigit0Sprite));
+    lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], (intptr_t)llIFCommonTimerDigit0Sprite));
 
-    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], &llIFCommonTimerSymbolColonSprite));
+    sobj = lbCommonMakeSObjForGObj(interface_gobj, lbRelocGetFileData(Sprite*, gGMCommonFiles[3], llIFCommonTimerSymbolColonSprite));
 
     sobj->pos.x = (s32)(260.0F - (sobj->sprite.width * 0.5F));
     sobj->pos.y = (s32)(30.0F - (sobj->sprite.height * 0.5F));
@@ -2485,7 +2699,11 @@ void ifCommonTimerFuncRun(GObj *interface_gobj)
             sIFCommonTimerStamp = time_update;
             gSCManagerBattleState->time_passed += time_delta;
 
-            if ((gSCManagerBattleState->game_rules & SCBATTLE_GAMERULE_TIME) && (gSCManagerBattleState->time_limit != SCBATTLE_TIMELIMIT_INFINITE))
+            //if ((gSCManagerBattleState->game_rules & SCBATTLE_GAMERULE_TIME) && (gSCManagerBattleState->time_limit != SCBATTLE_TIMELIMIT_INFINITE))
+
+            // decouple timer logic for comp. ruleset
+            extern int port_get_comp_ruleset(void);
+            if (((gSCManagerBattleState->game_rules & SCBATTLE_GAMERULE_TIME) || (port_get_comp_ruleset() && gSCManagerSceneData.scene_curr == nSCKindVSBattle)) && (gSCManagerBattleState->time_limit != SCBATTLE_TIMELIMIT_INFINITE))
             {
                 if (gSCManagerBattleState->time_remain != 0)
                 {
@@ -2598,7 +2816,7 @@ void ifCommonBattleInitPlacement(void)
 }
 
 // 0x80113638
-void ifCommonBattleInterfacePauseGObj(GObj *interface_gobj, u32 unused)
+void ifCommonBattleInterfacePauseGObj(GObj *interface_gobj, uintptr_t unused)
 {
     gcPauseGObjProcessAll(interface_gobj);
 
@@ -2606,7 +2824,7 @@ void ifCommonBattleInterfacePauseGObj(GObj *interface_gobj, u32 unused)
 }
 
 // 0x8011366C
-void ifCommonBattleInterfaceResumeGObj(GObj *interface_gobj, u32 unused)
+void ifCommonBattleInterfaceResumeGObj(GObj *interface_gobj, uintptr_t unused)
 {
     gcResumeGObjProcessAll(interface_gobj);
 
@@ -2890,6 +3108,16 @@ void ifCommonBattlePauseInitInterface(s32 player)
 
     sIFCommonBattlePausePlayer = player;
 
+#ifdef PORT
+    /* Silence per-fighter loop SFX (Samus's charge whoosh, etc.) before
+     * the existing audio calls. The IDO/N64 pause path doesn't stop
+     * these explicitly — it relies on the audio thread descheduling
+     * because the SP is busy with the pause menu. The port's audio
+     * thread runs continuously, so the FGM bytecode keeps cycling and
+     * the looping voice keeps re-arming. See
+     * docs/bugs/samus_charge_loop_sfx_pause_leak_2026-05-03.md. */
+    ftParamStopAllFightersLoopSFX();
+#endif
     func_80026594_27194();
     func_800269C0_275C0(nSYAudioFGMGamePause);
     syAudioSetBGMVolume(0, 0x3C00);
@@ -3219,6 +3447,18 @@ void ifCommonBattleSetGameStatusWait(void)
 // 0x80114968
 void ifCommonPlayerStockMakeStockSnap(FTStruct *fp)
 {
+#ifdef PORT
+    /* Intro scenes never run ifCommonBattleMakeInterface, so the player
+     * HUD position arrays (gIFCommonPlayerInterface.player_pos_x) can be
+     * NULL.  Intro-scene fighters occasionally get pushed through the
+     * "dead" state machine because of bad map bounds, which calls this
+     * function via ftCommonDeadUpdateScore.  Bail instead of dereferencing
+     * a null pointer array. */
+    if (gIFCommonPlayerInterface.player_pos_x == NULL)
+    {
+        return;
+    }
+#endif
     efManagerStockSnapMakeEffect(gIFCommonPlayerInterface.player_pos_x[fp->player], gIFCommonPlayerInterface.player_pos_y);
 }
 

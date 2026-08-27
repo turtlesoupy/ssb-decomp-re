@@ -1,5 +1,6 @@
 #include <ft/fighter.h>
 #include <reloc_data.h>
+extern void *func_800269C0_275C0(u16 id);
 
 // // // // // // // // // // // //
 //                               //
@@ -110,7 +111,11 @@ void ftKirbySpecialNCopyInitCopyVars(GObj *fighter_gobj)
 {
     s16 copy_id;
     FTStruct *fp = ftGetStruct(fighter_gobj);
+#ifdef PORT
+    FTKirbyCopy *copy = lbRelocGetFileData(FTKirbyCopy*, gFTDataKirbyMainMotion, llKirbyMainMotionSpecialNFTKirbyCopy);
+#else
     FTKirbyCopy *copy = lbRelocGetFileData(FTKirbyCopy*, gFTDataKirbyMainMotion, &llKirbyMainMotionSpecialNFTKirbyCopy);
+#endif
 
     if (fp->motion_vars.flags.flag1 != 0)
     {
@@ -169,7 +174,11 @@ void ftKirbySpecialNLoopProcUpdate(GObj *fighter_gobj)
 void ftKirbySpecialNCatchProcUpdate(GObj *fighter_gobj)
 {
     FTStruct *kirby_fp = ftGetStruct(fighter_gobj);
+#ifdef PORT
+    FTKirbyCopy *copy = lbRelocGetFileData(FTKirbyCopy*, gFTDataKirbyMainMotion, llKirbyMainMotionSpecialNFTKirbyCopy);
+#else
     FTKirbyCopy *copy = lbRelocGetFileData(FTKirbyCopy*, gFTDataKirbyMainMotion, &llKirbyMainMotionSpecialNFTKirbyCopy);
+#endif
     FTStruct *victim_fp;
     Vec3f kirby_pos;
     f32 dist;
@@ -190,7 +199,7 @@ void ftKirbySpecialNCatchProcUpdate(GObj *fighter_gobj)
             victim_fp->status_vars.common.capturekirby.is_kirby = TRUE;
         }
         else kirby_fp->status_vars.kirby.specialn.copy_id = copy[victim_fp->fkind].copy_id;
-        
+
         func_800269C0_275C0(nSYAudioFGMKirbySpecialNCopyEat);
 
         if (kirby_fp->ga == nMPKineticsGround)

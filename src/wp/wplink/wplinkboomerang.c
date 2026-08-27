@@ -13,7 +13,11 @@ WPDesc dWPLinkBoomerangWeaponDesc =
     0x01,                                     // Render flags?
     nWPKindBoomerang,                         // Weapon Kind
     &gFTDataLinkSpecial1,                     // Pointer to character's loaded files?
+#ifdef PORT
+    llLinkSpecial1BoomerangWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llLinkSpecial1BoomerangWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

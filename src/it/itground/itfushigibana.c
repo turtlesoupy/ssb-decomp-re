@@ -4,6 +4,11 @@
 #include <gr/ground.h>
 #include <reloc_data.h>
 
+#ifdef PORT
+#include <config.h>
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       EXTERNAL VARIABLES      //
@@ -23,7 +28,7 @@ ITDesc dITFushigibanaItemDesc =
 {
     nITKindFushigibana,                         // Item Kind
     &gGRCommonStruct.yamabuki.item_head,        // Pointer to item file data?
-    &llGRYamabukiMapFushigibanaItemAttributes,  // Offset of item attributes in file?
+    llGRYamabukiMapFushigibanaItemAttributes,  // Offset of item attributes in file?
 
     // DObj transformation struct
     {
@@ -48,7 +53,7 @@ WPDesc dITFushigibanaWeaponRazorWeaponDesc =
     0x03,                                       // Render flags?
     nWPKindFushigibanaRazor,                    // Weapon Kind
     &gGRCommonStruct.yamabuki.item_head,        // Pointer to item's loaded files?
-    &llGRYamabukiMapFushigibanaRazorWeaponAttributes, // Offset of weapon attributes in loaded files
+    llGRYamabukiMapFushigibanaRazorWeaponAttributes, // Offset of weapon attributes in loaded files
 
     // DObj transformation struct
     {
@@ -77,11 +82,16 @@ WPDesc dITFushigibanaWeaponRazorWeaponDesc =
 void itFushigibanaCommonUpdateMonsterEvent(GObj *item_gobj)
 {
     ITStruct *ip = itGetStruct(item_gobj);
-    ITMonsterEvent *ev = itGetMonsterEvent(dITFushigibanaItemDesc, &llGRYamabukiMapFushigibanaHitParties); // (ITMonsterEvent*) ((uintptr_t)*dITFushigibanaItemDesc.p_file + (intptr_t)&Fushigibana_Event);
+    ITMonsterEvent *ev = itGetMonsterEvent(dITFushigibanaItemDesc, llGRYamabukiMapFushigibanaHitParties); // (ITMonsterEvent*) ((uintptr_t)*dITFushigibanaItemDesc.p_file + (intptr_t)&Fushigibana_Event);
 
     if (ip->multi == ev[ip->event_id].timer)
     {
+#ifdef PORT
+        portFixupStructU16(&ev[ip->event_id], 0x20, 1);
+        ip->attack_coll.angle            = BITFIELD_SEXT10(ev[ip->event_id].angle);
+#else
         ip->attack_coll.angle            = ev[ip->event_id].angle;
+#endif
         ip->attack_coll.damage           = ev[ip->event_id].damage;
         ip->attack_coll.size             = ev[ip->event_id].size;
         ip->attack_coll.knockback_scale  = ev[ip->event_id].knockback_scale;

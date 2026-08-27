@@ -47,6 +47,11 @@ extern void gcPlayDObjAnimJoint(DObj *dobj);
 
 // Apply MatAnimJoint values on current frame of animation to specific MObj
 extern void gcPlayMObjMatAnim(MObj *mobj);
+#ifdef PORT
+
+// Parse MatAnimJoint on specific MObj
+extern void gcParseMObjMatAnimJoint(MObj *mobj);
+#endif
 
 // Play all DObj and MObj animations on a GObj
 extern void gcPlayAnimAll(GObj *gobj);

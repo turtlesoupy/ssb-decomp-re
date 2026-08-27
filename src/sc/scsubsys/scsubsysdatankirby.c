@@ -4,7 +4,11 @@
 
 FTMotionDesc dFTNKirbySubMotionDescs[] =
 {
+#ifdef PORT
+	ll_1259_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTKirbyAnimEggLayFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
@@ -18,6 +22,10 @@ FTMotionDesc dFTNKirbySubMotionDescs[] =
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_496_FileID, 0x80000000, 0x00000000
+#else
 	&llFTNKirbyAnimPose1PFileID, 0x80000000, 0x00000000
+#endif
 };
 s32 dFTNKirbySubMotionDescsCount = sizeof(dFTNKirbySubMotionDescs)/sizeof(FTMotionDesc); // 0x0000000F

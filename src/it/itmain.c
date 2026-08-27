@@ -1,7 +1,19 @@
+#include <string.h>
 #include <it/item.h>
 #include <ft/fighter.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+
+#ifdef PORT
+#include <config.h>
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+extern void port_log(const char *fmt, ...);
+/* The project's shadow <stdlib.h> doesn't expose host getenv/atoi
+ * (it's the decomp's slim stdlib). Forward-declare locally for the
+ * SSB64_FORCE_ITEM_KIND test hook. Real prototypes per POSIX/C99. */
+extern char *getenv(const char *name);
+extern int atoi(const char *str);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -292,7 +304,41 @@ sb32 itMainCheckShootNoAmmo(GObj *item_gobj)
 // 0x801728D4
 void itMainDestroyItem(GObj *item_gobj)
 {
+#ifdef PORT
+    /* PORT crash-diag: bail loudly if the caller handed us a zombie
+     * GObj (on the free list with our sentinel) or a pointer too low to
+     * be a valid user-space address on LP64. Either case would fault on
+     * the very next field read. */
+    if (item_gobj == NULL) {
+        port_log("SSB64: itMainDestroyItem NULL gobj — bailing\n");
+        return;
+    }
+    if ((uintptr_t)item_gobj < (uintptr_t)0x100000000ULL) {
+        port_log("SSB64: itMainDestroyItem SUSPECT gobj=%p (low addr) — bailing\n",
+                 (void*)item_gobj);
+        return;
+    }
+    if (item_gobj->obj_kind == 0xFE /* GOBJ_PORT_EJECTED_SENTINEL */) {
+        port_log("SSB64: itMainDestroyItem ZOMBIE gobj=%p id=%u link_id=%u "
+                 "dl_link_id=%u — caller holds a freed GObj; bailing\n",
+                 (void*)item_gobj, item_gobj->id,
+                 (unsigned)item_gobj->link_id,
+                 (unsigned)item_gobj->dl_link_id);
+        return;
+    }
+#endif
     ITStruct *ip = itGetStruct(item_gobj);
+
+#ifdef PORT
+    port_log("SSB64: itMainDestroyItem ENTER gobj=%p id=%u kind=%u ip=%p "
+             "ip->kind=%u is_hold=%u owner=%p arrow=%p\n",
+             (void*)item_gobj, item_gobj->id, (unsigned)item_gobj->obj_kind,
+             (void*)ip,
+             ip ? (unsigned)ip->kind : 0,
+             ip ? (unsigned)ip->is_hold : 0,
+             ip ? (void*)ip->owner_gobj : NULL,
+             ip ? (void*)ip->arrow_gobj : NULL);
+#endif
 
     if ((ip->is_hold) && (ip->owner_gobj != NULL))
     {
@@ -308,10 +354,38 @@ void itMainDestroyItem(GObj *item_gobj)
     }
     if (ip->arrow_gobj != NULL)
     {
+#ifdef PORT
+        /* PORT: observed in the wild on LP64 — ip->arrow_gobj reads back with
+         * the upper 32 bits zeroed, giving a small "0x0Xxxxxxx" value that
+         * is not-NULL but not a valid user-space address. Dereferencing it
+         * in gcEjectGObj faults on the first field load. Root cause is still
+         * under investigation (suspected bitfield RMW overlapping the high
+         * word of the pointer — see docs/bugs/item_arrow_gobj_trunc...). For
+         * now: skip the eject when we detect a truncated pointer, dump raw
+         * bytes around the field so we can reconstruct what clobbered it,
+         * and keep the game alive. The worst visible consequence of skipping
+         * is a leaked red-arrow interface gobj. */
+        if ((uintptr_t)ip->arrow_gobj < (uintptr_t)0x100000000ULL) {
+            const unsigned char *bytes = (const unsigned char *)&ip->arrow_gobj;
+            port_log("SSB64: itMainDestroyItem TRUNC arrow_gobj=%p ip=%p "
+                     "raw_bytes=[%02x %02x %02x %02x %02x %02x %02x %02x] "
+                     "— skipping eject (leak)\n",
+                     (void*)ip->arrow_gobj, (void*)ip,
+                     bytes[0], bytes[1], bytes[2], bytes[3],
+                     bytes[4], bytes[5], bytes[6], bytes[7]);
+        } else {
+            gcEjectGObj(ip->arrow_gobj);
+        }
+#else
         gcEjectGObj(ip->arrow_gobj);
+#endif
     }
     itManagerSetPrevStructAlloc(ip);
     gcEjectGObj(item_gobj);
+
+#ifdef PORT
+    port_log("SSB64: itMainDestroyItem EXIT gobj=%p\n", (void*)item_gobj);
+#endif
 }
 
 // 0x80172984 - Link's Bomb erroneously redeclares this without stat_flags and stat_count
@@ -350,7 +424,11 @@ void itMainSetFighterRelease(GObj *item_gobj, Vec3f *vel, f32 throw_mul, u16 sta
 
     ip->attack_coll.throw_mul = throw_mul;
 
+#ifdef PORT
+    memcpy(&ip->attack_coll.stat_flags, &stat_flags, sizeof(u16));
+#else
     ip->attack_coll.stat_flags = *(GMStatFlags*)&stat_flags;
+#endif
     ip->attack_coll.stat_count = stat_count;
 
     ftParamSetHammerParams(fighter_gobj);
@@ -457,7 +535,7 @@ void itMainSetFighterHold(GObj *item_gobj, GObj *fighter_gobj)
 
     gmCollisionGetFighterPartsWorldPosition(fp->joints[joint_id], &pos);
     efManagerItemGetSwirlProcUpdate(&pos);
-    gcSetDObjTransformsForGObj(item_gobj, ip->attr->data);
+    gcSetDObjTransformsForGObj(item_gobj, PORT_RESOLVE(ip->attr->data));
 
     if (dITMainProcHoldList[ip->kind] != NULL)
     {
@@ -555,19 +633,51 @@ s32 itMainSearchRandomWeight(s32 random, ITRandomWeights *weights, u32 min, u32 
 
         if (random < weights->blocks[avg])
         {
-            itMainSearchRandomWeight(random, weights, min, avg);
+            /* PORT: recursive calls were missing `return` — original relied on
+             * MIPS leaving the callee's return value in $v0. Explicit return
+             * makes the search correct under any ABI. */
+            return itMainSearchRandomWeight(random, weights, min, avg);
         }
         else if (random < weights->blocks[avg + 1])
         {
             return avg;
         }
-        else itMainSearchRandomWeight(random, weights, avg, max);
+        else return itMainSearchRandomWeight(random, weights, avg, max);
     }
 }
 
 // 0x80173090
+#ifdef PORT
+/* Test override env vars (cached on first call). Item kinds:
+ *   0=Box  1=Taru(Barrel)  2=Capsule  3=Egg  4=Tomato  5=Heart  6=Star
+ *   7=Sword  8=Bat  9=Harisen  10=StarRod  11=LGun  12=FFlower
+ *   13=Hammer  14=MSBomb  15=BombHei  16=NBumper(item)  17=GShell
+ *   18=RShell  19=MBall
+ * Empty / unset = no override. */
+static int port_forced_item_kind(void) {
+    static int s = -2;
+    if (s == -2) {
+        const char *env = getenv("SSB64_FORCE_ITEM_KIND");
+        s = env ? atoi(env) : -1;
+    }
+    return s;
+}
+static int port_forced_container_kind(void) {
+    static int s = -2;
+    if (s == -2) {
+        const char *env = getenv("SSB64_FORCE_CONTAINER_DROP");
+        s = env ? atoi(env) : -1;
+    }
+    return s;
+}
+#endif
+
 s32 itMainGetWeightedItemKind(ITRandomWeights *weights)
 {
+#ifdef PORT
+    int forced = port_forced_item_kind();
+    if (forced >= 0) return forced;
+#endif
     return weights->kinds[itMainSearchRandomWeight(syUtilsRandIntRange(weights->weights_sum), weights, 0, weights->valids_num)];
 }
 
@@ -581,13 +691,22 @@ sb32 itMainMakeContainerItem(GObj *parent_gobj)
     if (gITManagerRandomWeights.weights_sum != 0)
     {
         kind = itMainGetWeightedItemKind(&gITManagerRandomWeights);
+#ifdef PORT
+        /* Container-drop-only override: pin the item that pops out of
+         * a smashed crate / barrel / capsule, while leaving natural
+         * spawn paths alone. Lets us tell whether breakage works. */
+        {
+            int forced = port_forced_container_kind();
+            if (forced >= 0) kind = forced;
+        }
+#endif
 
         if (kind <= nITKindCommonEnd)
         {
             vel.x = 0.0F;
 
             // Quite ridiculous especially since llITCommonDataContainerVelocitiesY is 0
-            vel.y = *(f32*) ((intptr_t)&llITCommonDataContainerVelocitiesY + ((uintptr_t) &((f32*)gITManagerCommonData)[kind]));
+            vel.y = *(f32*) ((intptr_t)llITCommonDataContainerVelocitiesY + ((uintptr_t) &((f32*)gITManagerCommonData)[kind]));
             vel.z = 0;
 
             if
@@ -618,9 +737,15 @@ void itMainUpdateAttackEvent(GObj *item_gobj, ITAttackEvent *ev)
 
     if (ip->multi == ev[ip->event_id].timer)
     {
+#ifdef PORT
+        ip->attack_coll.angle  = BITFIELD_SEXT10(ev[ip->event_id].angle);
+        ip->attack_coll.damage = ev[ip->event_id].damage;
+        ip->attack_coll.size   = ev[ip->event_id].size;
+#else
         ip->attack_coll.angle  = ev[ip->event_id].angle;
         ip->attack_coll.damage = ev[ip->event_id].damage;
         ip->attack_coll.size   = ev[ip->event_id].size;
+#endif
 
         ip->event_id++;
 

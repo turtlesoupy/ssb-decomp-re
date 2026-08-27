@@ -7,9 +7,13 @@
 
 typedef struct GMColEventDefault
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 value1 : 26;
-
+#else
+	u32 value1 : 26;
+	u32 opcode : 6;
+#endif
 } GMColEventDefault;
 
 typedef struct GMColEventGoto1
@@ -20,8 +24,11 @@ typedef struct GMColEventGoto1
 
 typedef struct GMColEventGoto2
 {
+#ifdef PORT
+	u32 p_goto;         // Relocation token — use PORT_RESOLVE()
+#else
 	void* p_goto;
-
+#endif
 } GMColEventGoto2;
 
 typedef struct GMColEventGoto
@@ -33,9 +40,13 @@ typedef struct GMColEventGoto
 
 typedef struct GMColEventLoopBegin
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 loop_count : 26;
-
+#else
+	u32 loop_count : 26;
+	u32 opcode : 6;
+#endif
 } GMColEventLoopBegin;
 
 typedef struct GMColEventSubroutine1
@@ -46,8 +57,11 @@ typedef struct GMColEventSubroutine1
 
 typedef struct GMColEventSubroutine2
 {
+#ifdef PORT
+	u32 p_subroutine;   // Relocation token — use PORT_RESOLVE()
+#else
 	void* p_subroutine;
-
+#endif
 } GMColEventSubroutine2;
 
 typedef struct GMColEventSubroutine
@@ -65,8 +79,11 @@ typedef struct GMColEventParallel1
 
 typedef struct GMColEventParallel2
 {
+#ifdef PORT
+	u32 p_script;       // Relocation token — use PORT_RESOLVE()
+#else
 	void* p_script;
-
+#endif
 } GMColEventParallel2;
 
 typedef struct GMColEventParallel
@@ -84,11 +101,17 @@ typedef struct GMColEventSetRGBA1
 
 typedef struct GMColEventSetRGBA2
 {
+#if IS_BIG_ENDIAN
 	u32 r : 8;
 	u32 g : 8;
 	u32 b : 8;
 	u32 a : 8;
-
+#else
+	u32 a : 8;
+	u32 b : 8;
+	u32 g : 8;
+	u32 r : 8;
+#endif
 } GMColEventSetRGBA2;
 
 typedef struct GMColEventSetRGBA
@@ -100,18 +123,28 @@ typedef struct GMColEventSetRGBA
 
 typedef struct GMColEventBlendRGBA1
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 blend_frames : 26;
-
+#else
+	u32 blend_frames : 26;
+	u32 opcode : 6;
+#endif
 } GMColEventBlendRGBA1;
 
 typedef struct GMColEventBlendRGBA2
 {
+#if IS_BIG_ENDIAN
 	u32 r : 8;
 	u32 g : 8;
 	u32 b : 8;
 	u32 a : 8;
-
+#else
+	u32 a : 8;
+	u32 b : 8;
+	u32 g : 8;
+	u32 r : 8;
+#endif
 } GMColEventBlendRGBA2;
 
 typedef struct GMColEventBlendRGBA
@@ -123,32 +156,50 @@ typedef struct GMColEventBlendRGBA
 
 typedef struct GMColEventMakeEffect1
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	s32 joint_id : 7;
 	u32 effect_id : 9;
 	u32 flag : 10;
-
+#else
+	u32 flag : 10;
+	u32 effect_id : 9;
+	u32 joint_id : 7;						// u32 for MSVC packing; sign-extend with BITFIELD_SEXT(x,7)
+	u32 opcode : 6;
+#endif
 } GMColEventMakeEffect1;
 
 typedef struct GMColEventMakeEffect2
 {
+#if IS_BIG_ENDIAN
 	s32 off_x : 16;
 	s32 off_y : 16;
-
+#else
+	s32 off_y : 16;
+	s32 off_x : 16;
+#endif
 } GMColEventMakeEffect2;
 
 typedef struct GMColEventMakeEffect3
 {
+#if IS_BIG_ENDIAN
 	s32 off_z : 16;
 	s32 rng_x : 16;
-
+#else
+	s32 rng_x : 16;
+	s32 off_z : 16;
+#endif
 } GMColEventMakeEffect3;
 
 typedef struct GMColEventMakeEffect4
 {
+#if IS_BIG_ENDIAN
 	s32 rng_y : 16;
 	s32 rng_z : 16;
-
+#else
+	s32 rng_z : 16;
+	s32 rng_y : 16;
+#endif
 } GMColEventMakeEffect4;
 
 typedef struct GMColEventMakeEffect
@@ -162,17 +213,26 @@ typedef struct GMColEventMakeEffect
 
 typedef struct GMColEventSetLight
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	s32 light1 : 13;
 	s32 light2 : 13;
-
+#else
+	u32 light2 : 13;						// u32 for MSVC packing; sign-extend with BITFIELD_SEXT13()
+	u32 light1 : 13;						// u32 for MSVC packing; sign-extend with BITFIELD_SEXT13()
+	u32 opcode : 6;
+#endif
 } GMColEventSetLight;
 
 typedef struct GMColEventPlayFGM
 {
+#if IS_BIG_ENDIAN
 	u32 opcode : 6;
 	u32 sfx_id : 26;
-
+#else
+	u32 sfx_id : 26;
+	u32 opcode : 6;
+#endif
 } GMColEventPlayFGM;
 
 typedef union GMColEventAll

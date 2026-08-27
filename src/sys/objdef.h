@@ -1,7 +1,9 @@
 #ifndef _OBJDEF_H_
 #define _OBJDEF_H_
+#ifndef PORT
 
 #include <macros.h> // GC_FIELDSET
+#endif
 
 typedef enum GObjKind
 {
@@ -279,6 +281,10 @@ typedef enum AObjTrackKind
  * MatAnimJoint arrays) use readable opcode names instead of opaque hex u32
  * literals. Track bit helpers compose the 10-bit `flags` field by OR'ing
  * 1 << (nGCAnimTrack* - nGCAnimTrackJointStart).
+ *
+ * Macros use explicit shift-OR via GC_FIELDSET (not C bitfields), so the
+ * encoded u32 is identical regardless of host bit-order — safe to expose
+ * under PORT for the source-compile relocData pipeline.
  */
 #define aobjEvent32(opcode, flags, payload) \
     (GC_FIELDSET((opcode), 25, 7) | GC_FIELDSET((flags), 15, 10) | GC_FIELDSET((payload), 0, 15))

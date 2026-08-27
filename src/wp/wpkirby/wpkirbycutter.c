@@ -1,6 +1,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ WPDesc dWPKirbyCutterWeaponDesc =
     0x03,                                  // Render flags?
     nWPKindCutter,                         // Weapon Kind
     &gFTDataKirbyMain,                     // Pointer to character's loaded files?
+#ifdef PORT
+    llKirbyMainCutterWeaponAttributes,    // Offset of weapon attributes in loaded files
+#else
     &llKirbyMainCutterWeaponAttributes,    // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

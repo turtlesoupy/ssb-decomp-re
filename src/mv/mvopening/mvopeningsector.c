@@ -4,8 +4,12 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+extern void *func_800269C0_275C0(u16 id);
 
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -14,7 +18,7 @@ extern u32 sySchedulerGetTicCount();
 // // // // // // // // // // // //
 
 // 0x801328F0
-u32 dMVOpeningSectorFileIDs[/* */] = { &llMVOpeningSectorFileID, &llFoxSpecial3FileID, &llMVOpeningSectorWallpaperFileID };
+u32 dMVOpeningSectorFileIDs[/* */] = { llMVOpeningSectorFileID, llFoxSpecial3FileID, llMVOpeningSectorWallpaperFileID };
 
 // 0x80132900
 Lights1 dMVOpeningSectorLights11 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x14, 0x14, 0x14);
@@ -175,7 +179,7 @@ void mvOpeningSectorMakeWallpaper(void)
         (
             Sprite*,
             sMVOpeningSectorFiles[2],
-            &llMVOpeningSectorWallpaperSprite
+            llMVOpeningSectorWallpaperSprite
         )
     );
     wallpaper_sobj->sprite.attr &= ~SP_FASTCOPY;
@@ -190,7 +194,7 @@ void mvOpeningSectorMakeWallpaper(void)
         (
             Sprite*,
             sMVOpeningSectorFiles[2],
-            &llMVOpeningSectorWallpaperSprite
+            llMVOpeningSectorWallpaperSprite
         )
     );
     wallpaper_sobj->sprite.attr &= ~SP_FASTCOPY;
@@ -205,7 +209,7 @@ void mvOpeningSectorMakeWallpaper(void)
         (
             Sprite*,
             sMVOpeningSectorFiles[2],
-            &llMVOpeningSectorWallpaperSprite
+            llMVOpeningSectorWallpaperSprite
         )
     );
     wallpaper_sobj->sprite.attr &= ~SP_FASTCOPY;
@@ -220,7 +224,7 @@ void mvOpeningSectorMakeWallpaper(void)
         (
             Sprite*,
             sMVOpeningSectorFiles[2],
-            &llMVOpeningSectorWallpaperSprite
+            llMVOpeningSectorWallpaperSprite
         )
     );
     wallpaper_sobj->sprite.attr &= ~SP_FASTCOPY;
@@ -243,7 +247,7 @@ void mvOpeningSectorMakeGreatFox(void)
         (
             DObjDesc*,
             sMVOpeningSectorFiles[0],
-            &llMVOpeningSectorGreatFoxDObjDesc
+            llMVOpeningSectorGreatFoxDObjDesc
         ),
         NULL,
         nGCMatrixKindTraRotRpyRSca,
@@ -263,7 +267,7 @@ void mvOpeningSectorMakeGreatFox(void)
         (
             AObjEvent32**,
             sMVOpeningSectorFiles[0],
-            &llMVOpeningSectorGreatFoxAnimJoint
+            llMVOpeningSectorGreatFoxAnimJoint
         ),
         0.0F
     );
@@ -333,7 +337,7 @@ void mvOpeningSectorMakeCockpit(void)
         (
             Sprite*,
             sMVOpeningSectorFiles[0],
-            &llMVOpeningSectorCockpitSprite
+            llMVOpeningSectorCockpitSprite
         )
     );
     cockpit_sobj->sprite.attr &= ~SP_FASTCOPY;
@@ -351,9 +355,9 @@ void mvOpeningSectorMakeArwings(void)
     // 0x80132930
     intptr_t anim_joints[/* */] =
     {
-        &llMVOpeningSectorArwing0AnimJoint,
-        &llMVOpeningSectorArwing1AnimJoint,
-        &llMVOpeningSectorArwing2AnimJoint
+        llMVOpeningSectorArwing0AnimJoint,
+        llMVOpeningSectorArwing1AnimJoint,
+        llMVOpeningSectorArwing2AnimJoint
     };
 
     s32 i;
@@ -368,7 +372,7 @@ void mvOpeningSectorMakeArwings(void)
             (
                 DObjDesc*,
                 sMVOpeningSectorFiles[1],
-                &llFoxSpecial3EntryArwingDObjDesc
+                llFoxSpecial3EntryArwingDObjDesc
             ),
             NULL,
             nGCMatrixKindTraRotRpyRSca,
@@ -413,7 +417,7 @@ void mvOpeningSectorMakeMainCamera(void)
     cobj->projection.persp.near = 128.0F;
     cobj->projection.persp.far = 30000.0F;
 
-    gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningSectorFiles[0], &llMVOpeningSectorCamAnimJoint), 0.0F);
+    gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningSectorFiles[0], llMVOpeningSectorCamAnimJoint), 0.0F);
     gcAddGObjProcess(camera_gobj, mvOpeningSectorCameraProcUpdate, nGCProcessKindFunc, 1);
 }
 
@@ -520,7 +524,7 @@ void mvOpeningSectorFuncStart(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-    rl_setup.table_files_num = (u32)&llRelocFileCount;
+    rl_setup.table_files_num = (u32)llRelocFileCount;
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMVOpeningSectorStatusBuffer;
@@ -546,6 +550,9 @@ void mvOpeningSectorFuncStart(void)
 
     while (sySchedulerGetTicCount() < 3420)
     {
+#ifdef PORT
+		port_coroutine_yield();
+#endif
         continue;
     }
     func_800269C0_275C0(nSYAudioFGMOpeningSectorAmbient);

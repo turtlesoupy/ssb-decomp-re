@@ -3,6 +3,9 @@
 #include <gr/ground.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // 0x80143E10
 void ftCommonTaruCannProcUpdate(GObj *fighter_gobj)
@@ -97,7 +100,11 @@ void ftCommonTaruCannSetStatus(GObj *fighter_gobj, GObj *tarucann_gobj)
 void ftCommonTaruCannShootFighter(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
+#ifdef PORT
+    FTThrowHitDesc *tarucann = (FTThrowHitDesc*) (((uintptr_t)gMPCollisionGroundData - (intptr_t)llGRJungleMapMapHeader) + (intptr_t)llGRJungleMapTaruCannThrowHitDesc);
+#else
     FTThrowHitDesc *tarucann = (FTThrowHitDesc*) (((uintptr_t)gMPCollisionGroundData - (intptr_t)&llGRJungleMapMapHeader) + (intptr_t)&llGRJungleMapTaruCannThrowHitDesc);
+#endif
     f32 knockback;
     s32 angle;
 

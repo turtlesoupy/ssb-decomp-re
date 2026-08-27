@@ -6,8 +6,38 @@
 #include <sys/rdp.h>
 #include <sys/controller.h>
 #include <reloc_data.h>
+#include <sys/audio.h>
+extern void func_800266A0_272A0(void);
 
 extern void* func_800269C0_275C0(u16);
+
+#ifdef PORT
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, unsigned int count);
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+
+/* Mirror of ifCommonPortFixupSpriteFull. Sound test value-copies digit
+ * Sprites out of llIFCommonPlayerDamageFileID at mnsoundtest.c:1499
+ * (sobj->sprite = *lbRelocGetFileData(...)), bypassing the fixup that
+ * lbCommonMakeSObjForGObj normally applies. Digits 1-9 thus walk the
+ * renderer through unfixed Sprite/Bitmap headers, producing the
+ * RelocPointerTable "invalid/stale token" flood from
+ * lbCommonDrawSObjBitmap when the menu opens. Pre-fixing every digit at
+ * load time keeps the value-copy path correct. */
+static void mnSoundTestPortFixupSpriteFull(Sprite *sprite)
+{
+    if (sprite == NULL) return;
+    portFixupSprite(sprite);
+    {
+        Bitmap *bitmaps = (Bitmap*)PORT_RESOLVE(sprite->bitmap);
+        if (bitmaps != NULL)
+        {
+            portFixupBitmapArray(bitmaps, sprite->nbitmaps);
+            portFixupSpriteBitmapData(sprite, bitmaps);
+        }
+    }
+}
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -587,11 +617,11 @@ u32 dMNSoundTestVoiceIDs[/* */] =
 // 0x8013416C
 u32 dMNSoundTestFileIDs[/* */] =
 {
-    &llIFCommonBattlePauseFileID,
-    &llIFCommonPlayerDamageFileID,
-    &llMNDataCommonFileID,
-    &llMNCommonFileID,
-    &llMNSoundTestFileID
+    llIFCommonBattlePauseFileID,
+    llIFCommonPlayerDamageFileID,
+    llMNDataCommonFileID,
+    llMNCommonFileID,
+    llMNSoundTestFileID
 };
 
 // 0x80134180
@@ -605,16 +635,16 @@ f32 dMNSoundTestArrowSpritePositions[/* */] =
 // 0x801341A4
 intptr_t dMNSoundTestDigitSpriteOffsets[/* */] =
 {
-    &llIFCommonPlayerDamageDigit0Sprite,
-    &llIFCommonPlayerDamageDigit1Sprite,
-    &llIFCommonPlayerDamageDigit2Sprite,
-    &llIFCommonPlayerDamageDigit3Sprite,
-    &llIFCommonPlayerDamageDigit4Sprite,
-    &llIFCommonPlayerDamageDigit5Sprite,
-    &llIFCommonPlayerDamageDigit6Sprite,
-    &llIFCommonPlayerDamageDigit7Sprite,
-    &llIFCommonPlayerDamageDigit8Sprite,
-    &llIFCommonPlayerDamageDigit9Sprite
+    llIFCommonPlayerDamageDigit0Sprite,
+    llIFCommonPlayerDamageDigit1Sprite,
+    llIFCommonPlayerDamageDigit2Sprite,
+    llIFCommonPlayerDamageDigit3Sprite,
+    llIFCommonPlayerDamageDigit4Sprite,
+    llIFCommonPlayerDamageDigit5Sprite,
+    llIFCommonPlayerDamageDigit6Sprite,
+    llIFCommonPlayerDamageDigit7Sprite,
+    llIFCommonPlayerDamageDigit8Sprite,
+    llIFCommonPlayerDamageDigit9Sprite
 };
 
 // 0x801341CC
@@ -1013,7 +1043,7 @@ void mnSoundTestSetupFiles(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-    rl_setup.table_files_num = (u32)&llRelocFileCount;
+    rl_setup.table_files_num = (u32)llRelocFileCount;
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMNSoundTestStatusBuffer;
@@ -1023,6 +1053,25 @@ void mnSoundTestSetupFiles(void)
 
     lbRelocInitSetup(&rl_setup);
     lbRelocLoadFilesListed(dMNSoundTestFileIDs, sMNSoundTestFiles);
+
+#ifdef PORT
+    /* Pre-fixup the 10 digit Sprites in llIFCommonPlayerDamageFileID
+     * (sMNSoundTestFiles[1]). mnSoundTestUpdateNumberSprites copies
+     * these by value into sobj->sprite (line 1499) without going
+     * through lbCommonMakeSObjForGObj, so without this loop only digit
+     * 0 (used by mnSoundTestMakeNumberSObj) would have its byte order
+     * corrected — digits 1-9 would render through garbled Bitmap
+     * headers and flood the RelocPointerTable with stale tokens. */
+    {
+        s32 i;
+        for (i = 0; i < ARRAY_COUNT(dMNSoundTestDigitSpriteOffsets); i++)
+        {
+            mnSoundTestPortFixupSpriteFull(
+                lbRelocGetFileData(Sprite*, sMNSoundTestFiles[1],
+                                   dMNSoundTestDigitSpriteOffsets[i]));
+        }
+    }
+#endif
 }
 
 // 0x8013234C
@@ -1035,7 +1084,7 @@ SObj* mnSoundTestMakeHeaderSObjs(void)
 
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 1, GOBJ_PRIORITY_DEFAULT, ~0);
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[2], &llMNDataCommonDataHeaderSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[2], llMNDataCommonDataHeaderSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1046,7 +1095,7 @@ SObj* mnSoundTestMakeHeaderSObjs(void)
     sobj->pos.x = 23.0F;
     sobj->pos.y = 17.0F;
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestSoundTestTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestSoundTestTextSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1134,12 +1183,12 @@ SObj* mnSoundTestMakeMusicSObjs(void)
         GOBJ_PRIORITY_DEFAULT,
         ~0
     );
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestMusicTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestMusicTextSprite));
     sobj->sprite.attr = SP_TRANSPARENT;
     sobj->pos.x = 55.0F;
     sobj->pos.y = 61.0F;
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestCapsuleRightSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestCapsuleRightSprite));
     sobj->sprite.attr = SP_TRANSPARENT;
     sobj->pos.x = 112.0F;
     sobj->pos.y = 56.0F;
@@ -1201,12 +1250,12 @@ SObj* mnSoundTestMakeSoundSObjs(void)
         GOBJ_PRIORITY_DEFAULT,
         ~0
     );
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestSoundTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestSoundTextSprite));
     sobj->sprite.attr = SP_TRANSPARENT;
     sobj->pos.x = 64.0F;
     sobj->pos.y = 108.0F;
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestCapsuleRightSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestCapsuleRightSprite));
     sobj->sprite.attr = SP_TRANSPARENT;
     sobj->pos.x = 132.0F;
     sobj->pos.y = 104.0F;
@@ -1268,12 +1317,12 @@ SObj* mnSoundTestMakeVoiceSObjs(void)
         GOBJ_PRIORITY_DEFAULT,
         ~0
     );
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestVoiceTextSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestVoiceTextSprite));
     sobj->sprite.attr = SP_TRANSPARENT;
     sobj->pos.x = 94.0F;
     sobj->pos.y = 156.0F;
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestCapsuleRightSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestCapsuleRightSprite));
     sobj->sprite.attr = SP_TRANSPARENT;
     sobj->pos.x = 152.0F;
     sobj->pos.y = 152.0F;
@@ -1284,7 +1333,7 @@ SObj* mnSoundTestMakeVoiceSObjs(void)
 // 0x80132C10
 SObj* mnSoundTestMakeAButtonSObj(GObj *gobj)
 {
-    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[0], &llIFCommonBattlePauseDecalAButtonSprite));
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[0], llIFCommonBattlePauseDecalAButtonSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1305,7 +1354,7 @@ SObj* mnSoundTestMakeAButtonSObj(GObj *gobj)
 // 0x80132C90
 SObj* mnSoundTestMakeBButtonSObj(GObj *gobj)
 {
-    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[0], &llIFCommonBattlePauseDecalBButtonSprite));
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[0], llIFCommonBattlePauseDecalBButtonSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1326,7 +1375,7 @@ SObj* mnSoundTestMakeBButtonSObj(GObj *gobj)
 // 0x80132D10
 SObj* mnSoundTestMakeStartButtonSObj(GObj *gobj)
 {
-    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestStartButtonSprite));
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestStartButtonSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1347,7 +1396,7 @@ SObj* mnSoundTestMakeStartButtonSObj(GObj *gobj)
 // 0x80132D90
 SObj* mnSoundTestMakeAFunctionSObj(GObj *gobj)
 {
-    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestColonPlayTextSprite));
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestColonPlayTextSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1364,7 +1413,7 @@ SObj* mnSoundTestMakeAFunctionSObj(GObj *gobj)
 // 0x80132DF8
 SObj* mnSoundTestMakeStartFunctionSObj(GObj *gobj)
 {
-    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestColonFadeOutTextSprite));
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestColonFadeOutTextSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1381,7 +1430,7 @@ SObj* mnSoundTestMakeStartFunctionSObj(GObj *gobj)
 // 0x80132E60
 SObj* mnSoundTestMakeBFunctionSObj(GObj *gobj)
 {
-    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], &llMNSoundTestColonExitTextSprite));
+    SObj *sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[4], llMNSoundTestColonExitTextSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1611,7 +1660,7 @@ void mnSoundTestMakeArrowSObjs(void)
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 1, GOBJ_PRIORITY_DEFAULT, ~0);
     gcAddGObjProcess(gobj, mnSoundTestArrowsThreadUpdate, nGCProcessKindThread, 1);
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[3], &llMNCommonArrowLSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[3], llMNCommonArrowLSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 
@@ -1622,7 +1671,7 @@ void mnSoundTestMakeArrowSObjs(void)
     sobj->sprite.green = 0xC3;
     sobj->sprite.blue  = 0x26;
 
-    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[3], &llMNCommonArrowRSprite));
+    sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMNSoundTestFiles[3], llMNCommonArrowRSprite));
 
     sobj->sprite.attr = SP_TRANSPARENT;
 

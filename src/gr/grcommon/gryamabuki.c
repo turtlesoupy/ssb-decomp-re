@@ -3,6 +3,9 @@
 #include <it/item.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -118,20 +121,32 @@ void grYamabukiGateSetPositionNear(void)
 // 0x8010AE94
 void grYamabukiGateAddAnimOffset(intptr_t offset)
 {
+#ifdef PORT
+    gcAddAnimJointAll(gGRCommonStruct.yamabuki.gate_gobj, (AObjEvent32 **)((uintptr_t)gGRCommonStruct.yamabuki.map_head + (intptr_t)offset), 0.0F);
+#else
     gcAddAnimJointAll(gGRCommonStruct.yamabuki.gate_gobj, (uintptr_t)gGRCommonStruct.yamabuki.map_head + (intptr_t)offset, 0.0F);
+#endif
     gcPlayAnimAll(gGRCommonStruct.yamabuki.gate_gobj);
 }
 
 // 0x8010AED8
 void grYamabukiGateAddAnimOpen(void)
 {
+#ifdef PORT
+    grYamabukiGateAddAnimOffset((intptr_t)llGRYamabukiMapGateOpenAnimJoint);
+#else
     grYamabukiGateAddAnimOffset((intptr_t)&llGRYamabukiMapGateOpenAnimJoint);
+#endif
 }
 
 // 0x8010AEFC
 void grYamabukiGateAddAnimClose(void)
 {
+#ifdef PORT
+    grYamabukiGateAddAnimOffset((intptr_t)llGRYamabukiMapGateCloseAnimJoint);
+#else
     grYamabukiGateAddAnimOffset((intptr_t)&llGRYamabukiMapGateCloseAnimJoint);
+#endif
 }
 
 // 0x8010AF20 - Allow entry inside Pokémon spawn hub?
@@ -254,7 +269,11 @@ void grYamabukiMakeGate(void)
     (
         gate_gobj, 
         (DObjDesc*) 
+#ifdef PORT
+        ((uintptr_t)gGRCommonStruct.yamabuki.map_head + (intptr_t)llGRYamabukiMapMapHead), 
+#else
         ((uintptr_t)gGRCommonStruct.yamabuki.map_head + (intptr_t)&llGRYamabukiMapMapHead), 
+#endif
         NULL, 
         nGCMatrixKindTraRotRpyR, 
         nGCMatrixKindNull, 
@@ -267,12 +286,20 @@ void grYamabukiMakeGate(void)
 // 0x8010B250
 void grYamabukiInitGroundVars(void)
 {
+#ifdef PORT
+    gGRCommonStruct.yamabuki.map_head = (void*) ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->map_nodes) - (intptr_t)llGRYamabukiMapMapHead);
+#else
     gGRCommonStruct.yamabuki.map_head = (void*) ((uintptr_t)gMPCollisionGroundData->map_nodes - (intptr_t)&llGRYamabukiMapMapHead);
+#endif
 
     mpCollisionSetYakumonoOnID(3);
 
     gGRCommonStruct.yamabuki.gate_wait = 1;
+#ifdef PORT
+    gGRCommonStruct.yamabuki.item_head = (void*) ((uintptr_t)gMPCollisionGroundData - (intptr_t)llGRYamabukiMapItemHead);
+#else
     gGRCommonStruct.yamabuki.item_head = (void*) ((uintptr_t)gMPCollisionGroundData - (intptr_t)&llGRYamabukiMapItemHead);
+#endif
 
     dGRYamabukiMonsterAttackKind = GRYAMABUKI_MONSTER_WEAPON_MAX;
 

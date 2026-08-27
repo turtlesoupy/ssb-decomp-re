@@ -1,6 +1,12 @@
 #include <it/item.h>
 #include <reloc_data.h>
 
+#ifdef PORT
+#include <config.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       INITIALIZED DATA        //
@@ -10,8 +16,8 @@
 // 0x80189F90 - unused?
 intptr_t dITBombHeiDisplayListOffsets[/* */] = 
 {
-    &llITCommonDataBombHeiWalkRightDisplayList,
-    &llITCommonDataBombHeiWalkLeftDisplayList
+    llITCommonDataBombHeiWalkRightDisplayList,
+    llITCommonDataBombHeiWalkLeftDisplayList
 };
 
 // 0x80189F98
@@ -19,7 +25,7 @@ ITDesc dITBombHeiItemDesc =
 {
     nITKindBombHei,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
-    &llITCommonDataBombHeiItemAttributes,   // Offset of item attributes in file?
+    llITCommonDataBombHeiItemAttributes,   // Offset of item attributes in file?
 
     // DObj transformation struct
     {
@@ -211,8 +217,8 @@ void itBombHeiCommonSetWalkLR(GObj *item_gobj, ub8 lr)
 {
     ITStruct *ip = itGetStruct(item_gobj);
     DObj *dobj = DObjGetStruct(item_gobj);
-    Gfx *dll = itGetPData(ip, &llITCommonDataBombHeiDataStart, &llITCommonDataBombHeiWalkLeftDisplayList);  // (void*)((uintptr_t)((uintptr_t)ip->attr->data - (uintptr_t)&llITCommonDataBombHeiDataStart) + &llITCommonDataBombHeiWalkLeftDisplayList);
-    Gfx *dlr = itGetPData(ip, &llITCommonDataBombHeiDataStart, &llITCommonDataBombHeiWalkRightDisplayList); // (void*)((uintptr_t)((uintptr_t)ip->attr->data - (uintptr_t)&llITCommonDataBombHeiDataStart) + &llITCommonDataBombHeiWalkRightDisplayList);
+    Gfx *dll = itGetPData(ip, llITCommonDataBombHeiDataStart, llITCommonDataBombHeiWalkLeftDisplayList);  // (void*)((uintptr_t)((uintptr_t)ip->attr->data - (uintptr_t)llITCommonDataBombHeiDataStart) + llITCommonDataBombHeiWalkLeftDisplayList);
+    Gfx *dlr = itGetPData(ip, llITCommonDataBombHeiDataStart, llITCommonDataBombHeiWalkRightDisplayList); // (void*)((uintptr_t)((uintptr_t)ip->attr->data - (uintptr_t)llITCommonDataBombHeiDataStart) + llITCommonDataBombHeiWalkRightDisplayList);
 
     if (lr != 0)
     {
@@ -308,7 +314,7 @@ sb32 itBombHeiWaitProcUpdate(GObj *item_gobj)
 {
     ITStruct *ip = itGetStruct(item_gobj);
     DObj *dobj = DObjGetStruct(item_gobj);
-    void *dll = itGetPData(ip, &llITCommonDataBombHeiDataStart, &llITCommonDataBombHeiWalkLeftDisplayList);
+    void *dll = itGetPData(ip, llITCommonDataBombHeiDataStart, llITCommonDataBombHeiWalkLeftDisplayList);
     s32 lr;
 
     if (ip->multi == ITBOMBHEI_WALK_WAIT)
@@ -522,7 +528,7 @@ void itBombHeiWalkInitVars(GObj *item_gobj)
 
     itMainRefreshAttackColl(item_gobj);
 
-    matanim_joint = itGetPData(ip, &llITCommonDataBombHeiDataStart, &llITCommonDataBombHeiWalkMatAnimJoint);
+    matanim_joint = itGetPData(ip, llITCommonDataBombHeiDataStart, llITCommonDataBombHeiWalkMatAnimJoint);
 
     gcAddMObjMatAnimJoint(dobj->mobj, matanim_joint, 0.0F);
     gcPlayAnimAll(item_gobj);
@@ -577,13 +583,19 @@ void itBombHeiCommonClearVelSetExplode(GObj *item_gobj, u8 unused)
 void itBombHeiCommonUpdateAttackEvent(GObj *item_gobj)
 {
     ITStruct *ip = itGetStruct(item_gobj);
-    ITAttackEvent *ev = itGetAttackEvent(dITBombHeiItemDesc, &llITCommonDataBombHeiAttackEvents);
+    ITAttackEvent *ev = itGetAttackEvent(dITBombHeiItemDesc, llITCommonDataBombHeiAttackEvents);
 
     if (ip->multi == ev[ip->event_id].timer)
     {
+#ifdef PORT
+        ip->attack_coll.angle = BITFIELD_SEXT10(ev[ip->event_id].angle);
+        ip->attack_coll.damage = ev[ip->event_id].damage;
+        ip->attack_coll.size = ev[ip->event_id].size;
+#else
         ip->attack_coll.angle = ev[ip->event_id].angle;
         ip->attack_coll.damage = ev[ip->event_id].damage;
         ip->attack_coll.size = ev[ip->event_id].size;
+#endif
 
         ip->attack_coll.can_rehit_item = TRUE;
         ip->attack_coll.can_hop = FALSE;

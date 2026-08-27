@@ -240,7 +240,11 @@ void ftNessSpecialLwInitVars(GObj *fighter_gobj)
     }
     fp->is_absorb = TRUE;
 
+#ifdef PORT
+    fp->special_coll = (FTSpecialColl*) ((uintptr_t)gFTNessFileMainMotion + (intptr_t)llNessMainMotionLwAbsorbFTSpecialColl);
+#else
     fp->special_coll = (FTSpecialColl*) ((uintptr_t)gFTNessFileMainMotion + (intptr_t)&llNessMainMotionLwAbsorbFTSpecialColl);
+#endif
 
     fp->motion_vars.flags.flag1 = 0;
 }

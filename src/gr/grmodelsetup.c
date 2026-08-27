@@ -22,9 +22,17 @@ void grModelSetupGroundDObjs(GObj *gobj, DObjDesc *dobjdesc, DObj **dobjs, DObjT
 
         if (id != 0)
         {
+#ifdef PORT
+            dobj = array_dobjs[id] = gcAddChildForDObj(array_dobjs[id - 1], PORT_RESOLVE(dobjdesc->dl));
+#else
             dobj = array_dobjs[id] = gcAddChildForDObj(array_dobjs[id - 1], dobjdesc->dl);
+#endif
         }
+#ifdef PORT
+        else dobj = array_dobjs[0] = gcAddDObjForGObj(gobj, PORT_RESOLVE(dobjdesc->dl));
+#else
         else dobj = array_dobjs[0] = gcAddDObjForGObj(gobj, dobjdesc->dl);
+#endif
         
         if (transform_types[i].tk1 != nGCMatrixKindNull)
         {

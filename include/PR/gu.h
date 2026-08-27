@@ -31,6 +31,11 @@
 #ifndef MIN
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #endif
+#ifdef PORT
+
+#define M_PI 3.14159265358979323846
+#define M_DTOR (3.14159265358979323846 / 180.0)
+#endif
 
 #define FTOFIX32(x) (long)((x) * (float)0x00010000)
 #define FIX32TOF(x) ((float)(x) * (1.0f / (float)0x00010000))

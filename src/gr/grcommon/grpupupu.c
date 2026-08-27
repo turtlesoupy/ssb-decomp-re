@@ -3,6 +3,9 @@
 #include <ef/effect.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -73,8 +76,13 @@ enum grPupupuFlowerStatus
 // 0x8012E870
 intptr_t dGRPupupuWhispyEyesAnims[/* */][nGRPupupuWhispyEyesStatusEnumCount][2] =
 {
+#ifdef PORT
+    { { llGRPupupuMapWhispyEyesLeftTurnAnimJoint, llGRPupupuMapWhispyEyesLeftTurnMatAnimJoint }, { llGRPupupuMapWhispyEyesLeftBlinkAnimJoint, 0x0 } },
+    { { llGRPupupuMapWhispyEyesRightTurnAnimJoint, llGRPupupuMapWhispyEyesRightTurnMatAnimJoint }, { llGRPupupuMapWhispyEyesRightBlinkAnimJoint, 0x0 } }
+#else
     { { &llGRPupupuMapWhispyEyesLeftTurnAnimJoint, &llGRPupupuMapWhispyEyesLeftTurnMatAnimJoint }, { &llGRPupupuMapWhispyEyesLeftBlinkAnimJoint, 0x0 } },
     { { &llGRPupupuMapWhispyEyesRightTurnAnimJoint, &llGRPupupuMapWhispyEyesRightTurnMatAnimJoint }, { &llGRPupupuMapWhispyEyesRightBlinkAnimJoint, 0x0 } }
+#endif
 };
 
 // 0x8012E890
@@ -82,33 +90,57 @@ intptr_t dGRPupupuWhispyMouthAnims[/* */][nGRPupupuWhispyMouthStatusEnumCount][2
 {
     // Left-facing
     {
+#ifdef PORT
+        { llGRPupupuMapWhispyMouthLeftStretchAnimJoint, llGRPupupuMapWhispyMouthLeftStretchMatAnimJoint },
+        { llGRPupupuMapWhispyMouthLeftTurnAnimJoint, llGRPupupuMapWhispyMouthLeftTurnMatAnimJoint },
+        { llGRPupupuMapWhispyMouthLeftOpenAnimJoint, llGRPupupuMapWhispyMouthLeftOpenMatAnimJoint },
+        { llGRPupupuMapWhispyMouthLeftCloseAnimJoint, llGRPupupuMapWhispyMouthLeftCloseMatAnimJoint }
+#else
         { &llGRPupupuMapWhispyMouthLeftStretchAnimJoint, &llGRPupupuMapWhispyMouthLeftStretchMatAnimJoint },
         { &llGRPupupuMapWhispyMouthLeftTurnAnimJoint, &llGRPupupuMapWhispyMouthLeftTurnMatAnimJoint },
         { &llGRPupupuMapWhispyMouthLeftOpenAnimJoint, &llGRPupupuMapWhispyMouthLeftOpenMatAnimJoint },
         { &llGRPupupuMapWhispyMouthLeftCloseAnimJoint, &llGRPupupuMapWhispyMouthLeftCloseMatAnimJoint }
+#endif
     },
 
     // Right-facing
     {
+#ifdef PORT
+        { llGRPupupuMapWhispyMouthRightStretchAnimJoint, llGRPupupuMapWhispyMouthRightStretchMatAnimJoint },
+        { llGRPupupuMapWhispyMouthRightTurnAnimJoint, llGRPupupuMapWhispyMouthRightTurnMatAnimJoint },
+        { llGRPupupuMapWhispyMouthRightOpenAnimJoint, llGRPupupuMapWhispyMouthRightOpenMatAnimJoint },
+        { llGRPupupuMapWhispyMouthRightCloseAnimJoint, llGRPupupuMapWhispyMouthRightCloseMatAnimJoint }
+#else
         { &llGRPupupuMapWhispyMouthRightStretchAnimJoint, &llGRPupupuMapWhispyMouthRightStretchMatAnimJoint },
         { &llGRPupupuMapWhispyMouthRightTurnAnimJoint, &llGRPupupuMapWhispyMouthRightTurnMatAnimJoint },
         { &llGRPupupuMapWhispyMouthRightOpenAnimJoint, &llGRPupupuMapWhispyMouthRightOpenMatAnimJoint },
         { &llGRPupupuMapWhispyMouthRightCloseAnimJoint, &llGRPupupuMapWhispyMouthRightCloseMatAnimJoint }
+#endif
     }
 };
 
 // 0x8012E8D0
 intptr_t dGRPupupuWhispyMouthTextures[/* */][nGRPupupuWhispyMouthTextureEnumCount] =
 {
+#ifdef PORT
+    { llGRPupupuMapWhispyMouthLeftOpenTexture, llGRPupupuMapWhispyMouthLeftBlowTexture, llGRPupupuMapWhispyMouthLeftCloseTexture },
+    { llGRPupupuMapWhispyMouthRightOpenTexture, llGRPupupuMapWhispyMouthRightBlowTexture, llGRPupupuMapWhispyMouthRightCloseTexture }
+#else
     { &llGRPupupuMapWhispyMouthLeftOpenTexture, &llGRPupupuMapWhispyMouthLeftBlowTexture, &llGRPupupuMapWhispyMouthLeftCloseTexture },
     { &llGRPupupuMapWhispyMouthRightOpenTexture, &llGRPupupuMapWhispyMouthRightBlowTexture, &llGRPupupuMapWhispyMouthRightCloseTexture }
+#endif
 };
 
 // 0x8012E8E8
 intptr_t dGRPupupuWhispyEyesTextures[/* */][nGRPupupuWhispyEyesTextureEnumCount] =
 {
+#ifdef PORT
+    { llGRPupupuMapWhispyEyesLeft0Texture, llGRPupupuMapWhispyEyesLeft1Texture, llGRPupupuMapWhispyEyesLeft2Texture },
+    { llGRPupupuMapWhispyEyesRight0Texture, llGRPupupuMapWhispyEyesRight1Texture, llGRPupupuMapWhispyEyesRight2Texture }
+#else
     { &llGRPupupuMapWhispyEyesLeft0Texture, &llGRPupupuMapWhispyEyesLeft1Texture, &llGRPupupuMapWhispyEyesLeft2Texture },
     { &llGRPupupuMapWhispyEyesRight0Texture, &llGRPupupuMapWhispyEyesRight1Texture, &llGRPupupuMapWhispyEyesRight2Texture }
+#endif
 };
 
 // 0x8012E900
@@ -662,11 +694,19 @@ GObj* grPupupuMakeMapGObj(intptr_t o_dobjdesc, intptr_t o_mobjsub, void (*proc_d
 // 0x8010658C
 void grPupupuInitAll(void)
 {
+#ifdef PORT
+    gGRCommonStruct.pupupu.map_head = (void*) ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->map_nodes) - (intptr_t)llGRPupupuMapMapHead);
+    gGRCommonStruct.pupupu.map_gobj[0] = grPupupuMakeMapGObj(llGRPupupuMapMapHead, llGRPupupuMapWhispyEyesTransformKindsMObjSub, grDisplayLayer0PriProcDisplay, 4);
+    gGRCommonStruct.pupupu.map_gobj[1] = grPupupuMakeMapGObj(llGRPupupuMapWhispyMouthTransformKindsDObjDesc, llGRPupupuMapWhispyMouthTransformKindsMObjSub, grDisplayLayer0PriProcDisplay, 4);
+    gGRCommonStruct.pupupu.map_gobj[2] = grPupupuMakeMapGObj(llGRPupupuMapFlowersBackTransformKindsDObjDesc, 0x0, grDisplayLayer0PriProcDisplay, 4);
+    gGRCommonStruct.pupupu.map_gobj[3] = grPupupuMakeMapGObj(llGRPupupuMapFlowersFrontTransformKindsDObjDesc, 0x0, grDisplayLayer3PriProcDisplay, 16);
+#else
     gGRCommonStruct.pupupu.map_head = (void*) ((uintptr_t)gMPCollisionGroundData->map_nodes - (intptr_t)&llGRPupupuMapMapHead);
     gGRCommonStruct.pupupu.map_gobj[0] = grPupupuMakeMapGObj(&llGRPupupuMapMapHead, &llGRPupupuMapWhispyEyesTransformKindsMObjSub, grDisplayLayer0PriProcDisplay, 4);
     gGRCommonStruct.pupupu.map_gobj[1] = grPupupuMakeMapGObj(&llGRPupupuMapWhispyMouthTransformKindsDObjDesc, &llGRPupupuMapWhispyMouthTransformKindsMObjSub, grDisplayLayer0PriProcDisplay, 4);
     gGRCommonStruct.pupupu.map_gobj[2] = grPupupuMakeMapGObj(&llGRPupupuMapFlowersBackTransformKindsDObjDesc, 0x0, grDisplayLayer0PriProcDisplay, 4);
     gGRCommonStruct.pupupu.map_gobj[3] = grPupupuMakeMapGObj(&llGRPupupuMapFlowersFrontTransformKindsDObjDesc, 0x0, grDisplayLayer3PriProcDisplay, 16);
+#endif
 
     gGRCommonStruct.pupupu.whispy_eyes_status   =
     gGRCommonStruct.pupupu.whispy_mouth_status  =
@@ -686,7 +726,11 @@ void grPupupuInitAll(void)
     gGRCommonStruct.pupupu.flowers_back_wait    = 15;
     gGRCommonStruct.pupupu.flowers_front_wait   = 22;
 
+#ifdef PORT
+    gGRCommonStruct.pupupu.particle_bank_id = efParticleGetLoadBankID((uintptr_t)&lGRPupupuParticleScriptBankLo, (uintptr_t)&lGRPupupuParticleScriptBankHi, (uintptr_t)&lGRPupupuParticleTextureBankLo, (uintptr_t)&lGRPupupuParticleTextureBankHi);
+#else
     gGRCommonStruct.pupupu.particle_bank_id = efParticleGetLoadBankID(&lGRPupupuParticleScriptBankLo, &lGRPupupuParticleScriptBankHi, &lGRPupupuParticleTextureBankLo, &lGRPupupuParticleTextureBankHi);
+#endif
 }
 
 // 0x801066D4

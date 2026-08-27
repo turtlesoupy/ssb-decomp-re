@@ -1,6 +1,11 @@
 #include <it/item.h>
 #include <sys/develop.h>
 #include <reloc_data.h>
+extern void *func_800269C0_275C0(u16 id);
+
+#ifdef PORT
+#include <enhancements/enhancements.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +18,7 @@ ITDesc dITKabigonItemDesc =
 {
     nITKindKabigon,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
-    &llITCommonDataKabigonItemAttributes,   // Offset of item attributes in file?
+    llITCommonDataKabigonItemAttributes,   // Offset of item attributes in file?
 
     // DObj transformation struct
     {
@@ -105,6 +110,10 @@ sb32 itKabigonFallProcUpdate(GObj *item_gobj)
 void itKabigonFallProcDisplay(GObj *item_gobj)
 {
     ITStruct *ip = itGetStruct(item_gobj);
+
+#ifdef PORT
+    ip->display_mode = port_enhancement_hitbox_display_override(ip->display_mode);
+#endif
 
     gDPPipeSync(gSYTaskmanDLHeads[0]++);
 
@@ -214,6 +223,10 @@ void itKabigonCommonProcDisplay(GObj *item_gobj)
 {
     ITStruct *ip = itGetStruct(item_gobj);
 
+#ifdef PORT
+    ip->display_mode = port_enhancement_hitbox_display_override(ip->display_mode);
+#endif
+
     gDPPipeSync(gSYTaskmanDLHeads[0]++);
 
     if (itDisplayCheckItemVisible(ip) != FALSE)
@@ -294,7 +307,7 @@ GObj* itKabigonMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
         ip->physics.vel_air.x = ip->physics.vel_air.z = 0.0F;
         ip->physics.vel_air.y = ITMONSTER_RISE_VEL_Y;
 
-        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataKabigonAnimJoint), 0.0F);
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataKabigonAnimJoint), 0.0F);
 
         if (ip->kind == nITKindKabigon)
         {

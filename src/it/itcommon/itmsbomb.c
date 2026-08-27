@@ -3,6 +3,12 @@
 #include <sc/scene.h>
 #include <reloc_data.h>
 
+#ifdef PORT
+#include <config.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       INITIALIZED DATA        //
@@ -13,7 +19,7 @@ ITDesc dITMSBombItemDesc =
 {
     nITKindMSBomb,                          // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
-    &llITCommonDataMSBombItemAttributes,    // Offset of item attributes in file?
+    llITCommonDataMSBombItemAttributes,    // Offset of item attributes in file?
 
     // DObj transformation struct
     {
@@ -468,13 +474,19 @@ sb32 itMSBombAttachedProcMap(GObj *item_gobj)
 void itMSBombExplodeUpdateAttackEvent(GObj *item_gobj)
 {
     ITStruct *ip = itGetStruct(item_gobj);
-    ITAttackEvent *ev = itGetAttackEvent(dITMSBombItemDesc, &llITCommonDataMSBombAttackEvents); // (ITAttackEvent *)((uintptr_t)*dITMSBombItemDesc.p_file + &llITCommonDataMSBombAttackEvents); - Linker thing
+    ITAttackEvent *ev = itGetAttackEvent(dITMSBombItemDesc, llITCommonDataMSBombAttackEvents); // (ITAttackEvent *)((uintptr_t)*dITMSBombItemDesc.p_file + llITCommonDataMSBombAttackEvents); - Linker thing
 
     if (ip->multi == ev[ip->event_id].timer)
     {
+#ifdef PORT
+        ip->attack_coll.angle  = BITFIELD_SEXT10(ev[ip->event_id].angle);
+        ip->attack_coll.damage = ev[ip->event_id].damage;
+        ip->attack_coll.size   = ev[ip->event_id].size;
+#else
         ip->attack_coll.angle  = ev[ip->event_id].angle;
         ip->attack_coll.damage = ev[ip->event_id].damage;
         ip->attack_coll.size   = ev[ip->event_id].size;
+#endif
 
         ip->attack_coll.can_rehit_item = TRUE;
         ip->attack_coll.can_hop = FALSE;

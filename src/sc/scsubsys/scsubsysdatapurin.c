@@ -84,20 +84,38 @@ s32 D_ovl1_80392584[] =
 
 FTMotionDesc dFTPurinSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_1492_FileID, (intptr_t)D_ovl1_803924B4, 0x00000000,
+	ll_469_FileID, (intptr_t)D_ovl1_803924E0, 0x00000000,
+	ll_470_FileID, (intptr_t)D_ovl1_80392508, 0x00000000,
+	ll_471_FileID, (intptr_t)D_ovl1_80392548, 0x00000000,
+	ll_471_FileID, (intptr_t)D_ovl1_80392548, 0x00000000,
+	ll_472_FileID, (intptr_t)D_ovl1_80392584, 0x00000000,
+#else
 	&llFTPurinAnimEggLayFileID, D_ovl1_803924B4, 0x00000000,
 	&llFTLuigiAnimUnknownFileID, D_ovl1_803924E0, 0x00000000,
 	&llFTPurinAnimSelectedFileID, D_ovl1_80392508, 0x00000000,
 	&llFTPurinAnimWin1FileID, D_ovl1_80392548, 0x00000000,
 	&llFTPurinAnimWin1FileID, D_ovl1_80392548, 0x00000000,
 	&llFTPurinAnimWin2FileID, D_ovl1_80392584, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_473_FileID, 0x80000000, 0x40000000,
+	ll_474_FileID, 0x80000000, 0x40000000,
+#else
 	&llFTPurinAnimDollFallFileID, 0x80000000, 0x40000000,
 	&llFTPurinAnimDollRevivalFileID, 0x80000000, 0x40000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_475_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTPurinAnimUnknownFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000
 };
 

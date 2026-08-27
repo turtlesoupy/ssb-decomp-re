@@ -4,6 +4,10 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#ifdef PORT
+#include <sys/audio.h>
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -84,7 +88,11 @@ void *sMVEndingFiles[2];
 // // // // // // // // // // // //
 
 // 0x80132AD0
+#ifdef PORT
+u32 dMVEndingFileIDs[/* */] = { llMVCommonFileID, llMVEndingFileID };
+#else
 u32 dMVEndingFileIDs[/* */] = { &llMVCommonFileID, &llMVEndingFileID };
+#endif
 
 // 0x80132AD8
 Lights1 dMVEndingLights11 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x14, 0x14, 0x14);
@@ -161,10 +169,19 @@ void mvEndingMakeRoomBackground(void)
 
     sMVEndingRoomBackgroundGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
+#ifdef PORT
+    gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], llMVCommonRoomBackgroundDObjDesc), NULL);
+#else
     gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], &llMVCommonRoomBackgroundDObjDesc), NULL);
+#endif
     gcAddGObjDisplay(gobj, gcDrawDObjTreeDLLinksForGObj, 29, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    gcAddMObjAll(gobj, lbRelocGetFileData(MObjSub***, sMVEndingFiles[0], llMVCommonRoomBackgroundMObjSub));
+    gcAddMatAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32***, sMVEndingFiles[0], llMVCommonRoomBackgroundMatAnimJoint), 0.0F);
+#else
     gcAddMObjAll(gobj, lbRelocGetFileData(MObjSub***, sMVEndingFiles[0], &llMVCommonRoomBackgroundMObjSub));
     gcAddMatAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32***, sMVEndingFiles[0], &llMVCommonRoomBackgroundMatAnimJoint), 0.0F);
+#endif
     gcPlayAnimAll(gobj);
 }
 
@@ -175,7 +192,11 @@ void mvEndingMakeRoomDesk(void)
 
     sMVEndingRoomDeskGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
+#ifdef PORT
+    gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], llMVCommonRoomDeskDObjDesc), NULL);
+#else
     gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], &llMVCommonRoomDeskDObjDesc), NULL);
+#endif
     gcAddGObjDisplay(gobj, gcDrawDObjTreeForGObj, 29, GOBJ_PRIORITY_DEFAULT, ~0);
 }
 
@@ -186,9 +207,17 @@ void mvEndingMakeRoomBooks(void)
 
     sMVEndingRoomBooksGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
+#ifdef PORT
+    gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], llMVCommonRoomBooksDObjDesc), NULL);
+#else
     gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], &llMVCommonRoomBooksDObjDesc), NULL);
+#endif
     gcAddGObjDisplay(gobj, gcDrawDObjTreeForGObj, 29, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMVEndingFiles[0], llMVCommonRoomBooksAnimJoint), 300.0F);
+#else
     gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMVEndingFiles[0], &llMVCommonRoomBooksAnimJoint), 300.0F);
+#endif
     gcPlayAnimAll(gobj);
 }
 
@@ -199,9 +228,17 @@ void mvEndingMakeRoomPencils(void)
 
     sMVEndingRoomPencilsGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
+#ifdef PORT
+    gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], llMVCommonRoomPencilsDObjDesc), NULL);
+#else
     gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], &llMVCommonRoomPencilsDObjDesc), NULL);
+#endif
     gcAddGObjDisplay(gobj, gcDrawDObjTreeForGObj, 29, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMVEndingFiles[0], llMVCommonRoomPencilsAnimJoint), 300.0F);
+#else
     gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMVEndingFiles[0], &llMVCommonRoomPencilsAnimJoint), 300.0F);
+#endif
     gcPlayAnimAll(gobj);
 }
 
@@ -212,9 +249,17 @@ void mvEndingMakeRoomLamp(void)
 
     sMVEndingRoomLampGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
+#ifdef PORT
+    gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], llMVCommonRoomLampDObjDesc), NULL);
+#else
     gcSetupCommonDObjs(gobj, lbRelocGetFileData(DObjDesc*, sMVEndingFiles[0], &llMVCommonRoomLampDObjDesc), NULL);
+#endif
     gcAddGObjDisplay(gobj, gcDrawDObjTreeForGObj, 29, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMVEndingFiles[0], llMVCommonRoomLampAnimJoint), 300.0F);
+#else
     gcAddAnimJointAll(gobj, lbRelocGetFileData(AObjEvent32**, sMVEndingFiles[0], &llMVCommonRoomLampAnimJoint), 300.0F);
+#endif
     gcPlayAnimAll(gobj);
 }
 
@@ -226,11 +271,19 @@ void mvEndingMakeRoomTissues(void)
 
     sMVEndingRoomTissuesGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 
+#ifdef PORT
+    dobj = gcAddDObjForGObj(gobj, lbRelocGetFileData(void*, sMVEndingFiles[0], llMVCommonRoomTissuesDisplayList));
+#else
     dobj = gcAddDObjForGObj(gobj, lbRelocGetFileData(void*, sMVEndingFiles[0], &llMVCommonRoomTissuesDisplayList));
+#endif
 
     gcAddXObjForDObjFixed(dobj, nGCMatrixKindTraRotRpyRSca, 0);
     gcAddGObjDisplay(gobj, gcDrawDObjDLHead0, 29, GOBJ_PRIORITY_DEFAULT, ~0);
+#ifdef PORT
+    gcAddDObjAnimJoint(dobj, lbRelocGetFileData(AObjEvent32*, sMVEndingFiles[0], llMVCommonRoomTissuesAnimJoint), 300.0F);
+#else
     gcAddDObjAnimJoint(dobj, lbRelocGetFileData(AObjEvent32*, sMVEndingFiles[0], &llMVCommonRoomTissuesAnimJoint), 300.0F);
+#endif
     gcPlayAnimAll(gobj);
 }
 
@@ -402,7 +455,11 @@ void mvEndingSetupOperatorCamera(GObj *gobj)
     cobj->projection.persp.near = 128.0F;
     cobj->projection.persp.far = 16384.0F;
 
+#ifdef PORT
+    gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVEndingFiles[1], llMVEndingOperatorCamAnimJoint), 0.0F);
+#else
     gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVEndingFiles[1], &llMVEndingOperatorCamAnimJoint), 0.0F);
+#endif
     gcAddGObjProcess(gobj, gcPlayCamAnim, nGCProcessKindFunc, 1);
 }
 
@@ -511,7 +568,11 @@ void mvEndingFuncStart(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
+#ifdef PORT
+    rl_setup.table_files_num = (u32)llRelocFileCount;
+#else
     rl_setup.table_files_num = (u32)&llRelocFileCount;
+#endif
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMVEndingStatusBuffer;

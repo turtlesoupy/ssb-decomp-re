@@ -418,4 +418,12 @@ typedef short ENVMIX_STATE[40];
 
 #endif /* _LANGUAGE_C */
 
+#ifdef PORT
+/* PORT: do NOT auto-include "audio/mixer.h" here.  Translation units that
+ * use the n_a* macros must include mixer.h themselves AFTER pulling in
+ * n_abi.h (e.g. via n_audio/n_synthInternals.h), or n_abi.h's later
+ * #defines silently override mixer.h's redefinitions.  See comment block
+ * at the top of port/audio/mixer.h's N_MICRO replacement section. */
+
+#endif
 #endif /* !_ABI_H_ */

@@ -2,6 +2,14 @@
 #include <gr/ground.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#include <sys/audio.h>
+#include <sys/debug.h>
+
+#ifdef PORT
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+extern void portFixupStructU32(void *base, unsigned int byte_offset, unsigned int num_words);
+extern void port_log(const char *fmt, ...);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -22,50 +30,153 @@ f32 dMPCollisionMaterialFrictions[/* */] =
     4.0F, 4.0F
 };
 
+#ifdef PORT
+typedef struct MPCollisionPortVSMapObjContainer MPCollisionPortVSMapObjContainer;
+
+struct MPCollisionPortVSMapObjContainer
+{
+    MPMapObjData mapobjs[11];
+};
+
+// Player spawn and map-object positions for Final Destination in VS mode.
+// Floor surface sits at Y=0 in world space (ROM mapobj data: file 114,
+// offset 0x4ED4 — all four BattlePlayer entries have y=1, i.e. floor level).
+// Using y=0 here; the physics engine snaps fighters to the floor on their first
+// frame anyway, so this is effectively identical to the ROM's y=1.
+//
+// Spacing model matches the ROM "flat stage" pattern observed at file 0x80,
+// offset 0x1F00 (BP1/2/3/4 at +300/+900/+1500/-300, ~600 between adjacent
+// screen positions). FD's platform is much wider than that stage's, so we
+// scale up to ~1000 between adjacent fighters so 4-player intros don't pile
+// up. Order: BP1 outer-left, BP3 inner-left, BP4 inner-right, BP2 outer-right.
+//   screen-left-to-right: BP1(-1500) BP3(-500) BP4(500) BP2(1500)
+// Item Y heights are above the stage so items fall onto the platform.
+// Rebirth halo platform placed well above the stage top (ROM: y=1050;
+// using 2600 for a more comfortable VS respawn arc height).
+MPCollisionPortVSMapObjContainer dMPCollisionLastVSMapObjs =
+{
+    {
+        { nMPMapObjKindBattlePlayer1, { -1500,    0 } },
+        { nMPMapObjKindBattlePlayer2, {  1500,    0 } },
+        { nMPMapObjKindBattlePlayer3, {  -500,    0 } },
+        { nMPMapObjKindBattlePlayer4, {   500,    0 } },
+        { nMPMapObjKindItem,          { -1500,  900 } },
+        { nMPMapObjKindItem,          {  -700,  700 } },
+        { nMPMapObjKindItem,          {     0,  950 } },
+        { nMPMapObjKindItem,          {   700,  700 } },
+        { nMPMapObjKindItem,          {  1500,  900 } },
+        { nMPMapObjKindItem,          {     0,  350 } },
+        { nMPMapObjKindRebirth,       {     0, 2600 } }
+    }
+};
+
+// Metal Cavern (nGRKindMetal) — Meta Crystal arena, designed for the 1v1
+// Metal Mario boss fight. The ROM mapobj data only spawns BattlePlayer1/2;
+// VS mode needs all four. Spawns follow the FD "flat stage" pattern (BP1/3
+// inner/outer left, BP4/2 inner/outer right) but scaled tighter because the
+// crystal floor is narrower than FD's platform.
+//
+// Floor-extent caveat: a previous attempt at ±700 was untested; ±300 spawned
+// fine but piled all 4 fighters on top of each other. ±600 outer with ±200
+// inner gives 400-unit gaps between adjacent fighters, which is enough
+// visual separation without falling off the platform. Bump to ±900/±300 if
+// the floor turns out to reach further; back off to ±400/±150 if any fighter
+// trips mpCollisionCheckExistLineID at intro time.
+MPCollisionPortVSMapObjContainer dMPCollisionMetalVSMapObjs =
+{
+    {
+        { nMPMapObjKindBattlePlayer1, {  -1200,  200 } },
+        { nMPMapObjKindBattlePlayer2, {   1200,  200 } },
+        { nMPMapObjKindBattlePlayer3, {  -400,  200 } },
+        { nMPMapObjKindBattlePlayer4, {   400,  200 } },
+        { nMPMapObjKindItem,          {  -700,  700 } },
+        { nMPMapObjKindItem,          {  -350,  600 } },
+        { nMPMapObjKindItem,          {     0,  800 } },
+        { nMPMapObjKindItem,          {   350,  600 } },
+        { nMPMapObjKindItem,          {   700,  700 } },
+        { nMPMapObjKindItem,          {     0,  400 } },
+        { nMPMapObjKindRebirth,       {     0, 2200 } }
+    }
+};
+
+// Battlefield (nGRKindZako) — Duel Zone arena, the Polygon Fighters' flat
+// abstract platform with no edges. Same spacing model as Metal Cavern; bumping
+// up if the platform turns out to be wider.
+MPCollisionPortVSMapObjContainer dMPCollisionZakoVSMapObjs =
+{
+    {
+        { nMPMapObjKindBattlePlayer1, {  -1500,  200 } },
+        { nMPMapObjKindBattlePlayer2, {   1500,  200 } },
+        { nMPMapObjKindBattlePlayer3, {  -500,  200 } },
+        { nMPMapObjKindBattlePlayer4, {   500,  200 } },
+        { nMPMapObjKindItem,          {  -700,  700 } },
+        { nMPMapObjKindItem,          {  -350,  600 } },
+        { nMPMapObjKindItem,          {     0,  800 } },
+        { nMPMapObjKindItem,          {   350,  600 } },
+        { nMPMapObjKindItem,          {   700,  700 } },
+        { nMPMapObjKindItem,          {     0,  400 } },
+        { nMPMapObjKindRebirth,       {     0, 2200 } }
+    }
+};
+
+// Item weights shared by all port-introduced VS stages. Same distribution as
+// the ROM uses for FD (file 114, offset 0x4ED4 weights block) — keeps item
+// drop behavior consistent across the page-1 expansion stages.
+u8 dMPCollisionPortVSItemWeights[20] =
+{
+    0x46, 0x28, 0x78, 0x00, 0x14, 0x08, 0x06, 0x0A, 0x05, 0x0C,
+    0x16, 0x08, 0x0A, 0x07, 0x0A, 0x0A, 0x0A, 0x05, 0x05, 0x12
+};
+
+// Legacy alias for the FD-specific weights table — kept so any out-of-tree
+// code that referenced dMPCollisionLastVSItemWeights continues to compile.
+#define dMPCollisionLastVSItemWeights dMPCollisionPortVSItemWeights
+#endif
+
 // 0x8012C520
 GRFileInfo dMPCollisionGroundFileInfos[/* */] =
 {
-    { &llGRCastleMapFileID,        &llGRCastleMapMapHeader }, // Peach's Castle
-    { &llGRSectorMapFileID,        &llGRSectorMapMapHeader }, // Sector Z
-    { &llGRJungleMapFileID,        &llGRJungleMapMapHeader }, // Kongo Jungle
-    { &llGRZebesMapFileID,         &llGRZebesMapMapHeader }, // Planet Zebes
-    { &llGRHyruleMapFileID,        &llGRHyruleMapMapHeader }, // Hyrule Castle
-    { &llGRYosterMapFileID,        &llGRYosterMapMapHeader }, // Yoshi's Island
-    { &llGRPupupuMapFileID,        &llGRPupupuMapMapHeader }, // Dream Land
-    { &llGRYamabukiMapFileID,      &llGRYamabukiMapMapHeader }, // Saffron City
-    { &llGRInishieMapFileID,       &llGRInishieMapMapHeader }, // Mushroom Kingdom
-    { &llGRPupupuSmallMapFileID,   &llGRPupupuSmallMapMapHeader }, // Beta Dream Land
-    { &llGRPupupuTestMapFileID,    &llGRPupupuTestMapMapHeader }, // Test Stage
-    { &llGRExplainMapFileID,       &llGRExplainMapMapHeader }, // How to Play
-    { &llGRYosterSmallMapFileID,   &llGRYosterSmallMapMapHeader }, // Small Yoshi's Island (1P Game)
-    { &llGRMetalMapFileID,         &llGRMetalMapMapHeader }, // Meta Crystal
-    { &llGRZakoMapFileID,          &llGRZakoMapMapHeader }, // Duel Zone
-    { &llGRBonus3MapFileID,        &llGRBonus3MapMapHeader }, // Race to the Finish
-    { &llGRLastMapFileID,          &llGRLastMapMapHeader }, // Final Destination
-    { &llGRBonus1MarioMapFileID,   &llGRBonus1MarioMapMapHeader }, // Break the Targets Mario
-    { &llGRBonus1FoxMapFileID,     &llGRBonus1FoxMapMapHeader }, // Break the Targets Fox
-    { &llGRBonus1DonkeyMapFileID,  &llGRBonus1DonkeyMapMapHeader }, // Break the Targets Donkey Kong
-    { &llGRBonus1SamusMapFileID,   &llGRBonus1SamusMapMapHeader }, // Break the Targets Samus
-    { &llGRBonus1LuigiMapFileID,   &llGRBonus1LuigiMapMapHeader }, // Break the Targets Luigi
-    { &llGRBonus1LinkMapFileID,    &llGRBonus1LinkMapMapHeader }, // Break the Targets Link
-    { &llGRBonus1YoshiMapFileID,   &llGRBonus1YoshiMapMapHeader }, // Break the Targets Yoshi
-    { &llGRBonus1CaptainMapFileID, &llGRBonus1CaptainMapMapHeader }, // Break the Targets Captain Falcon
-    { &llGRBonus1KirbyMapFileID,   &llGRBonus1KirbyMapMapHeader }, // Break the Targets Kirby
-    { &llGRBonus1PikachuMapFileID, &llGRBonus1PikachuMapMapHeader }, // Break the Targets Pikachu
-    { &llGRBonus1PurinMapFileID,   &llGRBonus1PurinMapMapHeader }, // Break the Targets Jigglypuff
-    { &llGRBonus1NessMapFileID,    &llGRBonus1NessMapMapHeader }, // Break the Targets Ness
-    { &llGRBonus2MarioMapFileID,   &llGRBonus2MarioMapMapHeader }, // Board the Platforms Mario
-    { &llGRBonus2FoxMapFileID,     &llGRBonus2FoxMapMapHeader }, // Board the Platforms Fox
-    { &llGRBonus2DonkeyMapFileID,  &llGRBonus2DonkeyMapMapHeader }, // Board the Platforms Donkey Kong
-    { &llGRBonus2SamusMapFileID,   &llGRBonus2SamusMapMapHeader }, // Board the Platforms Samus
-    { &llGRBonus2LuigiMapFileID,   &llGRBonus2LuigiMapMapHeader }, // Board the Platforms Luigi
-    { &llGRBonus2LinkMapFileID,    &llGRBonus2LinkMapMapHeader }, // Board the Platforms Link
-    { &llGRBonus2YoshiMapFileID,   &llGRBonus2YoshiMapMapHeader }, // Board the Platforms Yoshi
-    { &llGRBonus2CaptainMapFileID, &llGRBonus2CaptainMapMapHeader }, // Board the Platforms Captain Falcon
-    { &llGRBonus2KirbyMapFileID,   &llGRBonus2KirbyMapMapHeader }, // Board the Platforms Kirby
-    { &llGRBonus2PikachuMapFileID, &llGRBonus2PikachuMapMapHeader }, // Board the Platforms Pikachu
-    { &llGRBonus2PurinMapFileID,   &llGRBonus2PurinMapMapHeader }, // Board the Platforms Jigglypuff
-    { &llGRBonus2NessMapFileID,    &llGRBonus2NessMapMapHeader }  // Board the Platforms Ness
+    { llGRCastleMapFileID,        llGRCastleMapMapHeader }, // Peach's Castle
+    { llGRSectorMapFileID,        llGRSectorMapMapHeader }, // Sector Z
+    { llGRJungleMapFileID,        llGRJungleMapMapHeader }, // Kongo Jungle
+    { llGRZebesMapFileID,         llGRZebesMapMapHeader }, // Planet Zebes
+    { llGRHyruleMapFileID,        llGRHyruleMapMapHeader }, // Hyrule Castle
+    { llGRYosterMapFileID,        llGRYosterMapMapHeader }, // Yoshi's Island
+    { llGRPupupuMapFileID,        llGRPupupuMapMapHeader }, // Dream Land
+    { llGRYamabukiMapFileID,      llGRYamabukiMapMapHeader }, // Saffron City
+    { llGRInishieMapFileID,       llGRInishieMapMapHeader }, // Mushroom Kingdom
+    { llGRPupupuSmallMapFileID,   llGRPupupuSmallMapMapHeader }, // Beta Dream Land
+    { llGRPupupuTestMapFileID,    llGRPupupuTestMapMapHeader }, // Test Stage
+    { llGRExplainMapFileID,       llGRExplainMapMapHeader }, // How to Play
+    { llGRYosterSmallMapFileID,   llGRYosterSmallMapMapHeader }, // Small Yoshi's Island (1P Game)
+    { llGRMetalMapFileID,         llGRMetalMapMapHeader }, // Meta Crystal
+    { llGRZakoMapFileID,          llGRZakoMapMapHeader }, // Duel Zone
+    { llGRBonus3MapFileID,        llGRBonus3MapMapHeader }, // Race to the Finish
+    { llGRLastMapFileID,          llGRLastMapMapHeader }, // Final Destination
+    { llGRBonus1MarioMapFileID,   llGRBonus1MarioMapMapHeader }, // Break the Targets Mario
+    { llGRBonus1FoxMapFileID,     llGRBonus1FoxMapMapHeader }, // Break the Targets Fox
+    { llGRBonus1DonkeyMapFileID,  llGRBonus1DonkeyMapMapHeader }, // Break the Targets Donkey Kong
+    { llGRBonus1SamusMapFileID,   llGRBonus1SamusMapMapHeader }, // Break the Targets Samus
+    { llGRBonus1LuigiMapFileID,   llGRBonus1LuigiMapMapHeader }, // Break the Targets Luigi
+    { llGRBonus1LinkMapFileID,    llGRBonus1LinkMapMapHeader }, // Break the Targets Link
+    { llGRBonus1YoshiMapFileID,   llGRBonus1YoshiMapMapHeader }, // Break the Targets Yoshi
+    { llGRBonus1CaptainMapFileID, llGRBonus1CaptainMapMapHeader }, // Break the Targets Captain Falcon
+    { llGRBonus1KirbyMapFileID,   llGRBonus1KirbyMapMapHeader }, // Break the Targets Kirby
+    { llGRBonus1PikachuMapFileID, llGRBonus1PikachuMapMapHeader }, // Break the Targets Pikachu
+    { llGRBonus1PurinMapFileID,   llGRBonus1PurinMapMapHeader }, // Break the Targets Jigglypuff
+    { llGRBonus1NessMapFileID,    llGRBonus1NessMapMapHeader }, // Break the Targets Ness
+    { llGRBonus2MarioMapFileID,   llGRBonus2MarioMapMapHeader }, // Board the Platforms Mario
+    { llGRBonus2FoxMapFileID,     llGRBonus2FoxMapMapHeader }, // Board the Platforms Fox
+    { llGRBonus2DonkeyMapFileID,  llGRBonus2DonkeyMapMapHeader }, // Board the Platforms Donkey Kong
+    { llGRBonus2SamusMapFileID,   llGRBonus2SamusMapMapHeader }, // Board the Platforms Samus
+    { llGRBonus2LuigiMapFileID,   llGRBonus2LuigiMapMapHeader }, // Board the Platforms Luigi
+    { llGRBonus2LinkMapFileID,    llGRBonus2LinkMapMapHeader }, // Board the Platforms Link
+    { llGRBonus2YoshiMapFileID,   llGRBonus2YoshiMapMapHeader }, // Board the Platforms Yoshi
+    { llGRBonus2CaptainMapFileID, llGRBonus2CaptainMapMapHeader }, // Board the Platforms Captain Falcon
+    { llGRBonus2KirbyMapFileID,   llGRBonus2KirbyMapMapHeader }, // Board the Platforms Kirby
+    { llGRBonus2PikachuMapFileID, llGRBonus2PikachuMapMapHeader }, // Board the Platforms Pikachu
+    { llGRBonus2PurinMapFileID,   llGRBonus2PurinMapMapHeader }, // Board the Platforms Jigglypuff
+    { llGRBonus2NessMapFileID,    llGRBonus2NessMapMapHeader }  // Board the Platforms Ness
 };
 
 // 0x8012C668 - I can't for the life of me figure out if these are referenced at all
@@ -792,7 +903,7 @@ sb32 mpCollisionCheckFloorLineCollisionSame(Vec3f *position, Vec3f *translate, V
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -951,7 +1062,7 @@ sb32 mpCollisionCheckFloorLineCollisionDiff(Vec3f *position, Vec3f *translate, V
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -1296,7 +1407,7 @@ sb32 mpCollisionCheckCeilLineCollisionSame(Vec3f *position, Vec3f *translate, Ve
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -1455,7 +1566,7 @@ sb32 mpCollisionCheckCeilLineCollisionDiff(Vec3f *position, Vec3f *translate, Ve
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -1616,7 +1727,7 @@ sb32 mpCollisionCheckRWallLineCollisionSame(Vec3f *position, Vec3f *translate, V
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -1936,7 +2047,7 @@ sb32 mpCollisionCheckRWallLineCollisionDiff(Vec3f *position, Vec3f *translate, V
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -2157,7 +2268,7 @@ sb32 mpCollisionCheckLWallLineCollisionSame(Vec3f *position, Vec3f *translate, V
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -2442,7 +2553,7 @@ sb32 mpCollisionCheckLWallLineCollisionDiff(Vec3f *position, Vec3f *translate, V
     f32 spAC;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -2590,7 +2701,7 @@ sb32 func_ovl2_800F8FFC(Vec3f *position)
     f32 vpdist_x, vpdist_y;
     s32 line_id;
 
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -2661,7 +2772,7 @@ sb32 mpCollisionCheckProjectFloor(Vec3f *position, s32 *project_line_id, f32 *ga
     f32 gdist;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -2764,7 +2875,7 @@ sb32 mpCollisionCheckProjectCeil(Vec3f *position, s32 *project_line_id, f32 *ga_
     f32 gdist;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -2867,7 +2978,7 @@ sb32 mpCollisionCheckProjectRWall(Vec3f *position, s32 *project_line_id, f32 *ga
     f32 gdist;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -2970,7 +3081,7 @@ sb32 mpCollisionCheckProjectLWall(Vec3f *position, s32 *project_line_id, f32 *ga
     f32 gdist;
 
     line_project_pos = F32_MAX;
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -3448,7 +3559,7 @@ void func_ovl2_800FB04C(void)
     s32 vp2;
     s32 index;
 
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = l = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -3624,7 +3735,7 @@ void mpCollisionUpdateBoundsCurrent(void)
 
     bounds = gMPCollisionBounds.stop;
 
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -3797,7 +3908,7 @@ void mpCollisionInitYakumonoAll(void)
     s32 i, j, k, l;
     s32 unused[2];
 
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     bounds_moved.top = -65536.0F;
     bounds_moved.right = -65536.0F;
@@ -3902,7 +4013,7 @@ s32 mpCollisionAllocLinesGetCountTotal(void)
     {
         line_count[i] = 0;
     }
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -3940,7 +4051,7 @@ void mpCollisionInitLineIDsAll(void)
     {
         line_count[i] = 0;
     }
-    line_info = gMPCollisionGeometry->line_info;
+    line_info = (MPLineInfo*)PORT_RESOLVE(gMPCollisionGeometry->line_info);
 
     for (i = 0; i < gMPCollisionGeometry->yakumono_count; i++, line_info++)
     {
@@ -3958,6 +4069,43 @@ void mpCollisionInitLineIDsAll(void)
 }
 
 // 0x800FC284
+void mpCollisionFixGroundDataLayout(MPGroundData *ground_data)
+{
+#ifdef PORT
+    if (ground_data != NULL)
+    {
+        unsigned int bounds_off = (unsigned int)((uintptr_t)&ground_data->camera_bound_top - (uintptr_t)ground_data);
+        unsigned int team_off   = (unsigned int)((uintptr_t)&ground_data->alt_warning - (uintptr_t)ground_data);
+        unsigned int end_off    = (unsigned int)((uintptr_t)(&ground_data->zoom_end + 1) - (uintptr_t)ground_data);
+        unsigned int lmask_off  = (unsigned int)((uintptr_t)&ground_data->layer_mask - (uintptr_t)ground_data);
+
+        portFixupStructU16(ground_data, bounds_off, 4);
+        portFixupStructU16(ground_data, team_off, (end_off - team_off + 3) / 4);
+        portFixupStructU32(ground_data, lmask_off & ~3U, 1);
+
+        // SYColorRGB fog_color (3 bytes) + u8 fog_alpha + SYColorRGB emblem_colors[GMCOMMON_PLAYERS_MAX]
+        // + s32 unused are packed bytes that pass1 BSWAP32 scrambles word-by-word. Reverse each
+        // containing u32.
+        //
+        // The `unused` slot must be included: ifCommonPlayerDamageInitInterface reads
+        // `emblem_colors[player.color]` and the VS-mode CPU path (mnplayersvs.c:4424) sets
+        // `color = GMCOMMON_PLAYERS_MAX` (= 4) for non-team CPUs, so the read indexes one past
+        // the declared array. On N64 those bytes live where the decomp labelled `unused` and
+        // hold the intended CPU-emblem color set by the level designer (gray on most stages).
+        // Without un-byteswapping `unused`, post-pass1 LE reads pull a permuted byte triple —
+        // typically (00, FF, FF) ≈ cyan — turning every CPU damage display's series icon cyan
+        // (issue #6).
+        {
+            unsigned int fog_off    = (unsigned int)((uintptr_t)&ground_data->fog_color - (uintptr_t)ground_data);
+            unsigned int unused_end = (unsigned int)((uintptr_t)(&ground_data->unused + 1) - (uintptr_t)ground_data);
+            unsigned int aligned_off = fog_off & ~3U;
+            portFixupStructU32(ground_data, aligned_off, (unused_end - aligned_off + 3) / 4);
+        }
+    }
+#endif
+}
+
+// 0x800FC284
 void mpCollisionInitGroundData(void)
 {
     MPGeometryData *gdata;
@@ -3967,7 +4115,7 @@ void mpCollisionInitGroundData(void)
         MPGroundData*,
         lbRelocGetExternHeapFile
         (
-            dMPCollisionGroundFileInfos[gSCManagerBattleState->gkind].file_id, 
+            dMPCollisionGroundFileInfos[gSCManagerBattleState->gkind].file_id,
             syTaskmanMalloc
             (
                 lbRelocGetFileSize(dMPCollisionGroundFileInfos[gSCManagerBattleState->gkind].file_id),
@@ -3976,8 +4124,16 @@ void mpCollisionInitGroundData(void)
         ),
         dMPCollisionGroundFileInfos[gSCManagerBattleState->gkind].offset
     );
+#ifdef PORT
+    port_log("[ground] InitGroundData scene=%d gkind=%d file_id=%d offset=0x%x gd=%p",
+        gSCManagerSceneData.scene_curr,
+        gSCManagerBattleState->gkind,
+        dMPCollisionGroundFileInfos[gSCManagerBattleState->gkind].file_id,
+        (unsigned)dMPCollisionGroundFileInfos[gSCManagerBattleState->gkind].offset,
+        (void*)gMPCollisionGroundData);
+#endif
 
-    gMPCollisionGeometry = gMPCollisionGroundData->map_geometry;
+    gMPCollisionGeometry = (MPGeometryData*)PORT_RESOLVE(gMPCollisionGroundData->map_geometry);
     gdata = gMPCollisionGeometry;
 
     if (gdata == NULL)
@@ -3988,17 +4144,124 @@ void mpCollisionInitGroundData(void)
             scManagerRunPrintGObjStatus();
         }
     }
-    gMPCollisionVertexData  = gdata->vertex_data;
-    gMPCollisionVertexIDs   = gdata->vertex_id;
-    gMPCollisionVertexLinks = gdata->vertex_links;
-    gMPCollisionMapObjs     = gdata->mapobjs;
+#ifdef PORT
+    // Fix u16 fields corrupted by blanket u32 byte-swap (u16 pairs within
+    // each u32 word are position-swapped; rotate16 restores them).
+    portFixupStructU16(gdata, 0, 1);   // yakumono_count (word at offset 0)
+    portFixupStructU16(gdata, 20, 1);  // mapobj_count   (word at offset 20)
+#endif
+    gMPCollisionVertexData  = (MPVertexPosContainer*)PORT_RESOLVE(gdata->vertex_data);
+    gMPCollisionVertexIDs   = (MPVertexArray*)PORT_RESOLVE(gdata->vertex_id);
+    gMPCollisionVertexLinks = (MPVertexLinks*)PORT_RESOLVE(gdata->vertex_links);
+    gMPCollisionMapObjs     = (MPMapObjContainer*)PORT_RESOLVE(gdata->mapobjs);
+
+#ifdef PORT
+    // Fix all-u16 map object data (MPMapObjData = u16 kind + Vec2h pos = 6 bytes each)
+    if ((gMPCollisionMapObjs != NULL) && (gdata->mapobj_count > 0))
+    {
+        unsigned int mapobj_words = (gdata->mapobj_count * 6 + 3) / 4;
+        portFixupStructU16(gMPCollisionMapObjs, 0, mapobj_words);
+    }
+    if (gSCManagerSceneData.scene_curr == nSCKindVSBattle)
+    {
+        // Port-introduced VS stages override the ROM mapobj data because the
+        // ROM only spawns BattlePlayer1/2 (these stages were 1v1 boss arenas
+        // in the original game). The per-gkind container has all four
+        // BattlePlayer entries plus item / rebirth halo positions tuned for
+        // that stage's geometry. Item weights are shared across the three —
+        // the same table FD uses ships for Metal and Battlefield.
+        MPCollisionPortVSMapObjContainer *port_vs_mapobjs = NULL;
+
+        switch (gSCManagerBattleState->gkind)
+        {
+        case nGRKindLast:
+            port_vs_mapobjs = &dMPCollisionLastVSMapObjs;
+            break;
+        case nGRKindMetal:
+            port_vs_mapobjs = &dMPCollisionMetalVSMapObjs;
+            break;
+        case nGRKindZako:
+            port_vs_mapobjs = &dMPCollisionZakoVSMapObjs;
+            break;
+        default:
+            break;
+        }
+        if (port_vs_mapobjs != NULL)
+        {
+            gdata->mapobj_count = ARRAY_COUNT(port_vs_mapobjs->mapobjs);
+            gdata->mapobjs = PORT_REGISTER(port_vs_mapobjs);
+            gMPCollisionMapObjs = (MPMapObjContainer*)PORT_RESOLVE(gdata->mapobjs);
+            gMPCollisionGroundData->item_weights = PORT_REGISTER(dMPCollisionPortVSItemWeights);
+        }
+    }
+    // Fix MPLineInfo array — all u16 fields (yakumono_id + MPLineData[4] = 18 bytes each).
+    // Must happen before mpCollisionAllocLinesGetCountTotal reads line_data->line_count.
+    {
+        void *line_info_ptr = PORT_RESOLVE(gdata->line_info);
+        if ((line_info_ptr != NULL) && (gdata->yakumono_count > 0))
+        {
+            unsigned int lineinfo_words = (gdata->yakumono_count * 18 + 3) / 4;
+            portFixupStructU16(line_info_ptr, 0, lineinfo_words);
+        }
+    }
+#endif
 
     gMPCollisionLinesNum = mpCollisionAllocLinesGetCountTotal();
+
+#ifdef PORT
+    // Fix MPVertexLinks — {u16 vertex1, u16 vertex2} = 4 bytes = exactly 1 u32 word each.
+    // Count is the total line count across all groups (now known after line counting).
+    if ((gMPCollisionVertexLinks != NULL) && (gMPCollisionLinesNum > 0))
+    {
+        portFixupStructU16(gMPCollisionVertexLinks, 0, (unsigned int)gMPCollisionLinesNum);
+    }
+
+    // Fix MPVertexIDs (u16 vertex_id[]) — all-u16 packed array. The size is
+    // max(vlinks->vertex1 + vlinks->vertex2) across all lines. vertex2 is the
+    // number of consecutive vertex indices starting at vertex1. After this
+    // fixup we can walk vertex_id[] to find the highest referenced vpos index.
+    if ((gMPCollisionVertexIDs != NULL) && (gMPCollisionVertexLinks != NULL) && (gMPCollisionLinesNum > 0))
+    {
+        unsigned int max_vid_index = 0;
+        s32 li;
+        for (li = 0; li < gMPCollisionLinesNum; li++)
+        {
+            unsigned int end = (unsigned int)gMPCollisionVertexLinks[li].vertex1
+                             + (unsigned int)gMPCollisionVertexLinks[li].vertex2;
+            if (end > max_vid_index) max_vid_index = end;
+        }
+        if (max_vid_index > 0)
+        {
+            unsigned int vid_bytes = max_vid_index * 2;
+            unsigned int vid_words = (vid_bytes + 3) / 4;
+            portFixupStructU16(gMPCollisionVertexIDs, 0, vid_words);
+        }
+
+        // Fix MPVertexData (vpos[]) — 6 bytes per entry {Vec2h pos; u16 vertex_flags}.
+        // Count = max vertex_id across all links + 1.
+        if ((gMPCollisionVertexData != NULL) && (max_vid_index > 0))
+        {
+            unsigned int max_vpos_index = 0;
+            unsigned int j;
+            for (j = 0; j < max_vid_index; j++)
+            {
+                unsigned int v = (unsigned int)gMPCollisionVertexIDs->vertex_id[j];
+                if (v > max_vpos_index) max_vpos_index = v;
+            }
+            {
+                unsigned int vpos_count = max_vpos_index + 1;
+                unsigned int vpos_bytes = vpos_count * 6;
+                unsigned int vpos_words = (vpos_bytes + 3) / 4;
+                portFixupStructU16(gMPCollisionVertexData, 0, vpos_words);
+            }
+        }
+    }
+#endif
 
     mpCollisionInitLineIDsAll();
     mpCollisionAllocVertexInfo();
     func_ovl2_800FB554();
-    mpCollisionAllocYakumono(gMPCollisionGroundData->gr_desc[1].dobjdesc);
+    mpCollisionAllocYakumono((DObjDesc*)PORT_RESOLVE(gMPCollisionGroundData->gr_desc[1].dobjdesc));
 
     gMPCollisionLightColor.r = 0xFF;
     gMPCollisionLightColor.g = 0xFF;
@@ -4007,6 +4270,8 @@ void mpCollisionInitGroundData(void)
 
     gMPCollisionLightAngleX = gMPCollisionGroundData->light_angle.x;
     gMPCollisionLightAngleY = gMPCollisionGroundData->light_angle.y;
+
+    mpCollisionFixGroundDataLayout(gMPCollisionGroundData);
 }
 
 // 0x800FC3E8
@@ -4028,7 +4293,7 @@ void mpCollisionSetBGM(void)
 // 0x800FC450
 void mpCollisionClearYakumonoAll(void)
 {
-    DObjDesc *dobjdesc = gMPCollisionGroundData->gr_desc[1].dobjdesc;
+    DObjDesc *dobjdesc = (DObjDesc*)PORT_RESOLVE(gMPCollisionGroundData->gr_desc[1].dobjdesc);
     s32 i;
 
     for (i = 0; dobjdesc->id != DOBJ_ARRAY_MAX; i++, dobjdesc++)

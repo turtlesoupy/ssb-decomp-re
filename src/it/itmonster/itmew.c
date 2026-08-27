@@ -1,5 +1,8 @@
 #include <it/item.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -12,7 +15,11 @@ ITDesc dITMewItemDesc =
 {
     nITKindMew,                             // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataMewItemAttributes,       // Offset of item attributes in file?
+#else
     &llITCommonDataMewItemAttributes,       // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -170,7 +177,11 @@ GObj* itMewMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
             
         // This ptr stuff is likely also a macro
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataMewDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataMewDataStart), 0.0F);
+#endif
     }
     return item_gobj;
 }

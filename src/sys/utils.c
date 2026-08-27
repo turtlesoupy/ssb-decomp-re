@@ -1,6 +1,8 @@
 #include "common.h"
 #include "utils.h"
+#ifndef PORT
 #include "libc/math.h"
+#endif
 
 #include <macros.h>
 #include <string.h>
@@ -160,26 +162,64 @@ void syUtilsSetRandomSeedPtr(s32 *seedptr)
     else sSYUtilsRandomSeedPtr = seedptr;
 }
 
+#ifdef PORT
+/* Classic MS Visual C LCG: step = seed * 214013 + 2531011, output bits
+ * 16..30. The OG decomp does the multiply in s32 — signed-overflow UB
+ * about half the time. Debug builds preserve wraparound; Release with
+ * -O3 is free to assume no overflow and produces a different sequence.
+ *
+ * Concrete symptom: under Release, item weight rolls (e.g. barrel
+ * contents) consistently land on the monster-ball "no item" slot, so
+ * every barrel explodes instead of dropping an item. Debug never
+ * showed this because its non-optimized codegen kept the wraparound
+ * intact.
+ *
+ * Fix: do the LCG step in u32 so wraparound is well-defined per the C
+ * standard. Cast back to s32 for the seed write to preserve the OG bit
+ * pattern (the seed is read both signed and unsigned across utils.c
+ * but the bit pattern is what matters). */
+#endif
 u16 syUtilsRandUShort(void)
 {
+#ifdef PORT
+    u32 step = ((u32)*sSYUtilsRandomSeedPtr * 214013u) + 2531011u;
+    *sSYUtilsRandomSeedPtr = (s32)step;
+#else
     s32 step = (*sSYUtilsRandomSeedPtr * 214013) + 2531011;
     *sSYUtilsRandomSeedPtr = step;
+#endif
 
+#ifdef PORT
+    return (u16)(step >> 16);
+#else
     return step >> 16;
+#endif
 }
 
 // between 0..1
 f32 syUtilsRandFloat(void)
 {
+#ifdef PORT
+    u32 step = ((u32)*sSYUtilsRandomSeedPtr * 214013u) + 2531011u;
+    *sSYUtilsRandomSeedPtr = (s32)step;
+#else
     s32 step = (*sSYUtilsRandomSeedPtr * 214013) + 2531011;
     *sSYUtilsRandomSeedPtr = step;
+#endif
 
     return ((step >> 16) & 0xFFFF) / 65536.0F;
 }
 
 s32 syUtilsRandIntRange(s32 range)
 {
+#ifdef PORT
+    /* Same UB story as the LCG: u16 * s32 promotes to s32 and can
+     * overflow for large ranges. Compute in u32 for defined behavior;
+     * the result fits in s32 for any sensible game-side `range`. */
+    return (s32)((u32)syUtilsRandUShort() * (u32)range / 65536u);
+#else
     return syUtilsRandUShort() * range / 65536;
+#endif
 }
 
 u8 syUtilsRandTimeUChar(void)

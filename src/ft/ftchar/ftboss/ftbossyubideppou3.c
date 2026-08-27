@@ -1,4 +1,7 @@
 #include <ft/fighter.h>
+#ifdef PORT
+#include <wp/wpboss/wpbossbullet.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //

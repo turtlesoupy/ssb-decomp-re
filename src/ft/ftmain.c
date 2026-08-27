@@ -3,6 +3,12 @@
 #include <it/item.h>
 #include <gr/ground.h>
 #include <sc/scene.h>
+#ifdef PORT
+extern void port_log(const char *fmt, ...);
+extern void port_dump_backtrace(void);
+#include "fighter_registry.h"
+#include "hooks/Events.h"
+#endif
 #include <sys/controller.h>
 
 extern alSoundEffect* func_800269C0_275C0(u16);
@@ -73,6 +79,8 @@ GRAttackColl dFTMainGroundHitCollisionAttributes[/* */] =
 #include <ft/ftchar/ftpurin/ftpurinstatus.h>
 #include <ft/ftchar/ftness/ftnessstatus.h>
 #include <ft/ftchar/ftboss/ftbossstatus.h>
+#include <ef/efmanager.h>
+extern void func_80026738_27338(void *arg0);
 
 // 0x8012B740
 FTStatusDesc *dFTMainSpecialStatusDescs[/* */] =
@@ -196,6 +204,15 @@ void ftMainParseMotionEvent(GObj *fighter_gobj, FTStruct *fp, FTMotionScript *ms
         {
             attack_id = ftMotionEventCast(ms, FTMotionEventMakeAttack1)->attack_id;
             attack_coll = &fp->attack_colls[attack_id];
+#ifdef PORT
+            /* create_hitbox_ (0x800DF1F0): notify mods so per-hitbox
+             * override slots (SR direction/FGM state in CE) are cleared and
+             * leftover state from the previous attack with the same id
+             * doesn't bleed in. */
+            {
+                CALL_EVENT(FighterHitboxSlotResetEvent, fp->player, attack_id);
+            }
+#endif
 
             if ((attack_coll->attack_state == nGMAttackStateOff) || (attack_coll->group_id != ftMotionEventCast(ms, FTMotionEventMakeAttack1)->group_id))
             {
@@ -336,7 +353,11 @@ void ftMainParseMotionEvent(GObj *fighter_gobj, FTStruct *fp, FTMotionScript *ms
     case nFTMotionEventSetThrow:
         ftMotionEventAdvance(ms, FTMotionEventSetThrow1);
 
+#ifdef PORT
+        fp->throw_desc = (FTThrowHitDesc*)PORT_RESOLVE(ftMotionEventCast(ms, FTMotionEventSetThrow2)->throw_desc);
+#else
         fp->throw_desc = ftMotionEventCast(ms, FTMotionEventSetThrow2)->throw_desc;
+#endif
 
         ftMotionEventAdvance(ms, FTMotionEventSetThrow2);
         break;
@@ -519,7 +540,11 @@ void ftMainParseMotionEvent(GObj *fighter_gobj, FTStruct *fp, FTMotionScript *ms
 
         ms->script_id++;
 
+#ifdef PORT
+        ms->p_script = (u32*)PORT_RESOLVE(ftMotionEventCast(ms, FTMotionEventSubroutine2)->p_goto);
+#else
         ms->p_script = ftMotionEventCast(ms, FTMotionEventSubroutine2)->p_goto;
+#endif
         break;
 
     case nFTMotionEventSetDamageThrown:
@@ -529,6 +554,22 @@ void ftMainParseMotionEvent(GObj *fighter_gobj, FTStruct *fp, FTMotionScript *ms
 
             ftMotionEventAdvance(ms, FTMotionEventSetDamageThrown1);
 
+#ifdef PORT
+            p_damage = (FTMotionDamageScript*)PORT_RESOLVE(ftMotionEventCast(ms, FTMotionEventSetDamageThrown2)->p_subroutine);
+
+            {
+                u32 script_token = p_damage->p_script[fp->status_vars.common.damage.script_id][fkind];
+                if (script_token != 0)
+                {
+                    ms->p_goto[ms->script_id] = lbRelocGetFileData(void*, ms->p_script, sizeof(FTMotionEventSetDamageThrown2));
+
+                    ms->script_id++;
+
+                    ms->p_script = (u32*)PORT_RESOLVE(script_token);
+                }
+                else ftMotionEventAdvance(ms, FTMotionEventSetDamageThrown2);
+            }
+#else
             p_damage = ftMotionEventCast(ms, FTMotionEventSetDamageThrown2)->p_subroutine;
 
             if (p_damage->p_script[fp->status_vars.common.damage.script_id][fkind] != NULL)
@@ -540,6 +581,7 @@ void ftMainParseMotionEvent(GObj *fighter_gobj, FTStruct *fp, FTMotionScript *ms
                 ms->p_script = p_damage->p_script[fp->status_vars.common.damage.script_id][fkind];
             }
             else ftMotionEventAdvance(ms, FTMotionEventSetDamageThrown2);
+#endif
         }
         else ftMotionEventAdvance(ms, FTMotionEventSetDamageThrown);
         break;
@@ -551,7 +593,11 @@ void ftMainParseMotionEvent(GObj *fighter_gobj, FTStruct *fp, FTMotionScript *ms
     case nFTMotionEventGoto:
         ftMotionEventAdvance(ms, FTMotionEventGoto1);
 
+#ifdef PORT
+        ms->p_script = (u32*)PORT_RESOLVE(ftMotionEventCast(ms, FTMotionEventGoto2)->p_goto);
+#else
         ms->p_script = ftMotionEventCast(ms, FTMotionEventGoto2)->p_goto;
+#endif
         break;
 
     case nFTMotionEventSetParallelScript:
@@ -559,7 +605,11 @@ void ftMainParseMotionEvent(GObj *fighter_gobj, FTStruct *fp, FTMotionScript *ms
 
         if (fp->motion_scripts[0][1].p_script == NULL)
         {
+#ifdef PORT
+            fp->motion_scripts[0][1].p_script = fp->motion_scripts[1][1].p_script = (u32*)PORT_RESOLVE(ftMotionEventCast(ms, FTMotionEventParallel2)->p_goto);
+#else
             fp->motion_scripts[0][1].p_script = fp->motion_scripts[1][1].p_script = ftMotionEventCast(ms, FTMotionEventParallel2)->p_goto;
+#endif
             fp->motion_scripts[0][1].script_wait = fp->motion_scripts[1][1].script_wait = DObjGetStruct(fighter_gobj)->anim_speed - fighter_gobj->anim_frame;
             fp->motion_scripts[0][1].script_id = fp->motion_scripts[1][1].script_id = 0;
         }
@@ -703,6 +753,9 @@ void ftMainUpdateMotionEventsAll(GObj *fighter_gobj)
     {
         FTMotionScript *ms = &fp->motion_scripts[0][i];
         u32 ev_kind;
+#ifdef PORT
+        s32 watchdog = 0;
+#endif
 
         if (ms->p_script != NULL)
         {
@@ -731,6 +784,15 @@ void ftMainUpdateMotionEventsAll(GObj *fighter_gobj)
                         break;
                     }
                     ev_kind = ftMotionEventCast(ms, FTMotionEventMakeEffect1)->opcode;
+#ifdef PORT
+                    if (++watchdog >= 256)
+                    {
+                        port_log("SSB64: ftMainUpdateMotionEventsAll - watchdog script=%d opcode=%u wait=%f ptr=%p frame=%f speed=%f\n",
+                            i, ev_kind, ms->script_wait, ms->p_script, fighter_gobj->anim_frame, DObjGetStruct(fighter_gobj)->anim_speed);
+                        ms->p_script = NULL;
+                        break;
+                    }
+#endif
     
                     if ((ev_kind == nFTMotionEventEffect || ev_kind == nFTMotionEventEffectItemHold) && (fp->is_events_forward))
                     {
@@ -1008,27 +1070,51 @@ sb32 ftMainUpdateColAnim(GMColAnim *colanim, GObj *fighter_gobj, sb32 is_muted, 
 
             case nGMColEventGoto:
                 gmColEventAdvance(colanim->cs[i].p_script, GMColEventGoto1);
+#ifdef PORT
+                colanim->cs[i].p_script = (u32*)PORT_RESOLVE(gmColEventCast(colanim->cs[i].p_script, GMColEventGoto2)->p_goto);
+#else
                 colanim->cs[i].p_script = gmColEventCast(colanim->cs[i].p_script, GMColEventGoto2)->p_goto;
+#endif
                 break;
 
             case nGMColEventLoopBegin:
                 colanim->cs[i].p_subroutine[colanim->cs[i].script_id++] = lbRelocGetFileData(void*, colanim->cs[i].p_script, sizeof(GMColEventDefault));
-                colanim->cs[i].p_subroutine[colanim->cs[i].script_id++] = gmColEventCast(colanim->cs[i].p_script, GMColEventDefault)->value,
+                colanim->cs[i].p_subroutine[colanim->cs[i].script_id++] = (void *)(uintptr_t)gmColEventCast(colanim->cs[i].p_script, GMColEventDefault)->value,
                 gmColEventAdvance(colanim->cs[i].p_script, GMColEventDefault);
                 break;
 
             case nGMColEventLoopEnd:
+#ifdef PORT
+            {
+                /* On N64 loop_count[script_id-2] aliases p_subroutine[script_id-1]
+                 * (the second push from LoopBegin, which stored
+                 * (void*)(uintptr_t)count). Under PORT we only have
+                 * p_subroutine[]; pull the count out of that slot
+                 * directly, decrement, and write back as a void*. */
+                s32 *count = (s32*)&colanim->cs[i].p_subroutine[colanim->cs[i].script_id - 1];
+                if (--*count != 0)
+                {
+                    colanim->cs[i].p_script = colanim->cs[i].p_subroutine[colanim->cs[i].script_id - 2];
+                }
+                else gmColEventAdvance(colanim->cs[i].p_script, GMColEventDefault), colanim->cs[i].script_id -= 2;
+            }
+#else
                 if (--colanim->cs[i].loop_count[colanim->cs[i].script_id - 2] != 0)
                 {
                     colanim->cs[i].p_script = colanim->cs[i].p_subroutine[colanim->cs[i].script_id - 2];
                 }
                 else gmColEventAdvance(colanim->cs[i].p_script, GMColEventDefault), colanim->cs[i].script_id -= 2;
+#endif
                 break;
 
             case nGMColEventSubroutine:
                 gmColEventAdvance(colanim->cs[i].p_script, GMColEventSubroutine1);
                 colanim->cs[i].p_subroutine[colanim->cs[i].script_id++] = lbRelocGetFileData(void*, colanim->cs[i].p_script, sizeof(GMColEventSubroutine1));
+#ifdef PORT
+                colanim->cs[i].p_script = (u32*)PORT_RESOLVE(gmColEventCast(colanim->cs[i].p_script, GMColEventSubroutine2)->p_subroutine);
+#else
                 colanim->cs[i].p_script = gmColEventCast(colanim->cs[i].p_script, GMColEventSubroutine2)->p_subroutine;
+#endif
                 break;
 
             case nGMColEventReturn:
@@ -1040,7 +1126,11 @@ sb32 ftMainUpdateColAnim(GMColAnim *colanim, GObj *fighter_gobj, sb32 is_muted, 
 
                 if (colanim->cs[1].p_script == NULL)
                 {
+#ifdef PORT
+                    colanim->cs[1].p_script = (u32*)PORT_RESOLVE(gmColEventCast(colanim->cs[i].p_script, GMColEventParallel2)->p_script);
+#else
                     colanim->cs[1].p_script = gmColEventCast(colanim->cs[i].p_script, GMColEventParallel2)->p_script;
+#endif
                     colanim->cs[1].color_event_timer = 0;
                     colanim->cs[1].script_id = 0;
                 }
@@ -1115,7 +1205,11 @@ sb32 ftMainUpdateColAnim(GMColAnim *colanim, GObj *fighter_gobj, sb32 is_muted, 
                 {
                     fp = ftGetStruct(fighter_gobj);
 
+#ifdef PORT
+                    joint_id = ftParamGetJointID(fp, BITFIELD_SEXT(gmColEventCast(colanim->cs[i].p_script, GMColEventMakeEffect1)->joint_id, 7));
+#else
                     joint_id = ftParamGetJointID(fp, gmColEventCast(colanim->cs[i].p_script, GMColEventMakeEffect1)->joint_id);
+#endif
                     effect_id = gmColEventCast(colanim->cs[i].p_script, GMColEventMakeEffect1)->effect_id;
                     flag = gmColEventCast(colanim->cs[i].p_script, GMColEventMakeEffect1)->flag;
 
@@ -1144,8 +1238,13 @@ sb32 ftMainUpdateColAnim(GMColAnim *colanim, GObj *fighter_gobj, sb32 is_muted, 
             case nGMColEventSetLight:
                 colanim->is_use_light = TRUE;
 
+#ifdef PORT
+                colanim->light_angle_x = BITFIELD_SEXT13(gmColEventCast(colanim->cs[i].p_script, GMColEventSetLight)->light1);
+                colanim->light_angle_y = BITFIELD_SEXT13(gmColEventCast(colanim->cs[i].p_script, GMColEventSetLight)->light2);
+#else
                 colanim->light_angle_x = gmColEventCast(colanim->cs[i].p_script, GMColEventSetLight)->light1;
                 colanim->light_angle_y = gmColEventCast(colanim->cs[i].p_script, GMColEventSetLight)->light2;
+#endif
 
                 gmColEventAdvance(colanim->cs[i].p_script, GMColEventSetLight);
                 break;
@@ -2111,7 +2210,6 @@ void ftMainPlayHitSFX(FTStruct *fp, FTAttackColl *attack_coll)
         func_80026738_27338(fp->p_sfx);
     }
     fp->p_sfx = NULL, fp->sfx_id = 0;
-
     lbCommonMakePositionFGM(dFTMainHitCollisionFGMs[attack_coll->fgm_kind][attack_coll->fgm_level], fp->joints[nFTPartsJointTopN]->translate.vec.f.x);
 }
 
@@ -2737,16 +2835,16 @@ void ftMainProcessHitCollisionStatsMain(GObj *fighter_gobj)
 
                 if (ft_attack_coll->fgm_level > 0) // Changed this to > 0 for now, makes a bit more sense to me since it only does this on moves with hit SFX levels greater than weak (0)
                 {
-                    efManagerDamageSpawnOrbsRandomMakeEffect(&pos);
+                    efManagerDamageSpawnOrbsRandgcMakeEffect(&pos);
 
                     switch (this_fp->attr->is_metallic)
                     {
                     case FALSE:
-                        efManagerDamageSpawnSparksRandomMakeEffect(&pos, this_fp->lr);
+                        efManagerDamageSpawnSparksRandgcMakeEffect(&pos, this_fp->lr);
                         break;
 
                     case TRUE:
-                        efManagerDamageSpawnMDustRandomMakeEffect(&pos, this_fp->lr);
+                        efManagerDamageSpawnMDustRandgcMakeEffect(&pos, this_fp->lr);
                         break;
                     }
                 }
@@ -2861,6 +2959,16 @@ void ftMainProcessHitCollisionStatsMain(GObj *fighter_gobj)
         this_fp->damage_element = ft_attack_coll->element;
 
         this_fp->damage_lr = (DObjGetStruct(fighter_gobj)->translate.vec.f.x < DObjGetStruct(attacker_gobj)->translate.vec.f.x) ? +1 : -1;
+
+#ifdef PORT
+        /* apply_direction_ (0x800E446C): a listener (CE) that keeps per-hitbox
+         * direction overrides derives the hitbox id from the attacker's
+         * attack_colls and overwrites this_fp->damage_lr when its slot is set.
+         * No listener = damage_lr keeps the vanilla value computed above. */
+        {
+            CALL_EVENT(FighterDamageDirectionApplyEvent, this_fp, attacker_fp, ft_attack_coll);
+        }
+#endif
 
         this_fp->damage_player_num = hitlog->attacker_player_num;
 
@@ -3775,6 +3883,15 @@ void ftMainSearchFighterCatch(GObj *this_gobj)
 // 0x800E6100
 void ftMainProcSearchCatch(GObj *fighter_gobj)
 {
+#ifdef PORT
+    {
+        extern s32 port_pose_capture_active(void);
+        if (port_pose_capture_active())
+        {
+            return;
+        }
+    }
+#endif
     FTStruct *fp = ftGetStruct(fighter_gobj);
 
     ftMainSearchHitHazard(fighter_gobj);
@@ -3796,6 +3913,17 @@ void ftMainProcSearchHitAll(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
 
+#ifdef PORT
+    /* pose-capture eval: the two fighters run the same scripted tour as
+     * test/reference; any hit between them desyncs the comparison. */
+    {
+        extern s32 port_pose_capture_active(void);
+        if (port_pose_capture_active())
+        {
+            return;
+        }
+    }
+#endif
     if (!(fp->is_ghost))
     {
         sFTMainHitLogID = 0;
@@ -3813,9 +3941,20 @@ void ftMainProcSearchHitAll(GObj *fighter_gobj)
 }
 
 // 0x800E61EC
+#ifdef PORT
+extern void port_dump_frame(GObj *fighter_gobj);
+extern void port_osb5_skin_update(GObj *fighter_gobj);
+extern void port_osb5_copy_windows(void);
+#endif
 void ftMainProcParams(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
+#ifdef PORT
+    port_dump_frame(fighter_gobj);
+    /* OSB5 CPU skinning: recompute the injected mesh every fighter tick */
+    port_osb5_skin_update(fighter_gobj);
+    port_osb5_copy_windows();
+#endif
     s32 damage;
     s32 status_id;
     f32 knockback_resist;
@@ -3987,6 +4126,23 @@ void ftMainProcParams(GObj *fighter_gobj)
     {
         fp->hitlag_tics = ftParamGetHitLag(damage, status_id, fp->hitlag_mul);
 
+#ifdef PORT
+        /* SR shield_hitlag_patch_ (CrashSpecial.asm:911-963, ROM 0x800E651C):
+         * lets per-fighter routines override hitlag when a shielded hit
+         * connects. Crash uses this to skip the hitlag freeze when his
+         * spin-attack is shield-blocked (NSPGBlocked / NSPABlocked) so the
+         * blocked-spin transition flows directly into the bounce-back.
+         * The registry hook dispatches to the per-fkind handler installed
+         * by the content mod; if the handler returns nonzero, hitlag_tics
+         * goes to 0 (same as SR's `or t6, r0, r0` branch). */
+        {
+            extern int port_fighter_shield_hitlag_skip(int fkind, GObj *fighter_gobj, int status_id);
+            if (port_fighter_shield_hitlag_skip((int)fp->fkind, fighter_gobj, (int)fp->status_id)) {
+                fp->hitlag_tics = 0;
+            }
+        }
+#endif
+
         if ((fp->hitlag_tics != 0) && (is_knockback_paused != FALSE))
         {
             fp->is_knockback_paused = TRUE;
@@ -4091,27 +4247,57 @@ void ftMainUpdateHiddenPartID(FTStruct *fp, s32 hiddenpart_id)
     DObj *sibling_joint;
     FTAttributes *attr;
     FTCommonPart *commonpart;
+    DObjDesc *commonpart_dobjdesc;
+    MObjSub ***commonpart_p_mobjsubs;
+    AObjEvent32 ***commonpart_p_costume_matanim_joints;
     DObj *parent_joint;
     FTParts *parts;
 
     attr = fp->attr;
-    hiddenpart = &attr->hiddenparts[hiddenpart_id];
+#ifdef PORT
+    {
+        FTHiddenPart *hp_table = (FTHiddenPart*)PORT_RESOLVE(attr->hiddenparts);
+        if (hp_table == NULL) {
+            port_log("SSB64: ftMainUpdateHiddenPartID BAIL — hp_table NULL fkind=%d hpid=%d token=0x%X\n",
+                (int)fp->fkind, hiddenpart_id, attr->hiddenparts);
+            return;
+        }
+        if (hiddenpart_id < 0 || hiddenpart_id >= 32) {
+            port_log("SSB64: ftMainUpdateHiddenPartID BAIL — hpid OOB fkind=%d hpid=%d\n",
+                (int)fp->fkind, hiddenpart_id);
+            return;
+        }
+        hiddenpart = &hp_table[hiddenpart_id];
+        if (hiddenpart->root_joint_id < 0 ||
+            hiddenpart->root_joint_id >= FTPARTS_JOINT_NUM_MAX) {
+            port_log("SSB64: ftMainUpdateHiddenPartID BAIL — root_joint OOB fkind=%d hpid=%d joint=%d\n",
+                (int)fp->fkind, hiddenpart_id, (int)hiddenpart->root_joint_id);
+            return;
+        }
+        port_log("SSB64: ftMainUpdateHiddenPartID OK fkind=%d hpid=%d joint=%d parent=%d kind=%d\n",
+            (int)fp->fkind, hiddenpart_id, (int)hiddenpart->root_joint_id,
+            (int)hiddenpart->parent_joint_id, (int)hiddenpart->joint_kind);
+    }
+#else
+    hiddenpart = &((FTHiddenPart*)PORT_RESOLVE(attr->hiddenparts))[hiddenpart_id];
+#endif
 
     if (hiddenpart->root_joint_id >= nFTPartsJointCommonStart)
     {
         if (fp->detail_curr == nFTPartsDetailHigh)
         {
-            commonpart = &fp->attr->commonparts_container->commonparts[0];
+            commonpart = &((FTCommonPartContainer*)PORT_RESOLVE(fp->attr->commonparts_container))->commonparts[0];
         }
-        else if (attr->commonparts_container->commonparts[1].dobjdesc[hiddenpart->root_joint_id - nFTPartsJointCommonStart].dl != NULL)
+        else if (!PORT_REF_IS_NULL(FTPARTS_GET_DOBJDESC(&((FTCommonPartContainer*)PORT_RESOLVE(attr->commonparts_container))->commonparts[1])[hiddenpart->root_joint_id - nFTPartsJointCommonStart].dl))
         {
-            commonpart = &attr->commonparts_container->commonparts[1];
+            commonpart = &((FTCommonPartContainer*)PORT_RESOLVE(attr->commonparts_container))->commonparts[1];
         }
-        else commonpart = &attr->commonparts_container->commonparts[0];
+        else commonpart = &((FTCommonPartContainer*)PORT_RESOLVE(attr->commonparts_container))->commonparts[0];
     }
     else commonpart = NULL;
 
-    dl = (commonpart != NULL) ? commonpart->dobjdesc[hiddenpart->root_joint_id - nFTPartsJointCommonStart].dl : NULL;
+    commonpart_dobjdesc = (commonpart != NULL) ? FTPARTS_GET_DOBJDESC(commonpart) : NULL;
+    dl = (commonpart_dobjdesc != NULL) ? PORT_RESOLVE(commonpart_dobjdesc[hiddenpart->root_joint_id - nFTPartsJointCommonStart].dl) : NULL;
 
     root_joint = gcAddDObjForGObj(fp->fighter_gobj, dl);
     root_joint->sib_prev->sib_next = NULL;
@@ -4119,7 +4305,28 @@ void ftMainUpdateHiddenPartID(FTStruct *fp, s32 hiddenpart_id)
 
     if (dl != NULL)
     {
-        lbCommonAddMObjForFighterPartsDObj(root_joint, commonpart->p_mobjsubs[hiddenpart->root_joint_id - nFTPartsJointCommonStart], commonpart->p_costume_matanim_joints[hiddenpart->root_joint_id - nFTPartsJointCommonStart], NULL, fp->costume);
+        commonpart_p_mobjsubs = FTPARTS_GET_MOBJSUBS(commonpart);
+        commonpart_p_costume_matanim_joints = FTPARTS_GET_COSTUME_MATANIM_JOINTS(commonpart);
+
+        lbCommonAddMObjForFighterPartsDObj
+        (
+            root_joint,
+#ifdef PORT
+            /* PORT: FTPARTS_GET_MOBJSUBS resolves to a pointer into an in-file
+             * u32-token array.  Native `[joint_off]` indexing would stride
+             * 8 bytes on LP64 and read two adjacent tokens as one garbage
+             * 8-byte pointer. PORT_RESOLVE_ARRAY reads the correct u32 and
+             * resolves it. Matches the fix already present in
+             * lbcommon.c:1188 / ftparam.c:812 / ftparam.c:926 / ftparam.c:1079. */
+            (commonpart_p_mobjsubs != NULL) ? (MObjSub **)PORT_RESOLVE_ARRAY(commonpart_p_mobjsubs, hiddenpart->root_joint_id - nFTPartsJointCommonStart) : NULL,
+            (commonpart_p_costume_matanim_joints != NULL) ? (AObjEvent32 **)PORT_RESOLVE_ARRAY(commonpart_p_costume_matanim_joints, hiddenpart->root_joint_id - nFTPartsJointCommonStart) : NULL,
+#else
+            (commonpart_p_mobjsubs != NULL) ? commonpart_p_mobjsubs[hiddenpart->root_joint_id - nFTPartsJointCommonStart] : NULL,
+            (commonpart_p_costume_matanim_joints != NULL) ? commonpart_p_costume_matanim_joints[hiddenpart->root_joint_id - nFTPartsJointCommonStart] : NULL,
+#endif
+            NULL,
+            fp->costume
+        );
     }
     if (commonpart != NULL)
     {
@@ -4190,7 +4397,7 @@ void ftMainUpdateHiddenPartID(FTStruct *fp, s32 hiddenpart_id)
 
     root_joint->user_data.p = parts = ftManagerGetNextPartsAlloc();
 
-    parts->flags = attr->commonparts_container->commonparts[fp->detail_curr - nFTPartsDetailStart].flags;
+    parts->flags = ((FTCommonPartContainer*)PORT_RESOLVE(attr->commonparts_container))->commonparts[fp->detail_curr - nFTPartsDetailStart].flags;
     parts->joint_id = hiddenpart->root_joint_id;
 
     if (hiddenpart->partindex_0x8 != 0)
@@ -4210,7 +4417,7 @@ void ftMainAddHiddenPartID(FTStruct *fp, s32 hiddenpart_id)
     DObj *new_child_joint;
     DObj *parent_joint;
 
-    hiddenpart = &fp->attr->hiddenparts[hiddenpart_id];
+    hiddenpart = &((FTHiddenPart*)PORT_RESOLVE(fp->attr->hiddenparts))[hiddenpart_id];
     root_joint = fp->joints[hiddenpart->root_joint_id];
 
     if (hiddenpart->root_joint_id == nFTPartsJointTransN)
@@ -4298,7 +4505,7 @@ void ftMainAddHiddenPartID(FTStruct *fp, s32 hiddenpart_id)
 // 0x800E6E00
 void ftMainEjectHiddenPartID(FTStruct *fp, s32 hiddenpart_id)
 {
-    FTHiddenPart *hiddenpart = &fp->attr->hiddenparts[hiddenpart_id];
+    FTHiddenPart *hiddenpart = &((FTHiddenPart*)PORT_RESOLVE(fp->attr->hiddenparts))[hiddenpart_id];
     DObj *root_joint = fp->joints[hiddenpart->root_joint_id];
     DObj *parent_joint;
     DObj *child_joint;
@@ -4364,6 +4571,18 @@ void ftMainEjectHiddenPartID(FTStruct *fp, s32 hiddenpart_id)
 // 0x800E6F24
 void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 anim_speed, u32 flags)
 {
+#ifdef PORT
+    if (status_id < 0) {
+        port_log("SSB64: !!! ftMainSetStatus ENTRY status_id=0x%x (negative) "
+                 "fighter_gobj=%p caller_ra=%p\n",
+#if defined(_MSC_VER)
+            (u32)status_id, fighter_gobj, (void *)0);
+#else
+            (u32)status_id, fighter_gobj, __builtin_return_address(0));
+#endif
+        port_dump_backtrace();
+    }
+#endif
     FTStruct *fp = ftGetStruct(fighter_gobj);
     intptr_t event_file_head;
     FTAttributes *attr = fp->attr;
@@ -4388,6 +4607,39 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
     DObj *transn_parent;                // Parent of TrasnN_Joint
     DObj *transn_child;                 // Child of TransN_Joint
     s32 i;
+
+#ifdef PORT
+    /* SR change_action_ (0x800E6F2C) — the per-status-change reset of SR
+     * translation multiplier / env color override is NOT an engine hook:
+     * mods that need it (CE) install a funchook detour on ftMainSetStatus
+     * via mod_install_hook, reset their own state, and call the original. */
+
+    /* SR dig_ecb_patch_ (0x800E6F4C, CrashSpecial.asm:2152-2194): resize
+     * the fighter's ECB diamond per the new action. SR's patch hard-codes
+     * Crash + DSP-action shrinking; the registry hook generalizes that so
+     * any fighter can register its own action-keyed ECB profile. The
+     * handler receives the next status_id and writes new map_coll.top /
+     * .center values; returning 0 leaves the engine's defaults. */
+    if (fp->attr != NULL)
+    {
+        extern int port_fighter_ecb_override(int fkind, FTStruct *fp, int next_status_id,
+                                             float *out_upper, float *out_middle);
+        float new_upper = 0.0F, new_middle = 0.0F;
+        if (port_fighter_ecb_override(fp->fkind, fp, status_id, &new_upper, &new_middle))
+        {
+            fp->attr->map_coll.top    = new_upper;
+            fp->attr->map_coll.center = new_middle;
+        }
+    }
+
+    /* SR change_action_ extras (CrashSpecial.asm: training-mode action
+     * frame reset, Item.respawn_with_item_). Training-mode is a separate
+     * SR engine subsystem that hasn't been ported; respawn_with_item is
+     * SR's item-respawn loop. Both fire from the same change_action_ patch
+     * site in SR but the port has no equivalent target to drive. They are
+     * left unimplemented here because the SR systems they depend on are
+     * not present in the BattleShip port. */
+#endif
 
     status_struct = NULL;
     opening_struct = NULL;
@@ -4553,7 +4805,11 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
     }
     if (status_id >= FTSTAT_OPENING1_START) // Check if Opening status ID 1
     {
+#ifdef PORT
+        opening_struct = port_fighter_opening_descs(fp->fkind);
+#else
         opening_struct = D_ovl1_80390D20[fp->fkind];
+#endif
         status_struct_id = status_id - FTSTAT_OPENING1_START;
     }
     else if (status_id >= FTSTAT_OPENING2_START) // Check if Opening status ID 2
@@ -4563,7 +4819,38 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
     }
     else if (status_id >= nFTCommonStatusSpecialStart)
     {
+#ifdef PORT
+        /* When a synth fighter (Crash etc.) performs its OWN special, the action
+         * status descriptor lives in the synth's table, not the common one. The
+         * transient scope (published by ftKirbySpecialNSetStatusSelect around the
+         * copied-special handler) and the host's persistent copy_id both name the
+         * synth so its descriptor resolves; the follow-on phases that re-enter
+         * from the synth's own routines after the scope clears use the copy_id.
+         *
+         * Kirby's copied-special status ids live in Kirby's OWN grown special
+         * table (KirbyHatEngine appends them past the vanilla Kirby range), so
+         * when Kirby is the actor and the requested status indexes inside that
+         * table, resolve through Kirby's descriptor -- not the synth's. */
+        s32 special_fkind = port_kirby_get_copy_special_fkind();
+        if ((special_fkind < 0) && (fp->fkind == nFTKindKirby) &&
+            (fp->passive_vars.kirby.copy_id >= nFTKindEnumCount))
+        {
+            special_fkind = fp->passive_vars.kirby.copy_id;
+        }
+        if (special_fkind < 0)
+        {
+            special_fkind = fp->fkind;
+        }
+        if ((fp->fkind == nFTKindKirby) &&
+            ((status_id - nFTCommonStatusSpecialStart) <
+             port_fighter_special_descs_count(nFTKindKirby)))
+        {
+            special_fkind = fp->fkind;
+        }
+        status_struct = port_fighter_special_descs(special_fkind);
+#else
         status_struct = dFTMainSpecialStatusDescs[fp->fkind];
+#endif
         status_struct_id = status_id - nFTCommonStatusSpecialStart;
     }
     else if (status_id >= nFTCommonStatusActionStart)
@@ -4576,7 +4863,7 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
         status_struct = dFTCommonNullStatusDescs;
         status_struct_id = status_id;
     }
-    status_desc = &status_struct[status_struct_id];
+    status_desc = (status_struct != NULL) ? &status_struct[status_struct_id] : NULL;
 
     if (fp->pkind != nFTPlayerKindDemo)
     {
@@ -4624,6 +4911,10 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
             fp->figatree = fp->figatree_heap;
         }
         else fp->figatree = NULL;
+#ifdef PORT
+        port_log("SSB64: ftMainSetStatus - status=0x%x motion=%d figatree=%p anim_flags=0x%08x\n",
+            status_id, motion_id, fp->figatree, motion_desc->anim_desc.word);
+#endif
         
         if (fp->figatree != NULL)
         {
@@ -4650,8 +4941,21 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
                 }
                 else ftMainEjectHiddenPartID(fp, i);
             }
-            dobjdesc = attr->commonparts_container->commonparts[fp->detail_curr - nFTPartsDetailStart].dobjdesc;
+            dobjdesc = FTPARTS_GET_DOBJDESC(&((FTCommonPartContainer*)PORT_RESOLVE(attr->commonparts_container))->commonparts[fp->detail_curr - nFTPartsDetailStart]);
 
+#ifdef PORT
+            /* NULL-check on token-resolved dobjdesc. If either of the two
+             * token resolutions in the chain above (attr->commonparts
+             * _container OR commonparts[detail]->dobjdesc) returns NULL —
+             * because the fighter's file was loaded in a prior scene
+             * whose arena has been recycled but its global p_file_*
+             * pointer is still being read — the loop below dereferences
+             * dobjdesc->id on a small invalid address and SIGSEGVs at
+             * fault_addr=0x0. The per-slot RelocPointerTable correctly
+             * returns NULL for arena-allocated stale tokens; this
+             * consumer check turns that NULL into a clean skip. */
+            if (dobjdesc != NULL)
+#endif
             for (i = nFTPartsJointCommonStart; dobjdesc->id != DOBJ_ARRAY_MAX; i++, dobjdesc++)
             {
                 joint = fp->joints[i];
@@ -4670,29 +4974,30 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
             if (fp->anim_desc.flags.is_use_transn_joint)
             {
                 joint = fp->joints[nFTPartsJointTransN];
-                
+#ifdef PORT
+                if (joint != NULL) {
+#endif
                 joint->translate.vec.f.x = joint->translate.vec.f.y = joint->translate.vec.f.z = 0.0F;
 
                 joint->rotate.vec.f.z = 0.0F;
 
                 joint->flags = DOBJ_FLAG_NONE;
+#ifdef PORT
+                }
+#endif
             }
             if (fp->anim_desc.flags.is_use_xrotn_joint)
             {
                 joint = fp->joints[nFTPartsJointXRotN];
 
-                joint->translate.vec.f.x = joint->translate.vec.f.y = joint->translate.vec.f.z = 0.0F;
-                
-                joint->rotate.vec.f.x = joint->rotate.vec.f.y = joint->rotate.vec.f.z = 0.0F; 
-                
-                joint->scale.vec.f.x = joint->scale.vec.f.y = joint->scale.vec.f.z = 1.0F;
-
-                joint->flags = DOBJ_FLAG_NONE;
-            }
-            if (fp->anim_desc.flags.is_use_yrotn_joint)
-            {
-                joint = fp->joints[nFTPartsJointYRotN];
-
+#ifdef PORT
+                /* Synth fkinds whose skeleton lacks the XRotN joint
+                 * (Crash uses Mario's commonparts which omits XRotN at
+                 * the Crash-required slot) get NULL here. Skipping the
+                 * reset is safe; the animation just won't have a hinge
+                 * to rotate, which is the desired fallback. */
+                if (joint != NULL) {
+#endif
                 joint->translate.vec.f.x = joint->translate.vec.f.y = joint->translate.vec.f.z = 0.0F;
 
                 joint->rotate.vec.f.x = joint->rotate.vec.f.y = joint->rotate.vec.f.z = 0.0F;
@@ -4700,8 +5005,35 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
                 joint->scale.vec.f.x = joint->scale.vec.f.y = joint->scale.vec.f.z = 1.0F;
 
                 joint->flags = DOBJ_FLAG_NONE;
+#ifdef PORT
+                }
+#endif
             }
+            if (fp->anim_desc.flags.is_use_yrotn_joint)
+            {
+                joint = fp->joints[nFTPartsJointYRotN];
+
+#ifdef PORT
+                if (joint != NULL) {
+#endif
+                joint->translate.vec.f.x = joint->translate.vec.f.y = joint->translate.vec.f.z = 0.0F;
+
+                joint->rotate.vec.f.x = joint->rotate.vec.f.y = joint->rotate.vec.f.z = 0.0F;
+
+                joint->scale.vec.f.x = joint->scale.vec.f.y = joint->scale.vec.f.z = 1.0F;
+
+                joint->flags = DOBJ_FLAG_NONE;
+#ifdef PORT
+                }
+#endif
+            }
+#ifdef PORT
+            port_log("SSB64: ftMainSetStatus - before figatree attach status=0x%x motion=%d\n", status_id, motion_id);
+#endif
             lbCommonAddFighterPartsFigatree(fp->joints[nFTPartsJointTopN]->child, fp->figatree, frame_begin);
+#ifdef PORT
+            port_log("SSB64: ftMainSetStatus - after figatree attach status=0x%x motion=%d\n", status_id, motion_id);
+#endif
 
             if (anim_speed != DObjGetStruct(fighter_gobj)->anim_speed)
             {
@@ -4710,7 +5042,11 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
             if (fp->anim_desc.flags.is_use_transn_joint)
             {
                 joint = fp->joints[nFTPartsJointTransN];
-
+#ifdef PORT
+                /* Skip TransN reparent dance when the joint isn't
+                 * present (synth fkind skeleton). */
+                if (joint != NULL) {
+#endif
                 transn_parent = joint->parent;
                 transn_child = joint->child;
                 transn_parent->child = transn_child;
@@ -4719,6 +5055,9 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
                 joint->sib_prev = transn_child;
                 joint->parent = transn_child->parent;
                 joint->child = NULL;
+#ifdef PORT
+                }
+#endif
             }
 
             if (fp->is_use_animlocks)
@@ -4734,7 +5073,7 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
             }
             fp->is_use_animlocks = fp->anim_desc.flags.is_use_animlocks;
 
-            if (attr->translate_scales != NULL)
+            if (PORT_RESOLVE(attr->translate_scales) != NULL)
             {
                 if (fp->anim_desc.flags.is_have_translate_scale)
                 {
@@ -4748,17 +5087,45 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
             if (motion_desc->offset != 0x80000000)
             {
                 // Actually subaction scripts?
+                // Note: event_file_head==0 is legitimate when motion_desc->offset
+                // is already a fully-resolved pointer (e.g. opening/win-pose scripts
+                // stored as D_ovl1_* symbols in submotion descs). On N64 *NULL read
+                // RDRAM[0]=0, so offset+0=offset worked. Don't NULL-out the result.
                 if (fp->anim_desc.flags.is_use_submotion_script)
                 {
+#ifdef PORT
+                    event_file_head = (fp->data->p_file_submotion != NULL) ? (intptr_t)*fp->data->p_file_submotion : 0;
+#else
                     event_file_head = *fp->data->p_file_submotion;
+#endif
 
                     event_script_ptr = (void*) ((intptr_t)motion_desc->offset + (intptr_t)event_file_head);
                 }
                 else
                 {
+#ifdef PORT
+                    /* Mod-side bytecode arrays patch motion_desc->offset to a
+                     * host RAM pointer. On Windows TCC mod blobs land in
+                     * the heap (0x00E00000+ range on this machine), which
+                     * is well above any plausible intra-file offset (vanilla
+                     * Mario's mainmotion file is <100KB so all real offsets
+                     * are <0x100000). Originally compared > 4GB but that
+                     * doesn't trip for Windows TCC heap addresses since
+                     * their high 32 bits are zero. 1MB threshold safely
+                     * separates real file offsets from any mod pointer. */
+                    if ((uintptr_t)motion_desc->offset > 0x100000u)
+                    {
+                        event_script_ptr = (void *)(intptr_t)motion_desc->offset;
+                    }
+                    else
+                    {
+                        event_file_head = (fp->data->p_file_mainmotion != NULL) ? (intptr_t)*fp->data->p_file_mainmotion : 0;
+                        event_script_ptr = (void *)((intptr_t)motion_desc->offset + (intptr_t)event_file_head);
+                    }
+#else
                     event_file_head = *fp->data->p_file_mainmotion;
-
                     event_script_ptr = (void*) ((intptr_t)motion_desc->offset + (intptr_t)event_file_head);
+#endif
                 }
             }
             else event_script_ptr = NULL;
@@ -4769,7 +5136,25 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
         {
             if (motion_desc->offset != 0x80000000)
             {
-                event_script_ptr = (void*) motion_desc->offset;
+#ifdef PORT
+                /* Mod-pointer threshold lowered to 1MB - Windows TCC mod
+                 * blobs land in the 14MB+ heap range, well above any
+                 * plausible intra-file offset (Mario's submotion is also
+                 * <100KB). See the matching change in the mainmotion branch
+                 * above for rationale. */
+                if ((uintptr_t)motion_desc->offset > 0x100000u)
+                {
+                    event_script_ptr = (void *)(intptr_t)motion_desc->offset;
+                }
+                else
+                {
+                    event_file_head = (fp->data->p_file_submotion != NULL) ? (intptr_t)*fp->data->p_file_submotion : 0;
+                    event_script_ptr = (void *)((intptr_t)motion_desc->offset + (intptr_t)event_file_head);
+                }
+#else
+                event_file_head = *fp->data->p_file_submotion;
+                event_script_ptr = (void*) ((intptr_t)motion_desc->offset + (intptr_t)event_file_head);
+#endif
             }
             else event_script_ptr = NULL;
 
@@ -4786,11 +5171,21 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
         }
         if (frame_begin != 0.0F)
         {
+#ifdef PORT
+            port_log("SSB64: ftMainSetStatus - before play forward events status=0x%x motion=%d frame_begin=%f\n",
+                status_id, motion_id, frame_begin);
+#endif
             ftMainPlayAnimEventsForward(fighter_gobj);
         }
         else
         {
+#ifdef PORT
+            port_log("SSB64: ftMainSetStatus - before play all events status=0x%x motion=%d\n", status_id, motion_id);
+#endif
             ftMainPlayAnimEventsAll(fighter_gobj);
+#ifdef PORT
+            port_log("SSB64: ftMainSetStatus - after play all events status=0x%x motion=%d\n", status_id, motion_id);
+#endif
             ftMainRunUpdateColAnim(fighter_gobj);
         }
     }

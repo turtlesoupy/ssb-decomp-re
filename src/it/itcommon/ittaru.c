@@ -1,5 +1,8 @@
 #include <it/item.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -11,7 +14,11 @@ ITDesc dITTaruItemDesc =
 {
     nITKindTaru,                            // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataTaruItemAttributes,      // Offset of item attributes in file?
+#else
     &llITCommonDataTaruItemAttributes,      // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -326,7 +333,11 @@ sb32 itTaruExplodeProcUpdate(GObj *item_gobj)
     {
         return TRUE;
     }
+#ifdef PORT
+    else itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITTaruItemDesc, llITCommonDataTaruAttackEvents));
+#else
     else itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITTaruItemDesc, &llITCommonDataTaruAttackEvents));
+#endif
 
     return FALSE;
 }
@@ -427,7 +438,11 @@ void itTaruExplodeInitVars(GObj *item_gobj)
 
     itMainClearOwnerStats(item_gobj);
     itMainRefreshAttackColl(item_gobj);
+#ifdef PORT
+    itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITTaruItemDesc, llITCommonDataTaruAttackEvents));
+#else
     itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITTaruItemDesc, &llITCommonDataTaruAttackEvents));
+#endif
 }
 
 // 0x8017A2D8

@@ -1,5 +1,9 @@
 #include <gr/ground.h>
 #include <mp/map.h>
+#ifdef PORT
+#include <ef/efground.h>
+#include <it/itmanager.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //

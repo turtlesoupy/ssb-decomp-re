@@ -1,6 +1,14 @@
 #include "common.h"
 #include <n_audio/n_libaudio.h>
 
+#ifdef PORT
+#include <assert.h>
+extern char __alSeqNextDelta(ALSeq *seq, s32 *pDeltaTicks);
+#endif
+
+extern float port_get_music_volume(void); // BGM
+extern float port_get_master_volume(void); // LUS: Add the Master Volume getter!
+
 void __n_seqpStopOsc(N_ALSeqPlayer *seqp, N_ALVoiceState *vs);
 void __n_initChanState(N_ALSeqPlayer *seqp);
 void __n_postNextSeqEvent(N_ALSeqPlayer *seqp);
@@ -195,8 +203,11 @@ s16 __n_vsVol(N_ALVoiceState *vs, N_ALSeqPlayer *seqp)
     t1 *= t2;
     t1 >>= 15;
 
-    return( (s16)t1 );
+    // LUS: Apply the Music AND Master Volume slider percentages
+    t1 = (u32)(t1 * port_get_music_volume() * port_get_master_volume());
 
+    //return( (s16)t1 );
+    return (s16)t1;
 }
 
 // 0x8002E1C4

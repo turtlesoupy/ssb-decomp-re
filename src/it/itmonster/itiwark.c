@@ -2,6 +2,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -14,7 +17,11 @@ ITDesc dITIwarkItemDesc =
 {
     nITKindIwark,                           // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataWarkItemAttributes,      // Offset of item attributes in file?
+#else
     &llITCommonDataWarkItemAttributes,      // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -68,7 +75,11 @@ WPDesc dITIwarkWeaponRockWeaponDesc =
     0x01,                                   // Render flags?
     nWPKindIwarkRock,                       // Weapon Kind
     &gITManagerCommonData,                  // Pointer to weapon's loaded files?
+#ifdef PORT
+    llITCommonDataWarkRockWeaponAttributes,// Offset of weapon attributes in loaded files
+#else
     &llITCommonDataWarkRockWeaponAttributes,// Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -219,7 +230,11 @@ void itIwarkAttackInitVars(GObj *item_gobj)
 
     if (ip->kind == nITKindIwark)
     {
+#ifdef PORT
+        dobj->dl = dl = (Gfx*) itGetPData(ip, llITCommonDataWarkDataStart, llITCommonDataWarkDisplayList);
+#else
         dobj->dl = dl = (Gfx*) itGetPData(ip, &llITCommonDataWarkDataStart, &llITCommonDataWarkDisplayList);
+#endif
 
         pos.y += ITIWARK_IWARK_ADD_POS_Y;
     }
@@ -323,7 +338,11 @@ GObj* itIwarkMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
 
         dobj->translate.vec.f.y -= ip->attr->map_coll_bottom;
 
+#ifdef PORT
+        gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, llITCommonDataWarkDataStart), 0.0F);
+#else
         gcAddDObjAnimJoint(dobj, itGetMonsterAnimNode(ip, &llITCommonDataWarkDataStart), 0.0F);
+#endif
     }
     return item_gobj;
 }

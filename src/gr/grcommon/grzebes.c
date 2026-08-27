@@ -74,7 +74,11 @@ GObj* grZebesMakeAcid(void)
     GObj *map_gobj;
     void *map_head;
 
+#ifdef PORT
+    map_head = (void*) ((uintptr_t)PORT_RESOLVE(gMPCollisionGroundData->map_nodes) - (intptr_t)llGRZebesMapAcidDObjDesc);
+#else
     map_head = (void*) ((uintptr_t)gMPCollisionGroundData->map_nodes - (intptr_t)&llGRZebesMapAcidDObjDesc);
+#endif
     gGRCommonStruct.zebes.map_head = map_head;
 
     map_gobj = gcMakeGObjSPAfter(nGCCommonKindGround, NULL, nGCCommonLinkIDGround, GOBJ_PRIORITY_DEFAULT);
@@ -84,19 +88,32 @@ GObj* grZebesMakeAcid(void)
     gcSetupCustomDObjs
     (
         map_gobj, 
+#ifdef PORT
+        (DObjDesc*) ((intptr_t)llGRZebesMapAcidDObjDesc + (uintptr_t)map_head), 
+#else
         (DObjDesc*) ((intptr_t)&llGRZebesMapAcidDObjDesc + (uintptr_t)map_head), 
+#endif
         NULL, 
         nGCMatrixKindTra, 
         nGCMatrixKindNull,
         nGCMatrixKindNull
     );
+#ifdef PORT
+    gcAddMObjAll(map_gobj, lbRelocGetFileData(MObjSub***, map_head, llGRZebesMapAcidMObjSub));
+#else
     gcAddMObjAll(map_gobj, lbRelocGetFileData(MObjSub***, map_head, &llGRZebesMapAcidMObjSub));
+#endif
     gcAddGObjProcess(map_gobj, gcPlayAnimAll, nGCProcessKindFunc, 5);
     gcAddAnimAll
     (
         map_gobj,
+#ifdef PORT
+        lbRelocGetFileData(AObjEvent32**, map_head, llGRZebesMapAcidAnimJoint),
+        lbRelocGetFileData(AObjEvent32***, map_head, llGRZebesMapAcidMatAnimJoint),
+#else
         lbRelocGetFileData(AObjEvent32**, map_head, &llGRZebesMapAcidAnimJoint),
         lbRelocGetFileData(AObjEvent32***, map_head, &llGRZebesMapAcidMatAnimJoint),
+#endif
         0.0F
     );
     gcPlayAnimAll(map_gobj);
@@ -105,7 +122,11 @@ GObj* grZebesMakeAcid(void)
     gGRCommonStruct.zebes.acid_level_curr = dGRZebesAcidAttributes[ARRAY_COUNT(dGRZebesAcidAttributes) - 1].acid_level;
     gGRCommonStruct.zebes.acid_attr_id = 0;
 
+#ifdef PORT
+    gGRCommonStruct.zebes.attack_coll = lbRelocGetFileData(GRAttackColl*, ((uintptr_t)gMPCollisionGroundData - (intptr_t)llGRZebesMapMapHeader), llGRZebesMapAcidGRAttackColl);
+#else
     gGRCommonStruct.zebes.attack_coll = lbRelocGetFileData(GRAttackColl*, ((uintptr_t)gMPCollisionGroundData - (intptr_t)&llGRZebesMapMapHeader), &llGRZebesMapAcidGRAttackColl);
+#endif
 
     grZebesAcidSetRandomWait();
 

@@ -7,8 +7,16 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <it/itmanager.h>
+#include <sys/debug.h>
+#include <wp/wpmanager.h>
 
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+extern void port_log(const char *fmt, ...);
+extern char *getenv(const char *name);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -33,7 +41,7 @@ FTKeyEvent dMVOpeningDonkeyKeyEvents[/* */] =
 };
 
 // 0x8018E0BC
-u32 dMVOpeningDonkeyFileIDs[/* */] = { &llIFCommonAnnounceCommonFileID, &llMVOpeningCommonFileID };
+u32 dMVOpeningDonkeyFileIDs[/* */] = { llIFCommonAnnounceCommonFileID, llMVOpeningCommonFileID };
 
 // // // // // // // // // // // //
 //                               //
@@ -98,7 +106,7 @@ void mvOpeningDonkeySetupFiles(void)
 	LBRelocSetup rl_setup;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-	rl_setup.table_files_num = (u32)&llRelocFileCount;
+	rl_setup.table_files_num = (u32)llRelocFileCount;
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sMVOpeningDonkeyStatusBuffer;
@@ -133,8 +141,8 @@ void mvOpeningDonkeyMakeName(void)
 #if defined (REGION_US)
 	intptr_t offsets[/* */] =
 	{
-		&llIFCommonAnnounceCommonLetterDSprite,
-		&llIFCommonAnnounceCommonLetterKSprite,
+		llIFCommonAnnounceCommonLetterDSprite,
+		llIFCommonAnnounceCommonLetterKSprite,
 		0x0
 	};
 	Vec2f pos[/* */] =
@@ -145,16 +153,16 @@ void mvOpeningDonkeyMakeName(void)
 #else
 	intptr_t offsets[/* */] =
 	{
-		&llIFCommonAnnounceCommonLetterDSprite,
-		&llIFCommonAnnounceCommonLetterOSprite,
-		&llIFCommonAnnounceCommonLetterNSprite,
-		&llIFCommonAnnounceCommonLetterKSprite,
-		&llIFCommonAnnounceCommonLetterESprite,
-		&llIFCommonAnnounceCommonLetterYSprite,
-		&llIFCommonAnnounceCommonLetterKSprite,
-		&llIFCommonAnnounceCommonLetterOSprite,
-		&llIFCommonAnnounceCommonLetterNSprite,
-		&llIFCommonAnnounceCommonLetterGSprite,
+		llIFCommonAnnounceCommonLetterDSprite,
+		llIFCommonAnnounceCommonLetterOSprite,
+		llIFCommonAnnounceCommonLetterNSprite,
+		llIFCommonAnnounceCommonLetterKSprite,
+		llIFCommonAnnounceCommonLetterESprite,
+		llIFCommonAnnounceCommonLetterYSprite,
+		llIFCommonAnnounceCommonLetterKSprite,
+		llIFCommonAnnounceCommonLetterOSprite,
+		llIFCommonAnnounceCommonLetterNSprite,
+		llIFCommonAnnounceCommonLetterGSprite,
 		0x0
 	};
 
@@ -448,7 +456,7 @@ void mvOpeningDonkeyMakePosedFighterCamera(void)
 	
 	cobj->projection.persp.aspect = 5.0F / 11.0F;
 
-	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningDonkeyFiles[1], &llMVOpeningCommonDonkeyCamAnimJoint), 0.0F);
+	gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningDonkeyFiles[1], llMVOpeningCommonDonkeyCamAnimJoint), 0.0F);
 	gcAddGObjProcess(camera_gobj, gcPlayCamAnim, nGCProcessKindFunc, 1);
 }
 
@@ -482,6 +490,18 @@ void mvOpeningDonkeyMakePosedWallpaperCamera(void)
 void mvOpeningDonkeyFuncRun(GObj *gobj)
 {
 	sMVOpeningDonkeyTotalTimeTics++;
+
+#ifdef PORT
+	if (getenv("SSB64_TRACE_INTRO_ANIM") && sMVOpeningDonkeyFighterGObj != NULL) {
+		FTStruct *fp = ftGetStruct(sMVOpeningDonkeyFighterGObj);
+		port_log("SSB64: mvOpeningDonkeyRun tic=%d status=0x%x motion=%d hitlag=%u fgobj_anim_frame=%f\n",
+			(int)sMVOpeningDonkeyTotalTimeTics,
+			fp ? (unsigned)fp->status_id : 0,
+			fp ? (int)fp->motion_id : -1,
+			fp ? (unsigned)fp->hitlag_tics : 0,
+			sMVOpeningDonkeyFighterGObj->anim_frame);
+	}
+#endif
 
 	if (scSubsysControllerGetPlayerTapButtons(A_BUTTON | B_BUTTON | START_BUTTON))
 	{
@@ -549,6 +569,9 @@ void mvOpeningDonkeyFuncStart(void)
 
 	while (sySchedulerGetTicCount() < 1605)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 }

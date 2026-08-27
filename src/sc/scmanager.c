@@ -1,3 +1,11 @@
+#ifdef PORT
+#include <port_log.h>
+#ifdef PORT
+extern char *getenv(const char *name);
+extern int atoi(const char *s);
+extern void port_coroutine_yield(void);
+#endif
+#endif
 #include <ft/fighter.h>
 #include <wp/weapon.h>
 #include <it/item.h>
@@ -11,6 +19,12 @@
 #include <sys/audio.h>
 #include <sys/video.h>
 #include <sys/controller.h>
+#include <sys/netpeer.h>
+#include <sys/netreplay.h>
+#ifdef PORT
+#include <gr/ground.h>
+#include <sys/objman.h>
+#endif
 
 extern void mnVSModeStartScene();
 
@@ -812,11 +826,88 @@ char dSCManagerBuildDate[/* */] = { "Dec 23 1998 18:06:24" };
 //                               //
 // // // // // // // // // // // //
 
+#ifdef PORT
+/* PORT: range-check the battle state against each field's documented domain
+ * immediately before a match starts.
+ *
+ * Routing preset construction through the menus' own commit functions (see
+ * the SSB64_BOOT_BATTLE block in scManagerRunLoop) removes *derivation*
+ * drift, but it cannot catch a *unit* mistake in whatever is still assigned
+ * directly. This function exists because of one: SSB64_BOOT_BATTLE set
+ * damage_ratio to 2 — a perfectly legal u8, but the field is a literal
+ * percent with domain 50..200, so knockback ran at 2% and no move in the
+ * game could launch anyone at any percent. Nothing crashed, nothing looked
+ * wrong in a static read, and it survived three weeks of screenshot evals.
+ * A loud log line on the first boot would have ended it immediately.
+ *
+ * Reports only, with one exception: an out-of-range per-player handicap is
+ * clamped, because ftParamGetCommonKnockback() indexes
+ * dFTCommonDataHandicapTable[handicap - 1] with no bound check, making 0 an
+ * out-of-bounds read rather than merely a wrong multiplier. */
+static void portValidateBattleState(const char *where)
+{
+	SCBattleState *bs = &gSCManagerTransferBattleState;
+	s32 i;
+
+	if ((bs->damage_ratio < 50) || (bs->damage_ratio > 200))
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): damage_ratio=%d outside 50..200 — "
+		         "this field is a literal percent and scales ALL knockback\n",
+		         where, (int)bs->damage_ratio);
+	}
+	if (bs->stocks > 4)
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): stocks=%d outside 0..4 (value is 0-based)\n",
+		         where, (int)bs->stocks);
+	}
+	if (bs->handicap >= nSCBattleHandicapEnumCount)
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): handicap=%d outside 0..%d\n",
+		         where, (int)bs->handicap, (int)nSCBattleHandicapEnumCount - 1);
+	}
+	if (bs->item_appearance_rate >= nSCBattleItemSwitchEnumCount)
+	{
+		port_log("SSB64: !!! BATTLESTATE (%s): item_appearance_rate=%d outside 0..%d\n",
+		         where, (int)bs->item_appearance_rate, (int)nSCBattleItemSwitchEnumCount - 1);
+	}
+
+	for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+	{
+		SCPlayerData *pd = &bs->players[i];
+
+		if (pd->pkind == nFTPlayerKindNot)
+		{
+			continue;
+		}
+		if ((pd->level < 1) || (pd->level > 9))
+		{
+			port_log("SSB64: !!! BATTLESTATE (%s): p%d level=%d outside 1..9\n",
+			         where, (int)i, (int)pd->level);
+		}
+		if (pd->tag > GMCOMMON_PLAYERS_MAX)
+		{
+			port_log("SSB64: !!! BATTLESTATE (%s): p%d tag=%d outside 0..%d\n",
+			         where, (int)i, (int)pd->tag, (int)GMCOMMON_PLAYERS_MAX);
+		}
+		if ((pd->handicap < 1) || (pd->handicap > dFTCommonDataHandicapTableCount))
+		{
+			port_log("SSB64: !!! BATTLESTATE (%s): p%d handicap=%d outside 1..%d — "
+			         "clamping to %d to avoid an out-of-bounds knockback-table read\n",
+			         where, (int)i, (int)pd->handicap,
+			         (int)dFTCommonDataHandicapTableCount, (int)FTCOMMON_HANDICAP_DEFAULT);
+
+			pd->handicap = FTCOMMON_HANDICAP_DEFAULT;
+		}
+	}
+}
+#endif
 // 0x800A1980
 void scManagerRunLoop(sb32 arg)
 {
+#ifndef PORT
 	u16 *framebuffer;
 	uintptr_t end;
+#endif
 
 	syControllerSetStatusDelay(60);
 
@@ -837,21 +928,39 @@ void scManagerRunLoop(sb32 arg)
 	ftManagerSetupFileSize();
 	dSYAudioPublicSettings.unk31 = 72;
 
+	/* Wait for the audio thread to finish its settings-update restart
+	 * (n_alClose -> portAudioLoadAssets -> syAudioMakeBGMPlayers -> clear
+	 * dSYAudioIsSettingsUpdated) before dispatching the first scene.
+	 * Skipping it lets syAudioPlayBGM race the restart: on JP the first
+	 * scene is nSCKindOpeningRoom immediately (no ~3 s nSCKindStartup to
+	 * mask it as on US), so syAudioStopBGMAll() wipes the queued BGM and
+	 * the attract music is silent. See
+	 * docs/bugs/jp_attract_music_settings_update_race_2026-05-18.md.
+	 * PORT swaps the N64 busy-spin for a cooperative yield — the same
+	 * idiom as the scautodemo / scvsbattle BGM waits. */
 	syAudioSetSettingsUpdated();
 
 	while (syAudioGetSettingsUpdated() != FALSE)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 	syAudioSetFXType(AL_FX_CUSTOM);
 
 	while (syAudioGetRestarting() != FALSE)
 	{
+#ifdef PORT
+		port_coroutine_yield();
+#endif
 		continue;
 	}
 	lbBackupIsSramValid();
 	lbBackupApplyOptions();
 
+#ifndef PORT
+	/* N64 only — no physical framebuffers on PC; Fast3D manages them. */
 	framebuffer = (u16*) gSYFramebufferSets;
 	end = 0x80400000;
 
@@ -859,12 +968,360 @@ void scManagerRunLoop(sb32 arg)
 	{
 		*framebuffer++ = GPACK_RGBA5551(0x00, 0x00, 0x00, 0x01);
 	}
+#endif
 	if (gSYControllerConnectedNum == 0)
 	{
 		gSCManagerSceneData.scene_curr = nSCKindNoController;
 	}
+#ifdef PORT_STAGE_CYCLE_DEMO
+	gSCManagerSceneData.scene_curr    = nSCKindAutoDemo;
+	gSCManagerSceneData.scene_prev    = nSCKindAutoDemo;
+	gSCManagerSceneData.demo_fkind[0] = nFTKindMario;
+	gSCManagerSceneData.demo_fkind[1] = nFTKindFox;
+#endif
+#ifdef PORT
+	/* Classic Co-op handoff defaults to "no P2". BSS zero-init would read
+	 * as port 0, which is a valid port — the sentinel must be explicit.
+	 * The co-op CSS rewrites this on every Classic entry. */
+	gSCManagerSceneData.coop_player2 = SCCOMMON_COOP_NO_PLAYER2;
+	{
+		const char *env = getenv("SSB64_START_SCENE");
+		if (env != NULL)
+		{
+			int n = atoi(env);
+			gSCManagerSceneData.scene_curr = n;
+			gSCManagerSceneData.scene_prev = n;
+			/* The override jumps the player into a scene that they may
+			 * not have unlocked yet (e.g. nSCKindSoundTest requires
+			 * LBBACKUP_UNLOCK_MASK_SOUNDTEST). Several menus assume
+			 * scene_prev only ever names a reachable scene, and gate
+			 * GObj creation on the matching unlock bit. Visiting Sound
+			 * Test on a fresh save and pressing B otherwise drops back
+			 * into the Data menu with sMNDataOption=SoundTest but
+			 * sMNDataOptionSoundTestGObj=NULL → SIGSEGV. Granting all
+			 * unlocks alongside the scene override keeps backup-mask
+			 * state consistent with where the user told us to start. */
+			gSCManagerBackupData.unlock_mask |= LBBACKUP_UNLOCK_MASK_ALL;
+			/* the CSS keys hidden tiles off fighter_mask, not unlock_mask —
+			 * grant the four unlockables too so injected characters on
+			 * Luigi/Captain/Ness/Purin slots are pickable in demo boots. */
+			gSCManagerBackupData.fighter_mask |= (u16)((1 << nFTKindLuigi) | (1 << nFTKindCaptain) |
+			                                           (1 << nFTKindNess) | (1 << nFTKindPurin));
+			port_log("SSB64: SSB64_START_SCENE override → scene=%d (unlock_mask |= ALL)\n", n);
+		}
+		const char *stage_env = getenv("SSB64_SPGAME_STAGE");
+		if (stage_env != NULL)
+		{
+			int s = atoi(stage_env);
+			gSCManagerSceneData.spgame_stage = s;
+			port_log("SSB64: SSB64_SPGAME_STAGE override → spgame_stage=%d (13=Boss/MasterHand)\n", s);
+		}
+		const char *fkind_env = getenv("SSB64_SPGAME_FKIND");
+		if (fkind_env != NULL)
+		{
+			int f = atoi(fkind_env);
+			gSCManagerSceneData.fkind = f;
+			port_log("SSB64: SSB64_SPGAME_FKIND override → fkind=%d\n", f);
+		}
+		/* Classic Co-op debug: inject a P2 handoff without going through
+		 * the CSS, for direct-boot testing of the co-op game side, e.g.
+		 *   SSB64_START_SCENE=52 SSB64_COOP_P2=1 SSB64_COOP_P2_FKIND=5 */
+		const char *coop_env = getenv("SSB64_COOP_P2");
+		if (coop_env != NULL)
+		{
+			const char *coop_fkind_env = getenv("SSB64_COOP_P2_FKIND");
+			gSCManagerSceneData.coop_player2 = (u8)atoi(coop_env);
+			gSCManagerSceneData.coop_fkind2 = (u8)((coop_fkind_env != NULL) ? atoi(coop_fkind_env) : 1);
+			gSCManagerSceneData.coop_costume2 = 0;
+			gSCManagerSceneData.coop_shade2 = 0;
+			port_log("SSB64: SSB64_COOP_P2 override → P2 port=%d fkind=%d\n",
+			         (int)gSCManagerSceneData.coop_player2, (int)gSCManagerSceneData.coop_fkind2);
+		}
+		syNetReplayInitDebugEnv();
+		syNetPeerInitDebugEnv();
+	}
+
+	// boot straight to CSS if enabled
+	extern int port_enhancement_boot_to_vs_css(void);
+	if (port_enhancement_boot_to_vs_css())
+	{
+		// Overwrite the starting scene
+		gSCManagerSceneData.scene_curr = nSCKindPlayersVS;
+		gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
+	}
+
+	/* OpenSmash pipeline: SSB64_BOOT_BATTLE="p1fkind,p2fkind,gkind[,p2kind[,p3fkind,p4fkind]]"
+	 * boots straight into a VS match (P1 human, P2 CPU lv1 by default,
+	 * 5 stock, no timer) — the mesh-iteration shortcut: no intro, no
+	 * menus. Optional 4th field makes P2 human (0=HMN, 1=CPU) so a
+	 * scripted SSB64_REPLAY_PLAY input file can drive both fighters.
+	 * Optional fields 5/6 add CPU players 3/4 (fkind, -1 = absent) for
+	 * multi-injection demo matches.
+	 *
+	 * The preset is expressed as character-select and VS-options *inputs*,
+	 * then committed through the same two functions the menus use:
+	 * mnPlayersVSSetSceneData() and mnVSOptionsSetAllSettings(). Nothing
+	 * here derives a battle-state field by hand.
+	 *
+	 * That structure is load-bearing. The previous version hand-wrote the
+	 * whole struct and drifted from the menu path in two ways: it set
+	 * damage_ratio to 2 — a legal u8, but the field is a literal percent
+	 * with domain 50..200, so every hit in the game landed at 2% knockback
+	 * and nothing could ever be launched at any percent — and it never set
+	 * is_single_stockicon at all, leaving the time-mode default on a stock
+	 * match. Both classes vanish when the derivation has exactly one owner.
+	 * Fields the two commit functions do not own follow as an explicit,
+	 * commented delta list. */
+	{
+		extern char *getenv(const char *);
+		extern int sscanf(const char *, const char *, ...);
+		const char *bb = getenv("SSB64_BOOT_BATTLE");
+		if (bb != NULL)
+		{
+			/* CSS and VS-options input globals; no header exports these. */
+			extern MNPlayersSlotVS sMNPlayersVSSlots[GMCOMMON_PLAYERS_MAX];
+			extern s32 sMNPlayersVSTimeValue;
+			extern s32 sMNPlayersVSStockValue;
+			extern sb32 sMNPlayersVSIsTeamBattle;
+			extern sb32 sMNPlayersVSGameRule;
+			extern s32 sMNVSOptionsHandicapStatus;
+			extern s32 sMNVSOptionsTeamAttackStatus;
+			extern s32 sMNVSOptionsStageSelectStatus;
+			extern s32 sMNVSOptionsDamage;
+
+			int p1 = 0, p2 = 8, gk = 4; /* defaults: Mario vs Kirby, Dream Land */
+			int p2kind = 1;             /* default: CPU */
+			int p3 = -1, p4 = -1;       /* optional CPU players 3/4 */
+			int fks[4];
+			int i;
+			sscanf(bb, "%d,%d,%d,%d,%d,%d", &p1, &p2, &gk, &p2kind, &p3, &p4);
+			fks[0] = p1; fks[1] = p2; fks[2] = p3; fks[3] = p4;
+
+			/* ---- character-select inputs ---- */
+			sMNPlayersVSGameRule     = SCBATTLE_GAMERULE_STOCK;
+			sMNPlayersVSStockValue   = 4;                          /* 0-based: 5 stocks */
+			sMNPlayersVSTimeValue    = SCBATTLE_TIMELIMIT_INFINITE;
+			sMNPlayersVSIsTeamBattle = FALSE;
+
+			/* Clear the board first. mnPlayersVSGetFreeCostume() below scans
+			 * the *other* slots for an already-taken costume on the same
+			 * fighter, so any stale fkind/costume left over from a previous
+			 * character-select session would skew the allocation. */
+			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+			{
+				sMNPlayersVSSlots[i].fkind   = nFTKindNull;
+				sMNPlayersVSSlots[i].costume = 0;
+			}
+
+			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+			{
+				MNPlayersSlotVS *slot = &sMNPlayersVSSlots[i];
+
+				/* Only the fields mnPlayersVSSetSceneData() reads. The slot
+				 * struct also holds live GObj pointers owned by the CSS, so
+				 * this must stay a targeted fill, never a blanket clear. */
+				slot->pkind = (i == 0) ? nFTPlayerKindMan
+				            : (i == 1) ? ((p2kind == 0) ? nFTPlayerKindMan : nFTPlayerKindCom)
+				            : (fks[i] >= 0) ? nFTPlayerKindCom : nFTPlayerKindNot;
+				slot->fkind = (fks[i] >= 0) ? fks[i] : nFTKindNull;
+
+				/* Assigning in port order reproduces the character-select's
+				 * incremental picking: slots below this one already hold a
+				 * real fighter and costume, slots above are still nFTKindNull
+				 * and cannot collide. Without this a ditto match booted two
+				 * identically-coloured fighters — the CSS never does that. */
+				slot->costume = (fks[i] >= 0) ? mnPlayersVSGetFreeCostume(slot->fkind, i) : 0;
+				slot->shade   = 0;
+				slot->team    = i;
+
+				/* Inherited rather than restated, exactly as the CSS seeds it
+				 * (mnplayersvs.c: sMNPlayersVSSlots[p].cpu_level =
+				 * ...players[p].level). Default battle state says 3; the old
+				 * hardcoded 1 made CPUs barely fight. port_enhancement_cpu_level_9()
+				 * still overrides this at VSBattle entry when enabled. */
+				slot->cpu_level = gSCManagerTransferBattleState.players[i].level;
+				slot->handicap  = FTCOMMON_HANDICAP_DEFAULT;
+			}
+
+			/* ---- VS-options inputs ---- */
+			sMNVSOptionsHandicapStatus    = nSCBattleHandicapOff;
+			sMNVSOptionsTeamAttackStatus  = FALSE;
+			sMNVSOptionsStageSelectStatus = gSCManagerTransferBattleState.is_stage_select;
+			sMNVSOptionsDamage            = 100; /* literal percent; menu domain is 50..200 */
+
+			/* ---- commit through the real writers ----
+			 * Order matters: SetAllSettings() normalizes every player's
+			 * handicap to FTCOMMON_HANDICAP_DEFAULT when the handicap
+			 * setting is Off, which has to land after SetSceneData() has
+			 * written the per-player rows. */
+			mnPlayersVSSetSceneData();   /* rules, stocks, and all derived per-player
+			                              * fields: player, color, tag,
+			                              * is_single_stockicon, level, handicap,
+			                              * plus pl_count / cp_count */
+			mnVSOptionsSetAllSettings(); /* handicap mode, team attack, stage select,
+			                              * damage_ratio */
+
+			/* ---- deltas the commit functions do not own ---- */
+			gSCManagerTransferBattleState.game_type = nSCBattleGameTypeRoyal;
+			gSCManagerTransferBattleState.gkind = (u8)gk;
+
+			/* Items are deliberately NOT set here. dSCManagerDefaultBattleState
+			 * is copied into TransferBattleState at the top of this function,
+			 * so leaving them alone inherits the vanilla defaults — every item
+			 * enabled (item_toggles ~0) at Middle appearance rate, exactly what
+			 * a fresh boot through the menus gives you. This preset is a play
+			 * path first; it should differ from booting normally only where it
+			 * has to (who fights, where, and the stock ruleset below). */
+			if (p2kind == 0)
+			{
+				/* Eval mode is the one exception. Both slots human means the
+				 * match is driven by a scripted SSB64_REPLAY_PLAY input file
+				 * for screenshot diffing, and item spawns are RNG-driven — a
+				 * crate drifting into frame makes frame-N captures differ run
+				 * to run and defeats the harness. Same condition that forces
+				 * the CP tag below, for the same reason. */
+				gSCManagerTransferBattleState.item_toggles = 0;
+				gSCManagerTransferBattleState.item_appearance_rate = nSCBattleItemSwitchNone;
+			}
+
+			for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+			{
+				SCPlayerData *pd = &gSCManagerTransferBattleState.players[i];
+
+				/* Not written by the VS path at all (vanilla leaves the
+				 * default in place); -1 is the "slot has no stocks"
+				 * sentinel the HUD keys off in ifcommon.c. */
+				pd->stock_count = (i <= 1 || fks[i] >= 0) ? 4 : -1;
+
+				/* DELIBERATE demo deviation: vanilla gives every CPU the
+				 * shared grey CP color, which makes a four-way injection
+				 * demo unreadable. Keep one distinct HUD color per port. */
+				pd->color = (u8)i;
+			}
+
+			/* DELIBERATE eval deviation: with both slots human the real path
+			 * assigns the 1P/2P tags; force the CP tag on both so screenshot
+			 * baselines stay stable across runs. Note this shows "CP" rather
+			 * than hiding the tag — index GMCOMMON_PLAYERS_MAX is
+			 * nIFPlayerTagKindCP, not a blank sprite. */
+			if (p2kind == 0)
+			{
+				gSCManagerTransferBattleState.players[0].tag =
+				gSCManagerTransferBattleState.players[1].tag = (u8)GMCOMMON_PLAYERS_MAX;
+			}
+
+			gSCManagerSceneData.gkind = (u8)gk;
+			if (getenv("SSB64_START_SCENE") == NULL)
+			{
+				gSCManagerSceneData.scene_curr = nSCKindVSBattle;
+				gSCManagerSceneData.scene_prev = nSCKindPlayersVS;
+			}
+			else
+			{
+				/* CSS-preset mode: SSB64_START_SCENE (16 = VS CSS) keeps the
+				 * scene override, and the select screen restores this roster
+				 * with every token pre-placed (mnPlayersVSInitPlayer reads
+				 * TransferBattleState when is_reset_players is clear). Use
+				 * fkind -1 for a slot the player should pick live. */
+				gSCManagerTransferBattleState.is_reset_players = FALSE;
+			}
+			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d damage_ratio=%d\n",
+			         p1, p2, gk, p2kind, p3, p4,
+			         (int)gSCManagerTransferBattleState.damage_ratio);
+		}
+	}
+	port_log("SSB64: scManagerRunLoop — controllers=%d scene=%d\n",
+	         (int)gSYControllerConnectedNum, (int)gSCManagerSceneData.scene_curr);
+#endif
 	while (TRUE)
 	{
+#ifdef PORT
+		/* Console reset: consume a pending reset (re-applies the target
+		 * scene and clears the flag) before dispatching. For top-level
+		 * scenes this is where the reset lands; for 1P sub-scenes the
+		 * sc1pmanager.c guards consumed it already and this is a no-op. */
+		{
+			extern sb32 portSCManagerConsumeReset(void);
+			portSCManagerConsumeReset();
+		}
+
+		port_log("SSB64: scManagerRunLoop — entering scene %d\n",
+		         (int)gSCManagerSceneData.scene_curr);
+
+		/* Issue #103 defence: clear cross-scene GObj pointers in the three
+		 * persistent battle-state structs before dispatching the next scene.
+		 * `fighter_gobj` is the only field in SCPlayerData that holds a host
+		 * pointer; it's set at fighter spawn (ftparam.c:197 in movie scenes,
+		 * and via FTStruct linkage in the regular battle path), survives the
+		 * battle scene's arena, and is read across scenes in callbacks like
+		 * ftshadow.c:107 and ftcomputer.c:5623. With taskman.c's prev-arena
+		 * free in place those reads now SIGSEGV at the read site instead of
+		 * hitting plausible-looking stale data. NULL the slot at the scene
+		 * boundary so the read just yields NULL (which the consumers already
+		 * gate on, e.g. controller.c:208). */
+		for (s32 _p = 0; _p < GMCOMMON_PLAYERS_MAX; _p++) {
+			gSCManager1PGameBattleState.players[_p].fighter_gobj = NULL;
+			gSCManagerTransferBattleState.players[_p].fighter_gobj = NULL;
+			gSCManagerTransferBattleState.players[_p].fighter_gobj = NULL;
+		}
+
+		/* Zebes acid + efManagerMakeEffect stale-dl_link family
+		 * (docs/bugs/zebes_acid_effect_stale_dl_link_holder_2026-05-23.md):
+		 * scene routines do not eject their own GObjs on exit — there are no
+		 * per-stage teardown hooks, and the existing gcEjectAll() sweep only
+		 * runs at task boundaries (taskman.c:1185, 1203), not between the
+		 * intra-task scene transitions that the attract demo cycles through.
+		 * The previous scene's stage / effect GObjs therefore stay linked in
+		 * gGCCommonLinks[], their DObj subtrees keep pointing at dl_link
+		 * memory in the recycled scene arena, and on the next frame the
+		 * renderer walks freed bytes — the defensive guard in
+		 * gcDrawDObjTreeDLLinks bails with "stale dl_link" and the entire
+		 * subtree drops (visible: particle / stage geometry corruption that
+		 * persists across the attract → title → match transition).
+		 *
+		 * Eject every linked GObj here, before the next scene's start routine
+		 * runs. Per objdef.h::GObjLinkID, every link kind is scene-scoped: no
+		 * GObj is documented to survive a scene transition. We mirror the
+		 * body of gcEjectAll() (objhelper.c:465) inline so we can clamp any
+		 * non-progress — gcEjectGObj refuses to drop gGCCurrentCommon, which
+		 * shouldn't be set between scenes but is cheap to guard against. The
+		 * existing GOBJ_PORT_EJECTED_SENTINEL guard in gcEjectGObj handles a
+		 * stage routine that already self-ejected (e.g. grHyruleTwister at
+		 * grhyrule.c:334) — that GObj is no longer in the link, so the sweep
+		 * just doesn't see it. */
+		{
+			s32 _link;
+			for (_link = 0; _link < ARRAY_COUNT(gGCCommonLinks); _link++) {
+				GObj *_head;
+				s32 _guard = 0;
+				while ((_head = gGCCommonLinks[_link]) != NULL) {
+					gcEjectGObj(_head);
+					if (gGCCommonLinks[_link] == _head) {
+						port_log("SSB64: scManagerRunLoop scene-boundary GObj "
+						         "sweep — no progress link=%d head=%p, breaking\n",
+						         (int)_link, (void*)_head);
+						break;
+					}
+					if (++_guard > 4096) {
+						port_log("SSB64: scManagerRunLoop scene-boundary GObj "
+						         "sweep — runaway link=%d, breaking\n",
+						         (int)_link);
+						break;
+					}
+				}
+			}
+		}
+
+		/* gGRCommonStruct is a union of per-stage var blobs; the cached GObj*
+		 * slots (zebes.map_gobj, hyrule.twister_gobj, jungle.tarucann_gobj,
+		 * castle.bumper_gobj, yamabuki.{gate,monster}_gobj, pupupu.map_gobj[],
+		 * inishie.{pakkun,pblock}_gobj, ...) all overlay one another. The
+		 * GObjs they cached were just ejected above; null the holders so
+		 * nothing (e.g. a stale subsystem callback that survived eject)
+		 * dereferences a freed slot before the next stage init repopulates
+		 * the union from scratch. */
+		memset(&gGRCommonStruct, 0, sizeof(gGRCommonStruct));
+#endif
 		switch (gSCManagerSceneData.scene_curr)
 		{
 			case nSCKindNoController:
@@ -997,6 +1454,17 @@ void scManagerRunLoop(sb32 arg)
 				syDmaLoadOverlay(&dSCManagerOverlays[1]);
 				syDmaLoadOverlay(&dSCManagerOverlays[26]);
 				mnPlayersVSStartScene();
+
+				// skip stage select
+				{
+					extern int port_get_comp_ruleset(void);
+					if (port_get_comp_ruleset() && gSCManagerSceneData.scene_curr == nSCKindMaps)
+					{
+						gSCManagerSceneData.gkind = nGRKindPupupu;
+						gSCManagerTransferBattleState.gkind = nGRKindPupupu;
+						gSCManagerSceneData.scene_curr = nSCKindVSBattle;
+					}
+				}
 				break;
 
 			case nSCKindMaps:
@@ -1009,7 +1477,88 @@ void scManagerRunLoop(sb32 arg)
 				syDmaLoadOverlay(&dSCManagerOverlays[2]);
 				syDmaLoadOverlay(&dSCManagerOverlays[3]);
 				syDmaLoadOverlay(&dSCManagerOverlays[4]);
+
+				// apply competitive ruleset
+				{
+					extern int port_get_comp_ruleset(void);
+					if (port_get_comp_ruleset())
+					{
+						int i;
+						extern __typeof__(gSCManagerTransferBattleState) gSCManagerVSBattleState;
+
+						gSCManagerTransferBattleState.game_rules = 0x2; // Stock Mode
+						gSCManagerTransferBattleState.time_limit = 8; // 8 minutes
+						gSCManagerTransferBattleState.stocks = 3; // 4 Stocks
+						gSCManagerTransferBattleState.is_show_score = FALSE;
+						gSCManagerTransferBattleState.item_toggles = 0; // No Items
+						gSCManagerTransferBattleState.item_appearance_rate = nSCBattleItemSwitchNone;
+						gSCManagerTransferBattleState.gkind = nGRKindPupupu; // Dream Land
+
+						// set Team Attack to ON
+						if (gSCManagerTransferBattleState.is_team_battle == TRUE)
+						{
+							gSCManagerTransferBattleState.is_team_attack = TRUE;
+						}
+
+						gSCManagerTransferBattleState.game_rules = 0x2;
+						gSCManagerTransferBattleState.time_limit = 0;
+						gSCManagerTransferBattleState.stocks = 3;
+						gSCManagerTransferBattleState.gkind = nGRKindPupupu;
+
+						for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+						{
+							if (gSCManagerTransferBattleState.players[i].pkind != 2)
+							{
+								gSCManagerTransferBattleState.players[i].stock_count = 3;
+								gSCManagerTransferBattleState.players[i].is_single_stockicon = FALSE;
+								gSCManagerTransferBattleState.players[i].falls = 0;
+								gSCManagerTransferBattleState.players[i].score = 0;
+							}
+						}
+					}
+					else
+					{
+						// vanilla timer fix
+						if (!(gSCManagerTransferBattleState.game_rules & 0x1))
+						{
+							gSCManagerTransferBattleState.time_limit = 0; // Infinite Time
+						}
+					}
+				}
+
+				// force default CPU level to 9 if checked
+				{
+					extern int port_enhancement_cpu_level_9(void);
+					if (port_enhancement_cpu_level_9())
+					{
+						int i;
+						for (i = 0; i < GMCOMMON_PLAYERS_MAX; i++)
+						{
+							// 1 = nFTPlayerKindCom (Slot is a CPU)
+							if (gSCManagerTransferBattleState.players[i].pkind == 1)
+							{
+								gSCManagerTransferBattleState.players[i].level = 9;
+							}
+						}
+					}
+				}
+
+				/* Last point at which the battle state is still mutable —
+				 * after the boot-battle preset, the CSS handoff, and the
+				 * competitive-ruleset override have all had their say. */
+				portValidateBattleState("VSBattle");
+
 				scVSBattleStartScene();
+
+				// clean up timer
+				{
+					extern int port_get_comp_ruleset(void);
+					if (port_get_comp_ruleset())
+					{
+						extern __typeof__(gSCManagerTransferBattleState) gSCManagerVSBattleState;
+						gSCManagerTransferBattleState.time_limit = SCBATTLE_TIMELIMIT_INFINITE;
+					}
+				}
 				break;
 
 			case nSCKindUnknownMario:
@@ -1465,7 +2014,11 @@ void scManagerInspectGObj(GObj *gobj)
         ep = efGetStruct(gobj);
 
         // Check if address is within base RDRAM + expansion pak bounds (why though!?)
+#ifdef PORT
+        if (ep != NULL)
+#else
         if (((uintptr_t)ep >= 0x80000000) && ((uintptr_t)ep < 0x80800000))
+#endif
         {
             syDebugDebugPrintf("effect\n");
             syDebugDebugPrintf("fgobj:%x", ep->fighter_gobj);
@@ -1552,3 +2105,76 @@ void scManagerRunPrintGObjStatus(void)
 {
 	syDebugRunFuncPrint(scManagerFuncPrint);
 }
+
+#ifdef PORT
+/* In-game reset for the port's ESC-menu Reset button / Ctrl+Cmd-R console
+ * "reset" command (registered in port/port.cpp). Mirrors what every scene's
+ * own exit path does (see sc1pintro.c, sc1pstageclear.c, scvsbattle.c):
+ * wind down audio, point scene_curr at the target scene, and ask the task
+ * manager to end the current scene at the frame boundary. scManagerRunLoop
+ * then runs its normal scene-boundary cleanup (GObj sweep, stale-pointer
+ * nulling) before entering the target — the same code path as any regular
+ * scene transition.
+ *
+ * The reset is STICKY (sPortResetPending + target) because 1P mode runs a
+ * nested scene chain: sc1PManagerUpdateScene dispatches sub-scenes back to
+ * back and rewrites scene_curr itself between them, so a plain scene_curr
+ * write gets clobbered and the manager chains into the next stage intro
+ * against half-torn-down battle state (crashed in
+ * ftManagerSetupFilesAllKind). sc1pmanager.c checks
+ * portSCManagerConsumeReset() after every sub-scene call and bails out to
+ * scManagerRunLoop; scManagerRunLoop consumes any remaining pending reset
+ * at the top of its dispatch loop (the top-level-scene case).
+ *
+ * The target mirrors the port's boot flow: nSCKindOpeningRoom (the port
+ * skips the ~3 s nSCKindStartup — see scManagerRunLoop), overridden to the
+ * VS character select when the Boot-to-CSS enhancement is active, exactly
+ * like boot. Safe to call from the ImGui/menu context: the port runs game
+ * and UI cooperatively on one coroutine, and the writes here are plain
+ * stores that taskman/scmanager consume at the next frame boundary. */
+static ub32 sPortResetPending = FALSE;
+static s32 sPortResetTarget = nSCKindOpeningRoom;
+
+void portSCManagerRequestReset(void)
+{
+	extern void func_800266A0_272A0(void); /* audio wind-down used by every scene exit */
+	extern int port_enhancement_boot_to_vs_css(void);
+
+	sPortResetTarget = port_enhancement_boot_to_vs_css() ? nSCKindPlayersVS : nSCKindOpeningRoom;
+	sPortResetPending = TRUE;
+
+	/* Speak the game's native match-abort language: is_reset is what the
+	 * original A+B+R+Z combo sets (ifcommon.c), and every battle-end flow
+	 * already honors it — scvsbattle.c:684 skips sudden death, the VS
+	 * results and 1P bonus/challenger flows short-circuit. Without it, a
+	 * forced mid-match exit reads as "time up, tied score" and VS battles
+	 * chain into sudden death. Each battle start clears it, so no staleness. */
+	gSCManagerSceneData.is_reset = TRUE;
+
+	func_800266A0_272A0();
+
+	/* Boot-like state: prev == curr == target (same as the default scene
+	 * data and the Boot-to-CSS override at the top of scManagerRunLoop). */
+	gSCManagerSceneData.scene_prev = sPortResetTarget;
+	gSCManagerSceneData.scene_curr = sPortResetTarget;
+
+	syTaskmanSetLoadScene();
+}
+
+/* If a reset is pending: re-apply the target scene (undoing any scene_curr
+ * writes a nested manager made since the request), clear the pending flag,
+ * and return TRUE so nested managers know to unwind to scManagerRunLoop. */
+sb32 portSCManagerConsumeReset(void)
+{
+	if (!sPortResetPending)
+	{
+		return FALSE;
+	}
+	sPortResetPending = FALSE;
+
+	gSCManagerSceneData.scene_prev = sPortResetTarget;
+	gSCManagerSceneData.scene_curr = sPortResetTarget;
+
+	return TRUE;
+}
+#endif

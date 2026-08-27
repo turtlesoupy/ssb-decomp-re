@@ -2,6 +2,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ ITDesc dITFFlowerItemDesc =
 {
     nITKindFFlower,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataFFlowerItemAttributes,   // Offset of item attributes in file?
+#else
     &llITCommonDataFFlowerItemAttributes,   // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -101,7 +108,11 @@ WPDesc dITFFlowerWeaponFlameWeaponDesc =
     0x00,                                        // Render flags?
     nWPKindFFlowerFlame,                         // Weapon Kind
     &gITManagerCommonData,                       // Pointer to character's loaded files?
+#ifdef PORT
+    llITCommonDataFFlowerFlameWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llITCommonDataFFlowerFlameWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {
@@ -338,7 +349,11 @@ void itFFlowerShootFlame(GObj *fighter_gobj, Vec3f *pos, s32 index, s32 ammo_sub
 {
     ITStruct *ip = itGetStruct(ftGetStruct(fighter_gobj)->item_gobj);
     Vec3f vel;
+#ifdef PORT
+    f32 *angle = (f32*) ((uintptr_t)*dITFFlowerItemDesc.p_file + (intptr_t) llITCommonDataFFlowerFlameAngles);
+#else
     f32 *angle = (f32*) ((uintptr_t)*dITFFlowerItemDesc.p_file + (intptr_t) &llITCommonDataFFlowerFlameAngles);
+#endif
 
     vel.x = __cosf(angle[index]) * ITFFLOWER_AMMO_VEL;
     vel.y = __sinf(angle[index]) * ITFFLOWER_AMMO_VEL;

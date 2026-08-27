@@ -1,5 +1,8 @@
 #include <it/item.h>
 #include <reloc_data.h>
+#ifdef PORT
+#include <ft/ftparam.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -11,7 +14,11 @@ ITDesc dITHammerItemDesc =
 {
     nITKindHammer,                          // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataHammerItemAttributes,    // Offset of item attributes in file?
+#else
     &llITCommonDataHammerItemAttributes,    // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {

@@ -2,6 +2,9 @@
 #include <ft/fighter.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ ITDesc dITMBallItemDesc =
 {
     nITKindMBall,                           // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataMBallItemAttributes,     // Offset of item attributes in file?
+#else
     &llITCommonDataMBallItemAttributes,     // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {
@@ -149,7 +156,11 @@ void itMBallOpenAddAnim(GObj *item_gobj)
 {
     ITStruct *ip = itGetStruct(item_gobj);
     DObj *dobj = DObjGetStruct(item_gobj);
+#ifdef PORT
+    void *matanim_joint = itGetPData(ip, llITCommonDataMBallDataStart, llITCommonDataMBallMatAnimJoint);
+#else
     void *matanim_joint = itGetPData(ip, &llITCommonDataMBallDataStart, &llITCommonDataMBallMatAnimJoint);
+#endif
 
     gcAddMObjMatAnimJoint(dobj->child->child->sib_next->mobj, matanim_joint, 0.0F);
     gcPlayAnimAll(item_gobj);

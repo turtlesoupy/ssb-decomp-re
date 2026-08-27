@@ -88,6 +88,15 @@ s32 D_ovl1_80392754[] =
 
 FTMotionDesc dFTNessSubMotionDescs[] =
 {
+#ifdef PORT
+	ll_1664_FileID, (intptr_t)D_ovl1_80392694, 0x00000000,
+	ll_436_FileID, (intptr_t)D_ovl1_803926C8, 0x00000000,
+	ll_437_FileID, (intptr_t)D_ovl1_80392720, 0x80000000,
+	ll_438_FileID, (intptr_t)D_ovl1_8039272C, 0x00000000,
+	ll_438_FileID, (intptr_t)D_ovl1_8039272C, 0x00000000,
+	ll_439_FileID, (intptr_t)D_ovl1_80392750, 0x00000000,
+	ll_1670_FileID, 0x80000000, 0x00000000,
+#else
 	&llFTNessAnimEggLayFileID, D_ovl1_80392694, 0x00000000,
 	&llFTNessAnimWin1FileID, D_ovl1_803926C8, 0x00000000,
 	&llFTNessAnimSelectedFileID, D_ovl1_80392720, 0x80000000,
@@ -95,13 +104,23 @@ FTMotionDesc dFTNessSubMotionDescs[] =
 	&llFTNessAnimWin2FileID, D_ovl1_8039272C, 0x00000000,
 	&llFTNessAnimClapsFileID, D_ovl1_80392750, 0x00000000,
 	&llFTNessAnimRunFileID, 0x80000000, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_440_FileID, 0x80000000, 0x40000000,
+	ll_441_FileID, 0x80000000, 0x40000000,
+#else
 	&llFTNessAnimDollFallFileID, 0x80000000, 0x40000000,
 	&llFTNessAnimDollRevivalFileID, 0x80000000, 0x40000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000,
 	0x00000000, 0x80000000, 0x00000000,
+#ifdef PORT
+	ll_442_FileID, (intptr_t)D_ovl1_80392754, 0x00000000,
+#else
 	&llFTNessAnimPosePlayerFileID, D_ovl1_80392754, 0x00000000,
+#endif
 	0x00000000, 0x80000000, 0x00000000
 };
 

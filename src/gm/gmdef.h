@@ -63,7 +63,16 @@
 #define gmColCommandWait(frames) (GC_FIELDSET(nGMColEventWait, 26, 6) | GC_FIELDSET(frames, 0, 26))
 
 #define gmColCommandGotoS1() GC_FIELDSET(nGMColEventGoto, 26, 6)
+/*
+ * GotoS2 on N64 embedded a raw 32-bit address as the goto target. On the PC
+ * port we store color scripts as `u32[]`, so branch targets are linked into
+ * relocation tokens at runtime by gmColScriptsLinkRelocTargets().
+ */
+#if defined(PORT)
+#define gmColCommandGotoS2(addr) ((u32)0)
+#else
 #define gmColCommandGotoS2(addr) ((uintptr_t)addr)
+#endif
 
 #define gmColCommandGoto(addr) gmColCommandGotoS1(), gmColCommandGotoS2(addr)
 
@@ -71,14 +80,22 @@
 #define gmColCommandLoopEnd() GC_FIELDSET(nGMColEventLoopEnd, 26, 6)
 
 #define gmColCommandSubroutineS1() GC_FIELDSET(nGMColEventSubroutine, 26, 6)
+#if defined(PORT)
+#define gmColCommandSubroutineS2(addr) ((u32)0)
+#else
 #define gmColCommandSubroutineS2(addr) ((uintptr_t)addr)
+#endif
 
 #define gmColCommandSubroutine(addr) gmColCommandSubroutineS1(), gmColCommandSubroutineS2(addr)
 
 #define gmColCommandReturn() GC_FIELDSET(nGMColEventReturn, 26, 6)
 
 #define gmColCommandParallelS1() GC_FIELDSET(nGMColEventSetParallelScript, 26, 6)
+#if defined(PORT)
+#define gmColCommandParallelS2(addr) ((u32)0)
+#else
 #define gmColCommandParallelS2(addr) ((uintptr_t)addr)
+#endif
 
 #define gmColCommandParallel(addr) gmColCommandParallelS1, gmColCommandParallelS2(addr)
 

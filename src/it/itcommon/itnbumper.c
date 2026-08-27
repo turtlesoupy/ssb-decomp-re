@@ -2,6 +2,10 @@
 #include <ft/fighter.h>
 #include <reloc_data.h>
 
+#ifdef PORT
+extern void portFixupMObjSub(void *mobjsub);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       INITIALIZED DATA        //
@@ -13,7 +17,7 @@ ITDesc dITNBumperItemDesc =
 {
     nITKindNBumper,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
-    &llITCommonDataNBumperItemAttributes,   // Offset of item attributes in file?
+    llITCommonDataNBumperItemAttributes,   // Offset of item attributes in file?
 
     // DObj transformation struct
     {
@@ -360,13 +364,16 @@ void itNBumperAttachedInitVars(GObj *item_gobj)
     ip->physics.vel_air.y = 0.0F;
     ip->physics.vel_air.z = 0.0F;
 
-    dl = itGetPData(ip, &llITCommonDataNBumperDataStart, &llITCommonDataNBumperWaitDisplayList); // (uintptr_t)((uintptr_t)ip->attr->data - (intptr_t)&llITCommonDataNBumperDataStart) + (intptr_t)&llITCommonDataNBumperWaitDisplayList; Linker thing
+    dl = itGetPData(ip, llITCommonDataNBumperDataStart, llITCommonDataNBumperWaitDisplayList); // (uintptr_t)((uintptr_t)ip->attr->data - (intptr_t)llITCommonDataNBumperDataStart) + (intptr_t)llITCommonDataNBumperWaitDisplayList; Linker thing
 
     dobj->dl = dl;
 
-    mobjsub = itGetPData(ip, &llITCommonDataNBumperDataStart, &llITCommonDataNBumperWaitMObjSub); // ((uintptr_t)((uintptr_t)ip->attr->data - (intptr_t)&llITCommonDataNBumperDataStart) + (intptr_t)&llITCommonDataNBumperWaitMObjSub);
+    mobjsub = itGetPData(ip, llITCommonDataNBumperDataStart, llITCommonDataNBumperWaitMObjSub); // ((uintptr_t)((uintptr_t)ip->attr->data - (intptr_t)llITCommonDataNBumperDataStart) + (intptr_t)llITCommonDataNBumperWaitMObjSub);
 
     gcRemoveMObjAll(dobj);
+#ifdef PORT
+    portFixupMObjSub(mobjsub);
+#endif
     gcAddMObjForDObj(dobj, mobjsub);
 
     dobj->scale.vec.f.x = dobj->scale.vec.f.y = dobj->scale.vec.f.z = 1.0F;

@@ -1,6 +1,11 @@
 #include <it/item.h>
 #include <wp/weapon.h>
 #include <reloc_data.h>
+extern void *func_800269C0_275C0(u16 id);
+
+#ifdef PORT
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +18,7 @@ ITDesc dITDogasItemDesc =
 {
     nITKindDogas,                           // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
-    &llITCommonDataDogasItemAttributes,     // Offset of item attributes in file?
+    llITCommonDataDogasItemAttributes,     // Offset of item attributes in file?
 
     // DObj transformation struct
     {
@@ -67,7 +72,7 @@ WPDesc dITDogasWeaponSmogWeaponDesc =
     0x03,                                   // Render flags?
     nWPKindDogasSmog,                       // Weapon Kind
     &gITManagerCommonData,                    // Pointer to weapon's loaded files?
-    &llITCommonDataDogasSmogWeaponAttributes,    // Offset of weapon attributes in loaded files
+    llITCommonDataDogasSmogWeaponAttributes,    // Offset of weapon attributes in loaded files
 
     // DObj transformation struct
     {
@@ -197,7 +202,7 @@ void itDogasAttackInitVars(GObj *item_gobj)
     {
         ip->item_vars.dogas.pos = dobj->translate.vec.f;
 
-        gcAddDObjAnimJoint(dobj->child, itGetPData(ip, &llITCommonDataDogasDataStart, &llITCommonDataDogasAnimJoint), 0.0F);
+        gcAddDObjAnimJoint(dobj->child, itGetPData(ip, llITCommonDataDogasDataStart, llITCommonDataDogasAnimJoint), 0.0F);
 
         gcPlayAnimAll(item_gobj);
         func_800269C0_275C0(nSYAudioVoiceMBallDogasAppear);
@@ -265,7 +270,7 @@ GObj* itDogasMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
         ip->physics.vel_air.z = 0.0F;
         ip->physics.vel_air.y = ITMONSTER_RISE_VEL_Y;
 
-        gcAddDObjAnimJoint(dobj->child, itGetMonsterAnimNode(ip, &llITCommonDataDogasDataStart), 0.0F);
+        gcAddDObjAnimJoint(dobj->child, itGetMonsterAnimNode(ip, llITCommonDataDogasDataStart), 0.0F);
     }
     return item_gobj;
 }
@@ -302,6 +307,9 @@ GObj* itDogasWeaponSmogMakeWeapon(GObj *item_gobj, Vec3f *pos, Vec3f *vel)
     wp->lifetime = ITDOGAS_SMOG_LIFETIME;
 
     wp->weapon_vars.smog.attr = (WPAttributes*) ((uintptr_t)*weapon_desc->p_weapon + (intptr_t)weapon_desc->o_attributes); // Dude I had a stroke trying to match this
+#ifdef PORT
+    portFixupStructU16(wp->weapon_vars.smog.attr, 0x10, 6);
+#endif
 
     dobj = DObjGetStruct(weapon_gobj);
 

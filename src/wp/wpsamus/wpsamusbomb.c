@@ -1,6 +1,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -13,7 +16,11 @@ WPDesc dWPSamusBombWeaponDesc =
     0x00,                                   // Render flags?
     nWPKindSamusBomb,                       // Weapon Kind
     &gFTDataSamusMain,                      // Pointer to character's loaded files?
+#ifdef PORT
+    llSamusMainBombWeaponAttributes,       // Offset of weapon attributes in loaded files
+#else
     &llSamusMainBombWeaponAttributes,       // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

@@ -1,6 +1,10 @@
 #include "common.h"
 #include "scheduler.h"
 
+#ifdef PORT
+extern void port_log(const char *fmt, ...);
+#endif
+
 #include <sys/debug.h>
 #include <sys/main.h>
 #include <sys/video.h>
@@ -64,8 +68,11 @@ SYTaskInfo *sSYSchedulerMainQueueHead; // largest priority/unk04?
 SYTaskInfo *sSYSchedulerMainQueueTail; // smallest priority/unk04?
 SYTaskGfx *sSYSchedulerCurrentTaskGfx;  // actually a pointer to SYTaskGfx?
 SYTaskAudio *sSYSchedulerCurrentTaskAudio;  // largest priority queue 2
-SYTaskGfx *sSYSchedulerPausedQueueHead;  // smallest priority queue 2
-SYTaskGfx *sSYSchedulerPausedQueueTail;  // largest priority queue 3
+// Paused queue is polymorphic: entries are any SYTaskInfo subtype
+// (SYTaskGfx, SYTaskGfxEnd, SYTaskType9, ...). Type is checked via ->type at
+// use sites before downcasting to Gfx-specific fields.
+SYTaskInfo *sSYSchedulerPausedQueueHead;  // smallest priority queue 2
+SYTaskInfo *sSYSchedulerPausedQueueTail;  // largest priority queue 3
 SYTaskGfx *scQueue3Head;  // smallest priority queue 3
 SYTaskGfx *D_80044EE0_406F0;  // standard linked list head
 SYTaskGfx *scCurrentQueue3Task;  // standard linked list tail
@@ -126,6 +133,11 @@ void unref_80000938(void)
     while ((sSYSchedulerCurrentTaskGfx != NULL) || (scCurrentQueue3Task != NULL) || (scQueue3Head != NULL));
 }
 
+#ifdef PORT
+/* Forward declaration — defined at line ~792. */
+s32 sySchedulerExecuteTask(SYTaskInfo *task);
+#endif
+
 void func_80000970(SYTaskInfo *task) {
     OSMesg msgs[1];
     OSMesgQueue mq;
@@ -134,12 +146,29 @@ void func_80000970(SYTaskInfo *task) {
     task->fnCheck  = NULL;
     task->retVal = 1;
     task->mq = &mq;
+#ifdef PORT
+    /* On PC, process the task synchronously instead of sending it to
+     * the scheduler queue and blocking.  The scheduler coroutine may
+     * not be running when this is called (e.g. during boot). */
+    sySchedulerExecuteTask(task);
+#else
     osSendMesg(&gSYSchedulerTaskMesgQueue, (OSMesg)task, OS_MESG_NOBLOCK);
     osRecvMesg(&mq, NULL, OS_MESG_BLOCK);
+#endif
 }
 
 void sySchedulerAddClient(SYClient *client, OSMesgQueue *mq, OSMesg *msg, u32 count)
 {
+#ifdef PORT
+    /* On PC, add the client directly to the scheduler's linked list.
+     * The normal path sends a task through the scheduler queue and blocks
+     * for completion, which deadlocks when the scheduler coroutine isn't
+     * running (e.g. during boot). */
+    osCreateMesgQueue(mq, msg, count);
+    client->mq = mq;
+    client->next = sSYSchedulerClients;
+    sSYSchedulerClients = client;
+#else
     SYTaskAddClient t;
 
     osCreateMesgQueue(mq, msg, count);
@@ -150,6 +179,7 @@ void sySchedulerAddClient(SYClient *client, OSMesgQueue *mq, OSMesg *msg, u32 co
     t.client = client;
 
     func_80000970(&t.info);
+#endif
 }
 
 // 0x80000A34 - Returns true if task can be executed now
@@ -207,7 +237,7 @@ s32 func_80000B54(UNUSED SYTaskInfo *t)
     {
         return FALSE;
     }
-    curr = &sSYSchedulerPausedQueueHead->info;
+    curr = sSYSchedulerPausedQueueHead;
 
     while (curr != NULL)
     {
@@ -299,7 +329,7 @@ void sySchedulerRemoveMainQueue(SYTaskInfo *task)
 // 0x80000D44 - Add to sSYSchedulerPausedQueueHead/sSYSchedulerPausedQueueTail priority queue
 void sySchedulerAddPausedQueue(SYTaskInfo *this_info)
 {
-    SYTaskInfo *tail_info = &sSYSchedulerPausedQueueTail->info;
+    SYTaskInfo *tail_info = sSYSchedulerPausedQueueTail;
 
     while ((tail_info != NULL) && (tail_info->priority < this_info->priority))
     {
@@ -314,7 +344,7 @@ void sySchedulerAddPausedQueue(SYTaskInfo *this_info)
     }
     else
     {
-        this_info->next = &sSYSchedulerPausedQueueHead->info;
+        this_info->next = sSYSchedulerPausedQueueHead;
         sSYSchedulerPausedQueueHead = this_info;
     }
     tail_info = this_info->next;
@@ -334,7 +364,7 @@ void sySchedulerRemovePausedQueue(SYTaskInfo *this_info)
         this_info->prev->next = this_info->next;
     }
     else sSYSchedulerPausedQueueHead = this_info->next;
-    
+
     if (this_info->next != NULL)
     {
         this_info->next->prev = this_info->prev;
@@ -379,6 +409,12 @@ void sySchedulerApplyViMode(void)
 }
 
 // 0x80000F30
+#ifdef PORT
+/* libultraship/include/libultraship/bridge/gfxbridge.h — keep manually-declared
+ * since scheduler.c is decomp code and shouldn't pull in port-only headers. */
+extern void GfxSetNativeDimensions(unsigned int width, unsigned int height);
+#endif
+
 void sySchedulerUpdateViMode(u32 width, u32 height, u32 flags, s16 off_left, s16 off_right, s16 off_top, s16 off_bottom)
 {
     sb32 not_phi_v1;
@@ -390,6 +426,14 @@ void sySchedulerUpdateViMode(u32 width, u32 height, u32 flags, s16 off_left, s16
     s32 pos2;
 
     is_res_in_bounds = ((width > GS_SCREEN_WIDTH_DEFAULT) || (height > GS_SCREEN_HEIGHT_DEFAULT)) ? FALSE : TRUE;
+#ifdef PORT
+    /* Tell Fast3D the game's logical render target size so viewports / vertex
+     * positions in the requested resolution land where they should. The credits
+     * scene uses 640x480 but every other scene is 320x240; without this every
+     * scene is interpreted as 320x240 and the credits get squashed into the
+     * top-left quadrant. Fixes issue #55 + downstream "garbled" names. */
+    GfxSetNativeDimensions((unsigned int)width, (unsigned int)height);
+#endif
 
     if (flags & SYVIDEO_FLAG_SERRATE)
     {
@@ -740,7 +784,7 @@ void sySchedulerExecuteTaskGfx(SYTaskGfx *t)
     {
         osSpTaskYield();
         sSYSchedulerCurrentTaskGfx->info.state = nSYSchedulerStatusTaskSuspending;
-        sySchedulerAddPausedQueue(sSYSchedulerCurrentTaskGfx);
+        sySchedulerAddPausedQueue((SYTaskInfo *)sSYSchedulerCurrentTaskGfx);
         t->info.state = nSYSchedulerStatusTaskPending;
     }
     else
@@ -814,7 +858,7 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
             sSYSchedulerClients = temp;
 
             if (t->info.mq != NULL) {
-                osSendMesg(t->info.mq, (OSMesg) t->info.retVal, OS_MESG_NOBLOCK);
+                osSendMesg(t->info.mq, (OSMesg)(intptr_t)t->info.retVal, OS_MESG_NOBLOCK);
             }
             break;
         }
@@ -824,7 +868,7 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
             sySchedulerUpdateViMode(t->width, t->height, t->flags, t->edgeOffsetLeft, t->edgeOffsetRight, t->edgeOffsetTop, t->edgeOffsetBottom);
 
             if (t->info.mq != NULL) {
-                osSendMesg(t->info.mq, (OSMesg) t->info.retVal, OS_MESG_NOBLOCK);
+                osSendMesg(t->info.mq, (OSMesg)(intptr_t)t->info.retVal, OS_MESG_NOBLOCK);
             }
             break;
         }
@@ -839,7 +883,7 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
             }
 
             if (t->info.mq != NULL) {
-                osSendMesg(t->info.mq, (OSMesg) t->info.retVal, OS_MESG_NOBLOCK);
+                osSendMesg(t->info.mq, (OSMesg)(intptr_t)t->info.retVal, OS_MESG_NOBLOCK);
             }
             break;
         }
@@ -852,7 +896,7 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
                 v1 = sSYSchedulerCurrentTaskGfx;
             }
 
-            v0 = &sSYSchedulerPausedQueueHead->info;
+            v0 = sSYSchedulerPausedQueueHead;
             while (v0 != NULL) {
                 if (v0->type == nSYTaskTypeGfx) {
                     if (((SYTaskGfx*) v0)->task_id == t->task_id) {
@@ -873,16 +917,16 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
                 v0 = v0->next;
             }
 
-            v0 = &scCurrentQueue3Task->info;
+            v0 = (scCurrentQueue3Task != NULL) ? &scCurrentQueue3Task->info : NULL;
             if (v0 != NULL) {
                 if (v0->type == nSYTaskTypeGfx) {
-                    if (sSYSchedulerCurrentTaskGfx->task_id == t->task_id) {
+                    if (((SYTaskGfx*)v0)->task_id == t->task_id) {
                         v1 = (void*) v0;
                     }
                 }
             }
 
-            v0 = &scQueue3Head->info;
+            v0 = (scQueue3Head != NULL) ? &scQueue3Head->info : NULL;
             while (v0 != NULL) {
                 if (v0->type == nSYTaskTypeGfx) {
                     if (((SYTaskGfx*) v0)->task_id == t->task_id) {
@@ -902,14 +946,14 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
                 }
 
                 if (t->info.mq != NULL) {
-                    osSendMesg(t->info.mq, (OSMesg) t->info.retVal, OS_MESG_NOBLOCK);
+                    osSendMesg(t->info.mq, (OSMesg)(intptr_t)t->info.retVal, OS_MESG_NOBLOCK);
                 }
             }
             break;
         }
         case nSYTaskTypeNoOp:
             if (task->mq != NULL) {
-                osSendMesg(task->mq, (OSMesg) task->retVal, OS_MESG_NOBLOCK);
+                osSendMesg(task->mq, (OSMesg)(intptr_t)task->retVal, OS_MESG_NOBLOCK);
             }
             break;
         case nSYTaskTypeRdpBuffer: {
@@ -918,7 +962,7 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
             sSYSchedulerRdpOutputBuffer = t->buffer;
             sSYSchedulerRdpOutputBufferSize = t->size;
             if (t->info.mq != NULL) {
-                osSendMesg(t->info.mq, (OSMesg) t->info.retVal, OS_MESG_NOBLOCK);
+                osSendMesg(t->info.mq, (OSMesg)(intptr_t)t->info.retVal, OS_MESG_NOBLOCK);
             }
             break;
         }
@@ -930,14 +974,14 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
 
             if (t->info.mq != NULL)
             {
-                osSendMesg(t->info.mq, (OSMesg) t->info.retVal, OS_MESG_NOBLOCK);
+                osSendMesg(t->info.mq, (OSMesg)(intptr_t)t->info.retVal, OS_MESG_NOBLOCK);
             }
             break;
         }
         case nSYTaskTypeDefaultBuffer:
             scUseCustomSwapBufferFunc = FALSE;
             if (task->mq != NULL) {
-                osSendMesg(task->mq, (OSMesg) task->retVal, OS_MESG_NOBLOCK);
+                osSendMesg(task->mq, (OSMesg)(intptr_t)task->retVal, OS_MESG_NOBLOCK);
             }
             break;
         case SC_TASK_TYPE_11: {
@@ -954,7 +998,7 @@ s32 sySchedulerExecuteTask(SYTaskInfo *task)
 
             sSYSchedulerCustomFramebuffer = NULL;
             if (task->mq != NULL) {
-                osSendMesg(task->mq, (OSMesg) task->retVal, OS_MESG_NOBLOCK);
+                osSendMesg(task->mq, (OSMesg)(intptr_t)task->retVal, OS_MESG_NOBLOCK);
             }
             break;
         }
@@ -979,7 +1023,7 @@ void sySchedulerExecuteTasksAll(void)
     {
         av_priority = sSYSchedulerCurrentTaskAudio->info.priority;
     }
-    paused_priority = (sSYSchedulerPausedQueueHead != NULL) ? sSYSchedulerPausedQueueHead->info.priority : -1;
+    paused_priority = (sSYSchedulerPausedQueueHead != NULL) ? sSYSchedulerPausedQueueHead->priority : -1;
 
     curr = sSYSchedulerMainQueueHead;
 
@@ -1004,12 +1048,18 @@ void sySchedulerExecuteTasksAll(void)
         else switch (is_task_ready)
         {
         case FALSE:
-            osSpTaskStart(&sSYSchedulerPausedQueueHead->task);
+        {
+            // Paused queue head is always Gfx when this branch fires; downcast
+            // to touch the Gfx-specific OSTask/task_id fields.
+            SYTaskGfx *head_gfx = (SYTaskGfx *)sSYSchedulerPausedQueueHead;
+
+            osSpTaskStart(&head_gfx->task);
             is_task_started = TRUE;
-            sSYSchedulerPausedQueueHead->info.state = nSYSchedulerStatusTaskRunning;
-            sSYSchedulerCurrentTaskGfx = sSYSchedulerPausedQueueHead;
+            sSYSchedulerPausedQueueHead->state = nSYSchedulerStatusTaskRunning;
+            sSYSchedulerCurrentTaskGfx = head_gfx;
             sySchedulerRemovePausedQueue(sSYSchedulerPausedQueueHead);
             break;
+        }
                 
         case TRUE:
             if ((curr->fnCheck == NULL) || (curr->fnCheck(curr) != FALSE))
@@ -1072,7 +1122,7 @@ void sySchedulerSpTaskDone(void)
             if (osSpTaskYielded(&sSYSchedulerCurrentTaskGfx->task) == OS_TASK_YIELDED)
             {
                 sSYSchedulerCurrentTaskGfx->info.state = nSYSchedulerStatusTaskSuspended;
-                sySchedulerAddPausedQueue(sSYSchedulerCurrentTaskGfx);
+                sySchedulerAddPausedQueue((SYTaskInfo *)sSYSchedulerCurrentTaskGfx);
                 sSYSchedulerCurrentTaskGfx = NULL;
             }
             else sSYSchedulerCurrentTaskGfx->info.state = nSYSchedulerStatusTaskStopped;
@@ -1125,7 +1175,7 @@ void sySchedulerDpFullSync(void)
             }
             if (sSYSchedulerCurrentTaskGfx->info.mq != NULL)
             {
-                osSendMesg(sSYSchedulerCurrentTaskGfx->info.mq, (OSMesg)sSYSchedulerCurrentTaskGfx->info.retVal, OS_MESG_NOBLOCK);
+                osSendMesg(sSYSchedulerCurrentTaskGfx->info.mq, (OSMesg)(intptr_t)sSYSchedulerCurrentTaskGfx->info.retVal, OS_MESG_NOBLOCK);
             }
             if (sSYSchedulerCurrentTaskGfx->info.state == nSYSchedulerStatusTaskSuspending)
             {
@@ -1144,22 +1194,24 @@ void sySchedulerDpFullSync(void)
         }
         if (scCurrentQueue3Task->info.mq != NULL)
         {
-            osSendMesg(scCurrentQueue3Task->info.mq, (OSMesg)scCurrentQueue3Task->info.retVal, OS_MESG_NOBLOCK);
+            osSendMesg(scCurrentQueue3Task->info.mq, (OSMesg)(intptr_t)scCurrentQueue3Task->info.retVal, OS_MESG_NOBLOCK);
         }
         scCurrentQueue3Task = NULL;
         func_80001FF4();
     }
-    else if ((sSYSchedulerPausedQueueHead != NULL) && (sSYSchedulerPausedQueueHead->info.unk18 == 2))
+    else if ((sSYSchedulerPausedQueueHead != NULL) && (sSYSchedulerPausedQueueHead->unk18 == 2))
     {
-        if (sSYSchedulerPausedQueueHead->info.type == nSYTaskTypeGfx)
+        if (sSYSchedulerPausedQueueHead->type == nSYTaskTypeGfx)
         {
-            if (sSYSchedulerPausedQueueHead->fb != NULL)
+            SYTaskGfx *head_gfx = (SYTaskGfx *)sSYSchedulerPausedQueueHead;
+
+            if (head_gfx->fb != NULL)
             {
-                sySchedulerSetNextFramebuffer(sSYSchedulerPausedQueueHead->fb);
+                sySchedulerSetNextFramebuffer(head_gfx->fb);
             }
-            if (sSYSchedulerPausedQueueHead->info.mq != NULL)
+            if (sSYSchedulerPausedQueueHead->mq != NULL)
             {
-                osSendMesg(sSYSchedulerPausedQueueHead->info.mq, (OSMesg)sSYSchedulerPausedQueueHead->info.retVal, OS_MESG_NOBLOCK);
+                osSendMesg(sSYSchedulerPausedQueueHead->mq, (OSMesg)(intptr_t)sSYSchedulerPausedQueueHead->retVal, OS_MESG_NOBLOCK);
             }
             sySchedulerRemovePausedQueue(sSYSchedulerPausedQueueHead);
         }
@@ -1187,16 +1239,17 @@ void sySchedulerSoftReset(void);
 // jp: 0x8000241C 
 void sySchedulerThreadMain(void *arg)
 {
-    s32 mesg;
+    OSMesg mesg;
+    intptr_t mesg_code;
 
     // the wonders of matching
     sSYSchedulerClients = NULL;
 
-    sSYSchedulerMainQueueHead =
-    sSYSchedulerMainQueueTail =
-    sSYSchedulerCurrentTaskGfx =
-    sSYSchedulerCurrentTaskAudio =
-    sSYSchedulerPausedQueueHead =
+    sSYSchedulerMainQueueHead = NULL;
+    sSYSchedulerMainQueueTail = NULL;
+    sSYSchedulerCurrentTaskGfx = NULL;
+    sSYSchedulerCurrentTaskAudio = NULL;
+    sSYSchedulerPausedQueueHead = NULL;
     sSYSchedulerPausedQueueTail = NULL;
     scCurrentQueue3Task = scQueue3Head = D_80044EE0_406F0 = NULL;
 
@@ -1255,9 +1308,10 @@ void sySchedulerThreadMain(void *arg)
 
     while (TRUE)
     {
-        osRecvMesg(&gSYSchedulerTaskMesgQueue, (OSMesg)&mesg, OS_MESG_BLOCK);
+        osRecvMesg(&gSYSchedulerTaskMesgQueue, &mesg, OS_MESG_BLOCK);
+        mesg_code = (intptr_t)mesg;
 
-        switch (mesg)
+        switch (mesg_code)
         {
         case INTR_VRETRACE:
             sySchedulerVRetrace();
@@ -1288,7 +1342,7 @@ void sySchedulerThreadMain(void *arg)
         default:
             if (gSYSchedulerIsSoftReset == FALSE)
             {
-                sySchedulerPrepTask(mesg);
+                sySchedulerPrepTask((SYTaskInfo*)mesg);
             }
         }
     }

@@ -2,6 +2,10 @@
 #include <ft/fighter.h>
 #include <ef/effect.h>
 #include <sc/scene.h>
+#ifdef PORT
+#include <sys/debug.h>
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //

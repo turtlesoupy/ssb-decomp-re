@@ -13,7 +13,11 @@ ITDesc dITGBumperItemDesc =
 {
     nITKindGBumper,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataGBumperItemAttributes,   // Offset of item attributes in file?
+#else
     &llITCommonDataGBumperItemAttributes,   // Offset of item attributes in file?
+#endif
 
     // DObj transformation struct
     {

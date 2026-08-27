@@ -3,6 +3,9 @@
 #include <gr/ground.h>
 #include <sc/scene.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // 0x801439D0
 void ftCommonTwisterProcUpdate(GObj *fighter_gobj)
@@ -89,7 +92,11 @@ void ftCommonTwisterSetStatus(GObj *fighter_gobj, GObj *tornado_gobj)
 void ftCommonTwisterShootFighter(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
+#ifdef PORT
+    FTThrowHitDesc *tornado = (FTThrowHitDesc*) (((uintptr_t)gMPCollisionGroundData - (intptr_t)llGRHyruleMapMapHeader) + (intptr_t)llGRHyruleMapTwisterThrowHitDesc);
+#else
     FTThrowHitDesc *tornado = (FTThrowHitDesc*) (((uintptr_t)gMPCollisionGroundData - (intptr_t)&llGRHyruleMapMapHeader) + (intptr_t)&llGRHyruleMapTwisterThrowHitDesc);
+#endif
     f32 knockback;
     s32 damage;
 

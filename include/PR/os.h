@@ -88,6 +88,11 @@ extern "C"
 		OSId id;				   /* id for debugging */
 		int fp;					   /* thread has used fp unit */
 		__OSThreadContext context; /* register/interrupt mask */
+#ifdef PORT
+		void (*port_entry)(void *); /* captured entry point */
+		void *port_arg;             /* captured argument */
+		void *port_coroutine;       /* PortCoroutine* (opaque to C code) */
+#endif
 	} OSThread;
 
 	typedef u32 OSEvent;
@@ -875,8 +880,13 @@ extern "C"
 	extern void osWritebackDCache(void*, s32);
 	extern void osWritebackDCacheAll(void);
 
+#ifdef PORT
+#define OS_DCACHE_ROUNDUP_ADDR(x) (void*)(((((u64)(x) + 0xfULL) / 0x10ULL) * 0x10ULL))
+#define OS_DCACHE_ROUNDUP_SIZE(x) (u64)(((((u64)(x) + 0xfULL) / 0x10ULL) * 0x10ULL))
+#else
 #define OS_DCACHE_ROUNDUP_ADDR(x) (void*)(((((u32)(x) + 0xf) / 0x10) * 0x10))
 #define OS_DCACHE_ROUNDUP_SIZE(x) (u32)(((((u32)(x) + 0xf) / 0x10) * 0x10))
+#endif
 
 	/* TLB management routines */
 
@@ -888,7 +898,13 @@ extern "C"
 
 	/* Address translation routines and macros */
 
+#if defined(PORT) && !defined(__EMSCRIPTEN__)
+	/* 64-bit hosts: libultraship defines this as uintptr_t (8 bytes). */
+	extern u64 osVirtualToPhysical(void*);
+#else
+	/* N64 and wasm32: pointers are 4 bytes (WASM traps on signature mismatch). */
 	extern u32 osVirtualToPhysical(void*);
+#endif
 	extern void* osPhysicalToVirtual(u32);
 
 #define OS_K0_TO_PHYSICAL(x) (u32)(((char*)(x)-0x80000000))
@@ -1023,9 +1039,18 @@ extern "C"
 
 	/* byte string operations */
 
+#ifdef PORT
+	/* LP64 host: third arg is size_t (POSIX). The N64 signatures below use
+	 * int, which clashes with clang's builtin prototypes. */
+	#include <stddef.h>
+	extern void bcopy(const void*, void*, size_t);
+	extern int bcmp(const void*, const void*, size_t);
+	extern void bzero(void*, size_t);
+#else
 	extern void bcopy(const void*, void*, int);
 	extern int bcmp(const void*, const void*, int);
 	extern void bzero(void*, int);
+#endif
 
 	/* Miscellaneous operations */
 

@@ -7,6 +7,9 @@
 
 extern void syTaskmanSetLoadScene();
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -15,7 +18,7 @@ extern u32 sySchedulerGetTicCount();
 // // // // // // // // // // // //
 
 // 0x801323A0
-u32 dMVOpeningYamabukiFileIDs[/* */] = { &llMVOpeningYamabukiFileID };
+u32 dMVOpeningYamabukiFileIDs[/* */] = { llMVOpeningYamabukiFileID };
 
 // 0x801323A8
 Lights1 dMVOpeningYamabukiLights11 = gdSPDefLights1(0x20, 0x20, 0x20, 0xFF, 0xFF, 0xFF, 0x14, 0x14, 0x14);
@@ -136,7 +139,7 @@ void mvOpeningYamabukiMakeWallpaper(void)
         (
             Sprite*,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiWallpaperSprite
+            llMVOpeningYamabukiWallpaperSprite
         )
     );
     sobj->pos.x = 0.0F;
@@ -177,7 +180,7 @@ void mvOpeningYamabukiMakeLegs(void)
         (
             DObjDesc*,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiLegsDObjDesc
+            llMVOpeningYamabukiLegsDObjDesc
         ),
         NULL,
         nGCMatrixKindTraRotRpyRSca,
@@ -197,7 +200,7 @@ void mvOpeningYamabukiMakeLegs(void)
         (
             AObjEvent32**,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiLegsAnimJoint
+            llMVOpeningYamabukiLegsAnimJoint
         ),
         0.0F
     );
@@ -215,7 +218,7 @@ void mvOpeningYamabukiMakeLegsShadow(void)
         (
             void*,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiLegsShadowDObjDesc
+            llMVOpeningYamabukiLegsShadowDObjDesc
         ),
         NULL,
         nGCMatrixKindTraRotRpyRSca,
@@ -235,7 +238,7 @@ void mvOpeningYamabukiMakeLegsShadow(void)
         (
             AObjEvent32**,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiLegsShadowAnimJoint
+            llMVOpeningYamabukiLegsShadowAnimJoint
         ),
         0.0F
     );
@@ -253,7 +256,7 @@ void mvOpeningYamabukiMakeMBall(void)
         (
             DObjDesc*,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiMBallDObjDesc
+            llMVOpeningYamabukiMBallDObjDesc
         ),
         NULL,
         nGCMatrixKindTraRotRpyRSca,
@@ -273,7 +276,7 @@ void mvOpeningYamabukiMakeMBall(void)
         (
             AObjEvent32**,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiMBallAnimJoint
+            llMVOpeningYamabukiMBallAnimJoint
         ),
         0.0F
     );
@@ -314,7 +317,7 @@ void mvOpeningYamabukiMakeMainCamera(void)
         (
             AObjEvent32*,
             sMVOpeningYamabukiFiles[0],
-            &llMVOpeningYamabukiCamAnimJoint
+            llMVOpeningYamabukiCamAnimJoint
         ),
         0.0F
     );
@@ -395,7 +398,7 @@ void mvOpeningYamabukiFuncStart(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-    rl_setup.table_files_num = (u32)&llRelocFileCount;
+    rl_setup.table_files_num = (u32)llRelocFileCount;
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMVOpeningYamabukiStatusBuffer;
@@ -429,6 +432,9 @@ void mvOpeningYamabukiFuncStart(void)
 
     while (sySchedulerGetTicCount() < 2690)
     {
+#ifdef PORT
+		port_coroutine_yield();
+#endif
         continue;
     }
 }

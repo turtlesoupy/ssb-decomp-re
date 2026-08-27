@@ -1,6 +1,9 @@
 #include <wp/weapon.h>
 #include <ft/fighter.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -23,7 +26,11 @@ wpMarioFireballAttributes dWPMarioFireballWeaponAttributes[/* */] =
         F_CLC_DTOR32(-5.0F),                      // Aerial launch angle (-0.0872664675117F)
         50.0F,                                    // Base velocity
         &gFTMarioFileSpecial1,                    // Pointer to ???
+#ifdef PORT
+        llMarioSpecial1FireballWeaponAttributes, // Offset of hitbox/attributes?
+#else
         &llMarioSpecial1FireballWeaponAttributes, // Offset of hitbox/attributes?
+#endif
         0.0F                                      // Animation starting frame?
     },
 
@@ -43,7 +50,11 @@ wpMarioFireballAttributes dWPMarioFireballWeaponAttributes[/* */] =
         F_CLC_DTOR32(0.0F),                       // Aerial launch angle (0.0F)
         36.0F,                                    // Base velocity
         &gFTDataLuigiSpecial1,                    // Pointer to ???
+#ifdef PORT
+        llLuigiSpecial1FireballWeaponAttributes, // Offset of hitbox/attributes?
+#else
         &llLuigiSpecial1FireballWeaponAttributes, // Offset of hitbox/attributes?
+#endif
         1.0F                                      // Animation starting frame?
     }
 };
@@ -54,7 +65,11 @@ WPDesc dWPMarioFireballWeaponDesc =
     0x00,                                   // Render flags?
     nWPKindFireball,                        // Weapon Kind
     &gFTMarioFileMain,                      // Pointer to character's loaded files?
+#ifdef PORT
+    llMarioMainFireballWeaponAttributes,   // Offset of weapon attributes in loaded files
+#else
     &llMarioMainFireballWeaponAttributes,   // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

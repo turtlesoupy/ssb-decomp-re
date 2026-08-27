@@ -1,8 +1,165 @@
 #include <sys/interp.h>
+#ifdef PORT
+#include <sys/objtypes.h>
+#include <port_log.h>
+#include <port_aobj_fixup.h>
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+#endif
 #include <PR/gu.h>
 
 // Biquadrate; easier to make a symbol than quartic (QT looks familiar to me)
 #define BIQUAD(x) ((x) * (x) * (x) * (x))
+
+#ifdef PORT
+/* Halfswap fixup for SYInterpDesc + its data blocks loaded from fighter
+ * figatree files.  portRelocFixupFighterFigatree halfswaps every non-reloc
+ * u32 in the file: that is correct for AObjEvent16 streams (u16 pairs
+ * packed into u32s) but corrupts full-width data — Vec3f points, f32
+ * keyframes, f32 quartics, and SYInterpDesc's own header words (kind +
+ * pad + s16 points_num at +0x00, f32 length at +0x0C).  We undo the
+ * halfswap on first access, idempotent via a visited-pointer set.
+ *
+ * Token slots (desc->points/keyframes/quartics at +0x08/+0x10/+0x14)
+ * were skipped by the figatree fixup (reloc_words[i]==1) and are
+ * already correct — leave them alone.
+ *
+ * Only data blocks inside a port_aobj_register_halfswapped_range region are
+ * un-halfswapped; non-figatree-derived interp blocks (stage Arwings, CObj
+ * camera anim data from non-fighter files) are already native f32 arrays
+ * after pass1.
+ */
+static u32 port_unhalfswap_u32(u32 v)
+{
+    return ((v & 0xFFFFu) << 16) | ((v >> 16) & 0xFFFFu);
+}
+
+static void port_unhalfswap_block(void *p, size_t n_u32)
+{
+    u32 *w;
+    size_t i;
+    if (p == NULL) return;
+    if (!port_aobj_is_in_halfswapped_range(p)) return;
+    if (port_aobj_unhalfswap_visit(p)) return;
+    w = (u32*)p;
+    for (i = 0; i < n_u32; i++)
+    {
+        w[i] = port_unhalfswap_u32(w[i]);
+    }
+}
+
+/* SYInterpDesc header fixup.
+ *
+ * After pass1 BSWAP32 + figatree halfswap, the desc memory contains:
+ *   byte 0 = original BE pad byte
+ *   byte 1 = original BE kind byte
+ *   bytes 2..3 = LE-readable s16 points_num
+ *   bytes 4..7 = unk04 (zero in practice)
+ *   bytes 8..B = points reloc token (skipped by figatree fixup, correct)
+ *   bytes C..F = halfswapped f32 length
+ *   bytes 10..13 = keyframes token (correct)
+ *   bytes 14..17 = quartics token (correct)
+ *
+ * Normal non-figatree files stop after pass1 BSWAP32, so the first word is
+ * [points_num_lo, points_num_hi, pad, kind].  Rotate that one word into the
+ * same layout the LE struct expects: [pad, kind, points_num_lo,
+ * points_num_hi].  The f32 fields and pointed-to f32 arrays are already
+ * correct in this path.
+ *
+ * Figatree files already have that first-word halfswap, but their full-width
+ * f32 words were corrupted by the same pass; un-halfswap unk04 and length
+ * once on first access.  Idempotency uses the shared visited set so that
+ * figatree-heap reloads trigger a fresh fixup pass on the new bytes.
+ */
+static void port_fixup_interp_desc(SYInterpDesc *desc)
+{
+    u32 *w;
+    if (desc == NULL) return;
+    if (!port_aobj_is_in_halfswapped_range(desc))
+    {
+        portFixupStructU16(desc, 0, 1);
+        return;
+    }
+    if (port_aobj_unhalfswap_visit(desc)) return;
+    w = (u32*)desc;
+    w[1] = port_unhalfswap_u32(w[1]); /* unk04 f32 at offset 0x04 */
+    w[3] = port_unhalfswap_u32(w[3]); /* length f32 at offset 0x0C */
+}
+
+/* Compute u32-count for the quartics block.  IDO's encoding uses
+ * (points_num - 1) * 5 floats for cubic kinds; Linear has none. */
+static size_t port_interp_quartics_u32_count(const SYInterpDesc *desc)
+{
+    if (desc == NULL || desc->kind == nSYInterpKindLinear) return 0;
+    if (desc->points_num < 2) return 0;
+    return (size_t)(desc->points_num - 1) * 5u;
+}
+
+/* Compute u32-count for the points block.  Linear stores exactly
+ * points_num Vec3f.  Cubic kinds (Bezier, Catrom, BezierS3) need two
+ * trailing phantom control points so the sliding-window-of-4 access
+ * pattern in syInterpBezier3Points / syInterpCatromCubicSpline doesn't
+ * read past the array — verified empirically by measuring the byte
+ * gap between desc->points and desc->keyframes in a Samus EscapeF
+ * spline (7 Vec3f for points_num=5). */
+static size_t port_interp_points_u32_count(const SYInterpDesc *desc)
+{
+    s32 n;
+    if (desc == NULL || desc->points_num <= 0) return 0;
+    n = desc->points_num;
+    if (desc->kind != nSYInterpKindLinear) n += 2;
+    return (size_t)n * 3u;
+}
+#endif
+
+static Vec3f* syInterpGetPoints(SYInterpDesc *desc)
+{
+#ifdef PORT
+    Vec3f *p;
+    port_fixup_interp_desc(desc);
+    p = (Vec3f*)PORT_RESOLVE(desc->points);
+    if (p != NULL)
+    {
+        size_t n = port_interp_points_u32_count(desc);
+        if (n > 0) port_unhalfswap_block(p, n);
+    }
+    return p;
+#else
+    return desc->points;
+#endif
+}
+
+static f32* syInterpGetKeyframes(SYInterpDesc *desc)
+{
+#ifdef PORT
+    f32 *kf;
+    port_fixup_interp_desc(desc);
+    kf = (f32*)PORT_RESOLVE(desc->keyframes);
+    if ((kf != NULL) && (desc->points_num > 0))
+    {
+        port_unhalfswap_block(kf, (size_t)desc->points_num);
+    }
+    return kf;
+#else
+    return desc->keyframes;
+#endif
+}
+
+static f32* syInterpGetQuartics(SYInterpDesc *desc)
+{
+#ifdef PORT
+    f32 *q;
+    port_fixup_interp_desc(desc);
+    q = (f32*)PORT_RESOLVE(desc->quartics);
+    if (q != NULL)
+    {
+        size_t n = port_interp_quartics_u32_count(desc);
+        if (n > 0) port_unhalfswap_block(q, n);
+    }
+    return q;
+#else
+    return desc->quartics;
+#endif
+}
 
 // Catmull-Rom cubic spline
 void syInterpCatromCubicSpline(Vec3f *out, Vec3f *ctrl, f32 s, f32 t)
@@ -145,6 +302,7 @@ void syInterpCubicSplineTimeFrac(Vec3f *out, SYInterpDesc *desc, f32 t)
 {
     s16 target_frame; // f10
     Vec3f *point;
+    Vec3f *points = syInterpGetPoints(desc);
 
     if ((t < 0.0F) || (t > 1.0F))
     {
@@ -163,22 +321,22 @@ void syInterpCubicSplineTimeFrac(Vec3f *out, SYInterpDesc *desc, f32 t)
         switch (desc->kind)
         {
         case nSYInterpKindLinear:
-            point = &desc->points[target_frame];
+            point = &points[target_frame];
             out->x = (point[1].x - point[0].x) * t + point[0].x;
             out->y = (point[1].y - point[0].y) * t + point[0].y;
             out->z = (point[1].z - point[0].z) * t + point[0].z;
             break;
 
         case nSYInterpKindBezierS3:
-            syInterpCubicBezierScale(out, &desc->points[target_frame * 3], t);
+            syInterpCubicBezierScale(out, &points[target_frame * 3], t);
             break;
                 
         case nSYInterpKindBezier:
-            syInterpBezier3Points(out, &desc->points[target_frame], t);
+            syInterpBezier3Points(out, &points[target_frame], t);
             break;
 
         case nSYInterpKindCatrom:
-            syInterpCatromCubicSpline(out, &desc->points[target_frame], desc->unk04, t);
+            syInterpCatromCubicSpline(out, &points[target_frame], desc->unk04, t);
             break;
         }
     }
@@ -189,21 +347,21 @@ void syInterpCubicSplineTimeFrac(Vec3f *out, SYInterpDesc *desc, f32 t)
         switch (desc->kind)
         {
         case nSYInterpKindLinear:
-            point  = &desc->points[target_frame];
+            point  = &points[target_frame];
             *out = *point;
             break;
 
         case nSYInterpKindBezierS3:
-            point  = &desc->points[target_frame * 3];
+            point  = &points[target_frame * 3];
             *out = *point;
             break;
                 
         case nSYInterpKindBezier:
-            syInterpBezier3Points(out, &desc->points[target_frame - 1], 1.0F);
+            syInterpBezier3Points(out, &points[target_frame - 1], 1.0F);
             break;
         
         case nSYInterpKindCatrom:
-            point  = &desc->points[target_frame + 1];
+            point  = &points[target_frame + 1];
             *out = *point;
             break;
         }
@@ -216,6 +374,7 @@ void syInterpQuadSplineTimeFrac(Vec3f *out, SYInterpDesc *desc, f32 t)
     s16 target_frame;
     f32 t_origin;
     Vec3f *point;
+    Vec3f *points = syInterpGetPoints(desc);
 
     if ((t < 0.0F) || (t > 1.0F))
     {
@@ -236,22 +395,22 @@ void syInterpQuadSplineTimeFrac(Vec3f *out, SYInterpDesc *desc, f32 t)
             {
                 target_frame--;
             }
-            point    = desc->points + target_frame;
+            point    = points + target_frame;
             out->x = point[1].x - point[0].x;
             out->y = point[1].y - point[0].y;
             out->z = point[1].z - point[0].z;
             break;
            
         case nSYInterpKindBezierS3:
-            syInterpQuadBezier4Points(out, &desc->points[target_frame * 3], t);
+            syInterpQuadBezier4Points(out, &points[target_frame * 3], t);
             break;
             
         case nSYInterpKindBezier:
-            syInterpBezier4Points(out, &desc->points[target_frame], t);
+            syInterpBezier4Points(out, &points[target_frame], t);
             break;
 
         case nSYInterpKindCatrom:
-            syInterpQuadSpline(out, &desc->points[target_frame], desc->unk04, t);
+            syInterpQuadSpline(out, &points[target_frame], desc->unk04, t);
             break;
         }
     }
@@ -293,6 +452,12 @@ f32 syInterpGetCubicIntegralApprox(f32 t, f32 f, f32 *cof)
 f32 syInterpGetFracFrame(SYInterpDesc *desc, f32 t)
 {
     f32 *point; // v0
+    f32 *keyframes = syInterpGetKeyframes(desc);
+    f32 *quartics = syInterpGetQuartics(desc);
+#ifdef PORT
+    Vec3f *points = syInterpGetPoints(desc);
+    static s32 sSYInterpNullResolveLogCount = 0;
+#endif
     s32 id;
     f32 frac_frame; // sp5C
     f32 time_scale;
@@ -301,8 +466,18 @@ f32 syInterpGetFracFrame(SYInterpDesc *desc, f32 t)
     f32 res;
     f32 diff; // f24
 
+#ifdef PORT
+    if (((points == NULL) || (keyframes == NULL) || (quartics == NULL)) && (sSYInterpNullResolveLogCount < 16))
+    {
+        sSYInterpNullResolveLogCount++;
+        port_log("SSB64: syInterpGetFracFrame - null resolve desc=%p kind=%u points_num=%d points=0x%08x keyframes=0x%08x quartics=0x%08x length=%f resolved=[%p %p %p]\n",
+            desc, desc->kind, desc->points_num, desc->points, desc->keyframes, desc->quartics, desc->length,
+            points, keyframes, quartics);
+    }
+#endif
+
     id = 0;
-    point = desc->keyframes;
+    point = keyframes;
 
     while (point[1] < t)
     {
@@ -312,18 +487,18 @@ f32 syInterpGetFracFrame(SYInterpDesc *desc, f32 t)
     switch (desc->kind)
     {
     case nSYInterpKindLinear:
-        frac_frame = (t - desc->keyframes[id]) / (desc->keyframes[id + 1] - desc->keyframes[id]);
+        frac_frame = (t - keyframes[id]) / (keyframes[id + 1] - keyframes[id]);
         break;
 
     case nSYInterpKindBezierS3:
     case nSYInterpKindBezier:
     case nSYInterpKindCatrom:
-        time_scale = (t - desc->keyframes[id]) * desc->length;
+        time_scale = (t - keyframes[id]) * desc->length;
 
         do
         {
             frac_frame = (min + max) / 2.0F;
-            res = syInterpGetCubicIntegralApprox(min, frac_frame, desc->quartics + (id * 5));
+            res = syInterpGetCubicIntegralApprox(min, frac_frame, quartics + (id * 5));
 
             if (time_scale < (res + 0.00001F)) 
             {

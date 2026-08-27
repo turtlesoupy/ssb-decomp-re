@@ -1,9 +1,21 @@
+#include <string.h>
 #include <sys/audio.h>
 #include <sys/scheduler.h>
 #include <sys/dma.h>
 #include <sys/main.h>
 #include <PR/rcp.h>
 #include <PR/gu.h>
+
+#ifdef PORT
+#include "audio/audio_playback.h"
+#include "audio/audio_dma.h"
+#include "bridge/audio_bridge.h"
+#include "acmd_trace/acmd_trace.h"
+#include "port_log.h"
+extern void func_80026738_27338(void *arg0);
+extern void func_800266A0_272A0(void);
+extern void func_80026204_26E04(void *arg0);
+#endif
 
 extern SYAudioSettings dSYAudioPublicSettings2, dSYAudioPublicSettings3;
 
@@ -102,13 +114,13 @@ SYAudioSettings dSYAudioPublicSettings =
     0,                              // ???
     50,                             // ???
     20,                             // Priority
-    &B1_sounds2_ctl_ROM_START,      // ROM address
-    &B1_sounds2_ctl_ROM_END,        // ROM address
-    &B1_sounds2_ctl_ROM_END,        // ROM address
-    &B1_sounds1_ctl_ROM_START,      // ROM address
-    &B1_sounds1_ctl_ROM_END,        // ROM address
-    &B1_sounds1_ctl_ROM_END,        // ROM address
-    &S1_music_sbk_ROM_START,        // ROM address
+    (uintptr_t)&B1_sounds2_ctl_ROM_START,      // bank1_start
+    (uintptr_t)&B1_sounds2_ctl_ROM_END,        // bank1_end
+    &B1_sounds2_ctl_ROM_END,                   // table1_start (void*)
+    (uintptr_t)&B1_sounds1_ctl_ROM_START,      // bank2_start
+    (uintptr_t)&B1_sounds1_ctl_ROM_END,        // bank2_end
+    &B1_sounds1_ctl_ROM_END,                   // table2_start (void*)
+    (uintptr_t)&S1_music_sbk_ROM_START,        // sbk_start
     AL_FX_NONE,                     // FX type
     48,                             // ???
     24,                             // ???
@@ -122,12 +134,12 @@ SYAudioSettings dSYAudioPublicSettings =
     0,                              // ucode count
     0,                              // table count
     0,                              // 0x4C
-    &fgm_unk_ROM_START,             // ROM address
-    &fgm_unk_ROM_END,               // ROM address
-    &fgm_tbl_ROM_START,             // ROM address
-    &fgm_tbl_ROM_END,               // ROM address
-    &fgm_ucd_ROM_START,             // ROM address
-    &fgm_ucd_ROM_END                // ROM address
+    (uintptr_t)&fgm_unk_ROM_START,             // fgm_table_start
+    (uintptr_t)&fgm_unk_ROM_END,               // fgm_table_end
+    (uintptr_t)&fgm_tbl_ROM_START,             // fgm_ucode_start
+    (uintptr_t)&fgm_tbl_ROM_END,               // fgm_ucode_end
+    (uintptr_t)&fgm_ucd_ROM_START,             // ???
+    (uintptr_t)&fgm_ucd_ROM_END                // ???
 };
 
 // // // // // // // // // // // //
@@ -137,7 +149,12 @@ SYAudioSettings dSYAudioPublicSettings =
 // // // // // // // // // // // //
 
 // 0x800472D0
-#if defined(REGION_US)
+#ifdef PORT
+// PORT: Larger heap — N64 heap was sized for 4MB RDRAM.  On PC we need
+// space for parsed bank structs, sequence data copies, FGM packages,
+// Acmd double buffers, and audio output triple buffers.
+u8 gSYAudioHeapBuffer[0x100000]; // 1 MB
+#elif defined(REGION_US)
 u8 gSYAudioHeapBuffer[0x56000];
 #else
 u8 gSYAudioHeapBuffer[0x53000];
@@ -216,7 +233,7 @@ ALBank *sSYAudioSequenceBank2;
 ALSeqFile *sSYAudioSeqFile;
 
 // 0x8009D960
-ALCSPlayer *gSYAudioCSPlayers[SYAUDIO_BGMPLAYERS_NUM];
+N_ALCSPlayer *gSYAudioCSPlayers[SYAUDIO_BGMPLAYERS_NUM];
 
 // 0x8009D964
 ALCSeq *sSYAudioCSeqs[SYAUDIO_BGMPLAYERS_NUM];
@@ -228,10 +245,21 @@ u8 gSYAudioGlobalBGMPriority;
 u8 *sSYAudioBGMSequenceDatas[SYAUDIO_BGMPLAYERS_NUM];
 
 // 0x8009D970
+#ifdef PORT
+static u8 sSYAudioCSPlayerStatusesBuf[SYAUDIO_BGMPLAYERS_NUM];
+u8 *sSYAudioCSPlayerStatuses = sSYAudioCSPlayerStatusesBuf;
+static s32 sSYAudioPortPaceError;
+#else
 u8 *sSYAudioCSPlayerStatuses;
+#endif
 
 // 0x8009D974
+#ifdef PORT
+static s32 sSYAudioBGMPlayingIDsBuf[SYAUDIO_BGMPLAYERS_NUM];
+s32 *sSYAudioBGMPlayingIDs = sSYAudioBGMPlayingIDsBuf;
+#else
 s32 *sSYAudioBGMPlayingIDs;
+#endif
 
 // 0x8009D978
 s32 sSYAudioBGMVolumeTimers[SYAUDIO_BGMPLAYERS_NUM];
@@ -256,6 +284,39 @@ extern void func_80026094_26C94(void*, u8);
 extern void* func_800269C0_275C0(u16);
 extern void func_80026070_26C70(u8);
 extern void func_80026174_26D74(void*, u8);
+
+#ifdef PORT
+static s16 syAudioGetPortSampleCount(void)
+{
+    s32 high_count = sSYAudioFrequency;
+    s32 low_count = D_8009D920_96D20;
+    s32 target_rate = sSYAudioCurrentSettings.output_rate;
+    s32 error_step;
+    s32 error_limit;
+
+    if ((low_count <= 0) || (high_count <= low_count) || (target_rate <= 0))
+    {
+        return high_count;
+    }
+
+    error_step = (high_count * 60) - target_rate;
+    error_limit = (high_count - low_count) * 60;
+
+    if (error_step <= 0)
+    {
+        return high_count;
+    }
+
+    sSYAudioPortPaceError += error_step;
+
+    if (sSYAudioPortPaceError >= error_limit)
+    {
+        sSYAudioPortPaceError -= error_limit;
+        return low_count;
+    }
+    return high_count;
+}
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -438,21 +499,25 @@ void syAudioReadRom(uintptr_t rom, void *vram, size_t size)
 }
 
 // 0x8001E99C
+#ifdef PORT
+uintptr_t syAudioDma(uintptr_t addr, s32 len, void *state)
+#else
 s32 syAudioDma(s32 addr, s32 len, void *state)
+#endif
 {
     void *freeBuffer;
     AMDMAState *dState = state;
     s32 delta = 0;
-    u32 bStartAddr;
-    u32 bEndAddr;
+    uintptr_t bStartAddr;
+    uintptr_t bEndAddr;
     AMDMABuffer *dBuff = &dState->buffers[dState->currentBuffer];
     OSMesg dummyMesg;
 
     /*
      * Is it in the last buffer
      */
-    bStartAddr = (u32) dBuff->addr;
-    bEndAddr = (u32) bStartAddr + dBuff->len;
+    bStartAddr = (uintptr_t) dBuff->addr;
+    bEndAddr = bStartAddr + dBuff->len;
 
     if ((addr >= bStartAddr) && (addr + len <= bEndAddr))
     {
@@ -480,7 +545,7 @@ s32 syAudioDma(s32 addr, s32 len, void *state)
 
         osEPiStartDma(gSYDmaRomPiHandle, &audDMAIOMesgBuf[dSYAudioNextDma++], OS_READ);
     }
-    return (s32) osVirtualToPhysical(freeBuffer) + delta;
+    return (uintptr_t) osVirtualToPhysical(freeBuffer) + delta;
 }
 
 // 0x8001EAC8
@@ -810,7 +875,7 @@ void syAudioLoadAssets(void)
         len = sSYAudioSeqFile->seqCount * sizeof(ALSeqData) + 4;
         sSYAudioSeqFile = alHeapAlloc(&sSYAudioHeap, 1, sSYAudioSeqFile->seqCount * sizeof(ALSeqData) + 4);
         syAudioReadRom(sSYAudioCurrentSettings.sbk_start, sSYAudioSeqFile, len); 
-        alSeqFileNew(sSYAudioSeqFile, (uintptr_t)sSYAudioCurrentSettings.sbk_start);
+        alSeqFileNew(sSYAudioSeqFile, (u8 *)(uintptr_t)sSYAudioCurrentSettings.sbk_start);
     }
     // get maximal seq length
     for (i = 0, len = 0; i < sSYAudioSeqFile->seqCount; i++)
@@ -894,7 +959,11 @@ void syAudioMakeBGMPlayers(void)
     syn_config.maxVVoices = sSYAudioCurrentSettings.vvoices_num_max;
     syn_config.maxPVoices = sSYAudioCurrentSettings.pvoices_num_max;
     syn_config.maxUpdates = sSYAudioCurrentSettings.updates_num_max;
+#ifdef PORT
+    syn_config.dmaproc = (ALDMANew)(void *)portAudioDmaNew;
+#else
     syn_config.dmaproc = syAudioDmaNew;
+#endif
     syn_config.outputRate = osAiSetFrequency(sSYAudioCurrentSettings.output_rate);
     syn_config.heap = &sSYAudioHeap;
 
@@ -914,7 +983,9 @@ void syAudioMakeBGMPlayers(void)
     sSYAudioFrequency = (syn_config.outputRate / 60.0F);
     sSYAudioFrequency = ((sSYAudioFrequency / 184) * 184) + 184;
     D_8009D920_96D20 = sSYAudioFrequency - 184;
-    
+#ifdef PORT
+    sSYAudioPortPaceError = 0;
+#endif
     audio_config.unk_80026204_0x0 = sSYAudioCurrentSettings.unk31;
     audio_config.unk_80026204_0x2 = sSYAudioCurrentSettings.unk32;
     audio_config.unk_80026204_0x4 = sSYAudioCurrentSettings.sndplayers_num;
@@ -922,16 +993,39 @@ void syAudioMakeBGMPlayers(void)
     if (sSYAudioCurrentSettings.unk34 != 0)
     {
         audio_config.inst_sound_count = sSYAudioCurrentSettings.unk34;
-        audio_config.inst_sound_array = sSYAudioCurrentSettings.unk38;
+        audio_config.inst_sound_array = (void *)(intptr_t)sSYAudioCurrentSettings.unk38;
     }
     else
     {
+#ifdef PORT
+        /* PORT: instArray[0] can be NULL when the CTL binary has offset 0
+         * for the first instrument slot (unused/dummy).  On N64 alBnkfNew
+         * adds the base address so offset 0 becomes non-NULL garbage.
+         * Use instArray[1] as fallback (first real instrument). */
+        {
+            ALInstrument *inst0 = sSYAudioSequenceBank1->instArray[0];
+            if (inst0 == NULL && sSYAudioSequenceBank1->instCount > 1)
+            {
+                inst0 = sSYAudioSequenceBank1->instArray[1];
+            }
+            audio_config.inst_sound_count = inst0 ? inst0->soundCount : 0;
+            audio_config.inst_sound_array = inst0 ? inst0->soundArray : NULL;
+        }
+#else
         audio_config.inst_sound_count = sSYAudioSequenceBank1->instArray[0]->soundCount;
         audio_config.inst_sound_array = sSYAudioSequenceBank1->instArray[0]->soundArray;
+#endif
     }
     audio_config.fgm_ucode_data = sSYAudioCurrentSettings.fgm_ucode_data;
     audio_config.fgm_table_data = sSYAudioCurrentSettings.fgm_table_data;
+#ifdef PORT
+    /* PORT: unk44 is a real heap pointer to the FGM unk44 package data;
+     * widened SYAudioConfig.unk_80026204_0x1C accepts the full 64-bit
+     * value without truncation. */
     audio_config.unk_80026204_0x1C = sSYAudioCurrentSettings.unk44;
+#else
+    audio_config.unk_80026204_0x1C = (s32)(uintptr_t)sSYAudioCurrentSettings.unk44;
+#endif
     audio_config.fgm_ucode_count = sSYAudioCurrentSettings.fgm_ucode_count;
     audio_config.fgm_table_count = sSYAudioCurrentSettings.fgm_table_count;
     audio_config.unk_80026204_0xC = sSYAudioCurrentSettings.unk4C;
@@ -1001,15 +1095,257 @@ void syAudioThreadMain(void *arg)
     sp73 = 2;
 
     syAudioInit();
-    
+
     sSYAudioCurrentSettings = dSYAudioPublicSettings;
-    
+
+#ifdef PORT
+    /* PORT: Load audio assets from .o2r archive instead of ROM DMA.
+     * portAudioLoadAssets() parses big-endian N64 binary and constructs
+     * native C structs with correct 64-bit pointer width. */
+    portAudioLoadAssets();
+#else
     syAudioLoadAssets();
+#endif
     syAudioMakeBGMPlayers();
-    
+
     dSYAudioPublicSettings = sSYAudioCurrentSettings;
-    
+
     osSendMesg(&gSYMainThreadingMesgQueue, (OSMesg)1, OS_MESG_NOBLOCK);
+
+#ifdef PORT
+    /* PORT (Phase 4): Full audio synthesis loop with BGM/FGM game API processing.
+     * n_alAudioFrame runs the synthesis pull chain.  With mixer.h's macro
+     * replacement active, the ABI macros (aSetBuffer, aLoadBuffer, etc.)
+     * call CPU functions directly instead of building RSP command lists.
+     * After synthesis, per-frame processing handles:
+     *   - FGM sound player cleanup (finished effects)
+     *   - BGM state machine (stop → load → play → track)
+     *   - BGM volume fading
+     *   - Audio settings update and restart */
+    {
+        s32 port_cmdLen;
+        s32 port_id_mod3;
+        s32 port_i;
+
+        acmd_trace_init();
+
+        port_log("SSB64 Audio: thread entering synthesis loop (freq=%d)\n",
+                 (int)sSYAudioFrequency);
+        port_log("SSB64 Audio: port pacing target=%d high=%d low=%d\n",
+                 (int)sSYAudioCurrentSettings.output_rate,
+                 (int)sSYAudioFrequency,
+                 (int)D_8009D920_96D20);
+
+        while (TRUE)
+        {
+            osRecvMesg(&sSYAudioTicMesgQueue, NULL, OS_MESG_BLOCK);
+
+            port_i = dSYAudioCurrentTic & 1;
+            sSYAudioCurrentAcmdListBuffer = sSYAudioAcmdListBuffers[port_i];
+            port_id_mod3 = dSYAudioCurrentTic % 3;
+
+            dSYAudioSampleCounts[port_id_mod3] = syAudioGetPortSampleCount();
+
+            acmd_trace_begin_task();
+
+            {
+                static sb32 sFrameLogged = FALSE;
+                if (!sFrameLogged)
+                {
+                    sFrameLogged = TRUE;
+                    port_log("SSB64 Audio: first n_alAudioFrame (tic=%d samples=%d)\n",
+                             (int)dSYAudioCurrentTic,
+                             (int)dSYAudioSampleCounts[port_id_mod3]);
+                }
+            }
+
+            n_alAudioFrame(sSYAudioCurrentAcmdListBuffer, &port_cmdLen,
+                           sSYAudioDataBuffers[port_id_mod3],
+                           dSYAudioSampleCounts[port_id_mod3]);
+
+            acmd_trace_end_task();
+
+            portAudioSubmitFrame(sSYAudioDataBuffers[port_id_mod3],
+                                 dSYAudioSampleCounts[port_id_mod3]);
+
+            dSYAudioCurrentTic++;
+
+            /* --- Per-frame FGM cleanup: null out finished sound players --- */
+            for (port_i = 0; port_i < sSYAudioCurrentSettings.sndplayers_num; port_i++)
+            {
+                if ((sSYAudioSoundPlayers[port_i] != NULL) && (sSYAudioSoundPlayers[port_i]->unk_0x10 == 0))
+                {
+                    sSYAudioSoundPlayers[port_i] = NULL;
+                }
+            }
+
+            /* --- Per-frame BGM state machine --- */
+            for (port_i = 0; port_i < SYAUDIO_BGMPLAYERS_NUM; port_i++)
+            {
+                switch (sSYAudioCSPlayerStatuses[port_i])
+                {
+                case 1:
+                    if (gSYAudioCSPlayers[port_i]->state != AL_STOPPED)
+                    {
+                        n_alCSPStop(gSYAudioCSPlayers[port_i]);
+                        continue;
+                    }
+                    else if (sSYAudioBGMPlayingIDs[port_i] < 0)
+                    {
+                        sSYAudioCSPlayerStatuses[port_i]--;
+                        continue;
+                    }
+                    else
+                    {
+                        /* PORT: Sequence data offsets are already memory pointers
+                         * (audio_bridge's parseSeqFile converts ROM offsets).
+                         * Use memcpy instead of syAudioReadRom. */
+                        memcpy(sSYAudioBGMSequenceDatas[port_i],
+                               sSYAudioSeqFile->seqArray[sSYAudioBGMPlayingIDs[port_i]].offset,
+                               sSYAudioSeqFile->seqArray[sSYAudioBGMPlayingIDs[port_i]].len);
+
+                        /* PORT: Byte-swap the ALCMidiHdr — sequence data from
+                         * ROM is big-endian.  The MIDI event stream itself is
+                         * byte-oriented (VarLen + single-byte status), but the
+                         * header has u32 trackOffset[16] and u32 division. */
+                        {
+                            u32 *hdr = (u32 *)sSYAudioBGMSequenceDatas[port_i];
+                            s32 j;
+                            for (j = 0; j < 17; j++) /* 16 trackOffsets + 1 division */
+                            {
+                                u32 v = hdr[j];
+                                hdr[j] = ((v >> 24) & 0xFF)
+                                       | ((v >>  8) & 0xFF00)
+                                       | ((v <<  8) & 0xFF0000)
+                                       | ((v << 24) & 0xFF000000);
+                            }
+                        }
+
+                        sSYAudioCSPlayerStatuses[port_i]++;
+                        continue;
+                    }
+                    break;
+
+                case 2:
+                    n_alCSeqNew(sSYAudioCSeqs[port_i], sSYAudioBGMSequenceDatas[port_i]);
+                    n_alCSPSetSeq(gSYAudioCSPlayers[port_i], sSYAudioCSeqs[port_i]);
+                    n_alCSPPlay(gSYAudioCSPlayers[port_i]);
+
+                    for (port_cmdLen = 0; port_cmdLen < AL_MAX_CHANNELS; port_cmdLen++)
+                    {
+                        n_alCSPSetChlPriority(gSYAudioCSPlayers[port_i], port_cmdLen, gSYAudioGlobalBGMPriority);
+                    }
+                    sSYAudioCSPlayerStatuses[port_i]++;
+                    break;
+
+                case 3:
+                    if (gSYAudioCSPlayers[port_i]->state == AL_STOPPED)
+                    {
+                        sSYAudioCSPlayerStatuses[port_i] = AL_STOPPED;
+                        sSYAudioBGMPlayingIDs[port_i] = -1;
+                    }
+                    break;
+                }
+            }
+
+            /* --- Per-frame BGM volume fading --- */
+            for (port_i = 0; port_i < ARRAY_COUNT(sSYAudioBGMVolumeTimers); port_i++)
+            {
+                if (sSYAudioBGMVolumeTimers[port_i] != 0)
+                {
+                    sSYAudioBGMVolumeTimers[port_i]--;
+
+                    sSYAudioBGMVolumes[port_i] += sSYAudioBGMVolumeRates[port_i];
+
+                    if (sSYAudioBGMVolumes[port_i] < 0.0F)
+                    {
+                        sSYAudioBGMVolumes[port_i] = 0.0F;
+                    }
+                    else if (sSYAudioBGMVolumes[port_i] > 30720.0F)
+                    {
+                        sSYAudioBGMVolumes[port_i] = 30720.0F;
+                    }
+                    n_alCSPSetVol(gSYAudioCSPlayers[port_i], sSYAudioBGMVolumes[port_i]);
+                }
+            }
+
+            /* --- Audio settings update (scene change, etc.) --- */
+            if (dSYAudioIsSettingsUpdated != FALSE)
+            {
+                port_cmdLen = sSYAudioCurrentSettings.sndplayers_num + 1;
+
+                for (port_i = 0; port_i < sSYAudioCurrentSettings.sndplayers_num; port_i++)
+                {
+                    if (sSYAudioSoundPlayers[port_i] == NULL)
+                    {
+                        port_cmdLen--;
+                    }
+                }
+                for (port_i = 0; port_i < SYAUDIO_BGMPLAYERS_NUM; port_i++)
+                {
+                    if (sSYAudioCSPlayerStatuses[port_i] == AL_STOPPED)
+                    {
+                        port_cmdLen--;
+                    }
+                }
+                if (port_cmdLen == 0)
+                {
+                    n_alClose(&sSYAudioGlobals);
+
+                    sSYAudioCurrentSettings = dSYAudioPublicSettings;
+
+                    portAudioLoadAssets();
+                    syAudioMakeBGMPlayers();
+
+                    dSYAudioPublicSettings = sSYAudioCurrentSettings;
+
+                    dSYAudioIsSettingsUpdated = FALSE;
+                    osSendMesg(&gSYMainThreadingMesgQueue, (OSMesg)1, OS_MESG_NOBLOCK);
+                }
+                else
+                {
+                    syAudioStopBGMAll();
+                    func_80020E28();
+                }
+            }
+
+            /* --- Audio restart (FX type change) --- */
+            if (dSYAudioIsRestarting != FALSE)
+            {
+                port_cmdLen = sSYAudioCurrentSettings.sndplayers_num + 1;
+
+                for (port_i = 0; port_i < sSYAudioCurrentSettings.sndplayers_num; port_i++)
+                {
+                    if (sSYAudioSoundPlayers[port_i] == NULL)
+                    {
+                        port_cmdLen--;
+                    }
+                }
+                for (port_i = 0; port_i < SYAUDIO_BGMPLAYERS_NUM; port_i++)
+                {
+                    if (sSYAudioCSPlayerStatuses[port_i] == AL_STOPPED)
+                    {
+                        port_cmdLen--;
+                    }
+                }
+                if (port_cmdLen == 0)
+                {
+                    n_alClose(&sSYAudioGlobals);
+                    sSYAudioHeap.cur = sSYAudioHeapBase;
+                    sSYAudioHeap.count = sSYAudioHeapSize;
+                    syAudioMakeBGMPlayers();
+                    dSYAudioPublicSettings = sSYAudioCurrentSettings;
+                    dSYAudioIsRestarting = FALSE;
+                }
+                else
+                {
+                    syAudioStopBGMAll();
+                    func_80020E28();
+                }
+            }
+        }
+    }
+#endif
 
     while (TRUE)
     {
@@ -1035,7 +1371,7 @@ void syAudioThreadMain(void *arg)
         }
         sSYAudioTimeStamp = osGetTime();
         
-        sSYAudioCurrentAcmdListBuffer = n_alAudioFrame(sSYAudioCurrentAcmdListBuffer, &sp80, osVirtualToPhysical(sSYAudioDataBuffers[id_mod3]), dSYAudioSampleCounts[id_mod3]);
+        sSYAudioCurrentAcmdListBuffer = n_alAudioFrame(sSYAudioCurrentAcmdListBuffer, &sp80, (s16 *)(uintptr_t)osVirtualToPhysical(sSYAudioDataBuffers[id_mod3]), dSYAudioSampleCounts[id_mod3]);
 
         sSYAudioCurrentTask->info.type = nSYTaskTypeAudio;
         sSYAudioCurrentTask->info.priority = 80;
@@ -1113,7 +1449,7 @@ void syAudioThreadMain(void *arg)
                 }
                 else
                 {
-                    syAudioReadRom(sSYAudioSeqFile->seqArray[sSYAudioBGMPlayingIDs[i]].offset, sSYAudioBGMSequenceDatas[i], sSYAudioSeqFile->seqArray[sSYAudioBGMPlayingIDs[i]].len);
+                    syAudioReadRom((uintptr_t)sSYAudioSeqFile->seqArray[sSYAudioBGMPlayingIDs[i]].offset, sSYAudioBGMSequenceDatas[i], sSYAudioSeqFile->seqArray[sSYAudioBGMPlayingIDs[i]].len);
                     sSYAudioCSPlayerStatuses[i]++;
                     continue;
                 }
@@ -1265,6 +1601,15 @@ void syAudioSetFXType(s32 fx_type)
     {
         dSYAudioIsRestarting++;
         sSYAudioCurrentSettings.fx_type = fx_type;
+#ifdef PORT
+        /* PORT: scManagerRunLoop does not spin waiting for the pending
+         * settings-update handshake to finish. If a settings update and an FX
+         * type change are requested in the same frame, the audio thread handles
+         * the settings update first and copies dSYAudioPublicSettings over
+         * sSYAudioCurrentSettings. Keep the public pending settings in sync so
+         * that copy does not erase the requested FX type. */
+        dSYAudioPublicSettings.fx_type = fx_type;
+#endif
     }
 }
 
@@ -1279,9 +1624,49 @@ void syAudioStopBGMAll(void)
     }
 }
 
+#ifdef PORT
+static sb32 syAudioHasBGMData(void)
+{
+    return (sSYAudioSeqFile != NULL);
+}
+
+static sb32 syAudioHasBGMPlayer(s32 sngplayer)
+{
+    return (sngplayer >= 0) && (sngplayer < SYAUDIO_BGMPLAYERS_NUM) && (gSYAudioCSPlayers[sngplayer] != NULL);
+}
+
+static sb32 syAudioHasSoundPlayers(void)
+{
+    return (sSYAudioSoundPlayers != NULL);
+}
+#endif
+
+#ifdef PORT
+// ShuffleMusic.cpp
+extern u32 port_enhancement_shuffle_music(u32 requested_bgm);
+#endif
+
 // 0x80020AB4
 s32 syAudioPlayBGM(s32 sngplayer, u32 bgm)
 {
+#ifdef PORT
+    if (syAudioHasBGMData() == FALSE)
+    {
+        return -1;
+    }
+    {
+        static sb32 sBgmLogged = FALSE;
+        if (!sBgmLogged)
+        {
+            sBgmLogged = TRUE;
+            port_log("SSB64 Audio: first syAudioPlayBGM sngplayer=%d bgm=%u seqCount=%d\n",
+                     (int)sngplayer, (unsigned)bgm, (int)sSYAudioSeqFile->seqCount);
+        }
+    }
+
+    bgm = port_enhancement_shuffle_music(bgm); // music shuffler
+
+#endif
     if (bgm < sSYAudioSeqFile->seqCount)
     {
         sSYAudioCSPlayerStatuses[sngplayer] = AL_PLAYING;
@@ -1361,6 +1746,12 @@ void syAudioSetBGMPriority(s32 sngplayer, u8 priority)
 // 0x80020D58
 s32 syAudioCheckBGMPlaying(s32 sngplayer)
 {
+#ifdef PORT
+    if (syAudioHasBGMPlayer(sngplayer) == FALSE)
+    {
+        return FALSE;
+    }
+#endif
     if (gSYAudioCSPlayers[sngplayer]->state == AL_STOPPED)
     {
         return FALSE;
@@ -1371,6 +1762,21 @@ s32 syAudioCheckBGMPlaying(s32 sngplayer)
 s32 syAudioPlayFGM(u32 fgm)
 {
     s32 i;
+
+#ifdef PORT
+    if (syAudioHasSoundPlayers() == FALSE)
+    {
+        return -1;
+    }
+    {
+        static sb32 sFgmLogged = FALSE;
+        if (!sFgmLogged)
+        {
+            sFgmLogged = TRUE;
+            port_log("SSB64 Audio: first syAudioPlayFGM fgm=%u\n", (unsigned)fgm);
+        }
+    }
+#endif
     
     for (i = 0; i < sSYAudioCurrentSettings.sndplayers_num; i++)
     {
@@ -1410,6 +1816,12 @@ void func_80020E64(u32 volume)
 
 void func_80020EA0(s32 sndplayer, u32 arg1)
 {
+#ifdef PORT
+    if (syAudioHasSoundPlayers() == FALSE)
+    {
+        return;
+    }
+#endif
     if (arg1 > 32767)
     {
         arg1 = 32767;
@@ -1424,6 +1836,12 @@ void func_80020EF8(s32 sndplayer, s32 arg1)
 {
     u8 var = arg1;
 
+#ifdef PORT
+    if (syAudioHasSoundPlayers() == FALSE)
+    {
+        return;
+    }
+#endif
     if (var > 127)
     {
         var = 127;
@@ -1438,6 +1856,12 @@ void func_80020F4C(s32 sndplayer, s32 arg1)
 {
     u8 var = arg1;
 
+#ifdef PORT
+    if (syAudioHasSoundPlayers() == FALSE)
+    {
+        return;
+    }
+#endif
     if (var > 127)
     {
         var = 127;
@@ -1457,6 +1881,12 @@ void func_80020FA0_21BA0(s32 sndplayer, s32 arg1)
 // 0x80020FAC
 void syAudioStopFGM(s32 sndplayer)
 {
+#ifdef PORT
+    if (syAudioHasSoundPlayers() == FALSE)
+    {
+        return;
+    }
+#endif
     if (sSYAudioSoundPlayers[sndplayer] != NULL)
     {
         func_80026738_27338(sSYAudioSoundPlayers[sndplayer]);
@@ -1467,6 +1897,12 @@ void syAudioStopFGM(s32 sndplayer)
 // 0x80020FFC
 void func_80020FFC(s32 sndplayer, u8 arg1)
 {
+#ifdef PORT
+    if (syAudioHasSoundPlayers() == FALSE)
+    {
+        return;
+    }
+#endif
     if (sSYAudioSoundPlayers[sndplayer] != NULL)
     {
         sSYAudioSoundPlayers[sndplayer]->unk_0x1F = arg1;

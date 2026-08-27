@@ -13,7 +13,11 @@ WPDesc dWPFoxBlasterWeaponDesc =
     0x00,                                  // Render flags?
     nWPKindBlaster,                        // Weapon Kind
     &gFTDataFoxSpecial1,                   // Pointer to character's loaded files?
+#ifdef PORT
+    llFoxSpecial1BlasterWeaponAttributes, // Offset of weapon attributes in loaded files
+#else
     &llFoxSpecial1BlasterWeaponAttributes, // Offset of weapon attributes in loaded files
+#endif
 
     // DObj transformation struct
     {

@@ -10,6 +10,16 @@
 // 0x80116BD0 - These will be linker variables in the future
 u32 dGMCommonFileIDs[/* */] = 
 { 
+#ifdef PORT
+    llIFCommonPlayerFileID,
+    llIFCommonGameStatusFileID,
+    llIFCommonPlayerDamageFileID,
+    llIFCommonTimerFileID,
+    llIFCommonDigitsFileID,
+    llIFCommonBattlePauseFileID,
+    llIFCommonPlayerTagsFileID,
+    llIFCommonAnnounceCommonFileID
+#else
     &llIFCommonPlayerFileID,
     &llIFCommonGameStatusFileID,
     &llIFCommonPlayerDamageFileID,
@@ -18,6 +28,7 @@ u32 dGMCommonFileIDs[/* */] =
     &llIFCommonBattlePauseFileID,
     &llIFCommonPlayerTagsFileID,
     &llIFCommonAnnounceCommonFileID
+#endif
 };
 
 // // // // // // // // // // // //

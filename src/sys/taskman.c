@@ -14,9 +14,33 @@
 #include <ssb_types.h>
 #include <stddef.h>
 
+#ifdef PORT
+#include <stdlib.h>
+extern void port_log(const char *fmt, ...);
+extern char *getenv(const char *name); /* decomp include/stdlib.h shadows the host header */
+#endif
+
 #include <PR/mbi.h>
 #include <PR/ucode.h>
 #include <PR/ultratypes.h>
+
+#ifdef PORT
+#include "port_log.h"
+/* The token-pointer table (port/resource/RelocPointerTable) and Fast3D's
+ * uintptr_t Gfx words make the port pointer-width-agnostic, so both LP64/LLP64
+ * (8-byte) and ILP32 (4-byte, e.g. Android armeabi-v7a) builds are supported.
+ * Guard only against an exotic uintptr_t that matches neither. */
+_Static_assert(sizeof(uintptr_t) == 8 || sizeof(uintptr_t) == 4,
+               "PORT build requires 32- or 64-bit uintptr_t");
+
+/* PORT scene arena. Allocated once in syTaskmanStartTask, recycled across
+ * every scene transition. File-scope so port-side diag and cache code can
+ * classify a pointer as in-arena vs reloc-file vs unknown without round-
+ * tripping through the taskman API. See docs/bugs/dl_link_stale_pointer
+ * _guard_2026-05-09.md for the recycle rationale. */
+void *gPortSceneHeap = NULL;
+const size_t gPortSceneHeapSize = 16 * 1024 * 1024;
+#endif
 
 // externs
 extern void syTaskmanCheckBufferLengths();
@@ -105,7 +129,11 @@ OSMesgQueue D_800454C8;
 SYClient sSYTaskmanClient;
 
 // 0x800454E8
+#ifdef PORT
+uintptr_t *sSYTaskmanSegmentFBase; // pointer to Gfx.w1 (segment base addr?)
+#else
 unsigned int *sSYTaskmanSegmentFBase; // pointer to Gfx.w1 (segment base addr?)
+#endif
 
 // 0x800454F0
 OSMesg sSYTaskmanContextMesgs[3];
@@ -257,13 +285,43 @@ void unref_80004934(u16 arg0, u16 arg1)
 // 0x80004950
 void syTaskmanInitGeneralHeap(void *start, u32 size)
 {
+#ifdef PORT
+	if ((start == NULL) || (size == 0))
+	{
+		port_log("SSB64: syTaskmanInitGeneralHeap received invalid PORT heap start=%p size=0x%x\n",
+		         start, (unsigned)size);
+		while (TRUE);
+	}
 	syMallocInit(&gSYTaskmanGeneralHeap, 0x10000, start, size);
+#else
+	syMallocInit(&gSYTaskmanGeneralHeap, 0x10000, start, size);
+#endif
 }
 
 // 0x80004980
 void* syTaskmanMalloc(size_t size, u32 align) // alloc_with_alignment
 {
+#ifdef PORT
+	static s32 sMallocDebugCount = 0;
+	void *result = syMallocSet(&gSYTaskmanGeneralHeap, size, align);
+	if (result == NULL)
+	{
+		port_log("SSB64: syTaskmanMalloc returned NULL (size=%u align=%u start=%p ptr=%p end=%p)\n",
+		         (unsigned)size, (unsigned)align,
+		         gSYTaskmanGeneralHeap.start, gSYTaskmanGeneralHeap.ptr, gSYTaskmanGeneralHeap.end);
+		syDebugPrintf("gtl : syTaskmanMalloc returned NULL (size=%d align=%d)\n", size, align);
+		while (TRUE);
+	}
+	if (sMallocDebugCount < 30) {
+		port_log("SSB64: syTaskmanMalloc(size=%u align=%u) = %p (heap ptr=%p end=%p)\n",
+		         (unsigned)size, (unsigned)align, result,
+		         gSYTaskmanGeneralHeap.ptr, gSYTaskmanGeneralHeap.end);
+		sMallocDebugCount++;
+	}
+	return result;
+#else
 	return syMallocSet(&gSYTaskmanGeneralHeap, size, align);
+#endif
 }
 
 // 0x800049B0
@@ -323,14 +381,31 @@ void syTaskmanCheckBufferLengths(void)
 	{
 		if (sSYTaskmanDLBuffers[gSYTaskmanTaskID][i].length + (uintptr_t)sSYTaskmanDLBuffers[gSYTaskmanTaskID][i].start < (uintptr_t)gSYTaskmanDLHeads[i])
 		{
+#ifdef PORT
+			port_log("SSB64: DLBuffer OVERFLOW kind=%d used=%llu alloc=%u start=%p head=%p\n",
+				i,
+				(unsigned long long)((uintptr_t)gSYTaskmanDLHeads[i] - (uintptr_t)sSYTaskmanDLBuffers[gSYTaskmanTaskID][i].start),
+				(unsigned int)sSYTaskmanDLBuffers[gSYTaskmanTaskID][i].length,
+				sSYTaskmanDLBuffers[gSYTaskmanTaskID][i].start,
+				gSYTaskmanDLHeads[i]);
+#else
 			syDebugPrintf("gtl : DLBuffer over flow !  kind = %d  vol = %d byte\n", i, (uintptr_t)gSYTaskmanDLHeads[i] - (uintptr_t)sSYTaskmanDLBuffers[gSYTaskmanTaskID][i].start);
 			while (TRUE);
+#endif
 		}
 	}
 	if ((uintptr_t)gSYTaskmanGraphicsHeap.end < (uintptr_t)gSYTaskmanGraphicsHeap.ptr)
 	{
+#ifdef PORT
+		port_log("SSB64: DynamicBuffer OVERFLOW used=%llu start=%p end=%p ptr=%p\n",
+			(unsigned long long)((uintptr_t)gSYTaskmanGraphicsHeap.ptr - (uintptr_t)gSYTaskmanGraphicsHeap.start),
+			gSYTaskmanGraphicsHeap.start,
+			gSYTaskmanGraphicsHeap.end,
+			gSYTaskmanGraphicsHeap.ptr);
+#else
 		syDebugPrintf("gtl : DynamicBuffer over flow !  %d byte\n", (uintptr_t)gSYTaskmanGraphicsHeap.ptr - (uintptr_t)gSYTaskmanGraphicsHeap.start);
 		while (TRUE);
+#endif
 	}
 }
 
@@ -841,12 +916,14 @@ void syTaskmanUpdateDLBuffers(void)
 // 0x80005AE4
 sb32 syTaskmanSwitchContext(s32 arg0)
 {
-	s32 msg;
+	OSMesg msg;
+	s32 msg_id;
 	s32 i;
 
-	while (osRecvMesg(&sSYTaskmanContextMesgQueue, (OSMesg*)&msg, OS_MESG_NOBLOCK) != -1)
+	while (osRecvMesg(&sSYTaskmanContextMesgQueue, &msg, OS_MESG_NOBLOCK) != -1)
 	{
-		D_80046638[msg] = 0;
+		msg_id = (s32)(intptr_t)msg;
+		D_80046638[msg_id] = 0;
 	}
 	do
 	{
@@ -861,8 +938,9 @@ sb32 syTaskmanSwitchContext(s32 arg0)
 		}
 		if (arg0 == 0)
 		{
-			osRecvMesg(&sSYTaskmanContextMesgQueue, (OSMesg*)&msg, OS_MESG_BLOCK);
-			D_80046638[msg] = 0;
+			osRecvMesg(&sSYTaskmanContextMesgQueue, &msg, OS_MESG_BLOCK);
+			msg_id = (s32)(intptr_t)msg;
+			D_80046638[msg_id] = 0;
 		}
 	}
 	while (arg0 == 0);
@@ -1017,6 +1095,19 @@ void syTaskmanRunTask(SYTaskFunction *tfunc)
 		func_80005D10();
 		syMainVerifyStackProbes();
 
+#ifdef PORT
+		{
+			static s32 sTaskmanLoopCount = 0;
+			if (sTaskmanLoopCount < 5) {
+				port_log("SSB64: syTaskmanRunTask — waiting for game tick (mq=%p cap=%d valid=%d) loop=%d\n",
+				         (void *)&sSYTaskmanGameTicMesgQueue,
+				         (int)sSYTaskmanGameTicMesgQueue.msgCount,
+				         (int)sSYTaskmanGameTicMesgQueue.validCount,
+				         (int)sTaskmanLoopCount);
+			}
+			sTaskmanLoopCount++;
+		}
+#endif
 		for (i = 0; i < sSYTaskmanUpdateInterval; i++)
 		{
 			osRecvMesg(&sSYTaskmanGameTicMesgQueue, NULL, OS_MESG_BLOCK);
@@ -1122,7 +1213,8 @@ void syTaskmanCommonTaskDraw(SYTaskFunction *tfunc)
 // 0x8000641C
 void unref_8000641C(GObj *gobj)
 {
-	s32 id;
+	OSMesg id;
+	s32 id_index;
 	SYTaskGfxEnd *task;
 
 	syTaskmanSwitchContext(0);
@@ -1145,8 +1237,9 @@ void unref_8000641C(GObj *gobj)
 
 	do
 	{
-		osRecvMesg(&sSYTaskmanContextMesgQueue, (OSMesg*)&id, OS_MESG_BLOCK);
-		D_80046638[id] = 0;
+		osRecvMesg(&sSYTaskmanContextMesgQueue, &id, OS_MESG_BLOCK);
+		id_index = (s32)(intptr_t)id;
+		D_80046638[id_index] = 0;
 	}
 	while (D_80046638[gSYTaskmanTaskID] != 0);
 
@@ -1207,10 +1300,16 @@ void syTaskmanLoadScene(SYTaskmanSceneSetup *tscene, void (*func_start)(void))
 
 	dSYTaskmanUpdateCount = dSYTaskmanFrameCount = 0;
 
+#ifdef PORT
+	port_log("SSB64: syTaskmanLoadScene — about to call func_start=%p\n", (void *)func_start);
+#endif
 	if (func_start != NULL)
 	{
 		func_start();
 	}
+#ifdef PORT
+	port_log("SSB64: syTaskmanLoadScene — func_start returned, entering syTaskmanRunTask\n");
+#endif
 	syTaskmanRunTask(&sSYTaskmanDefaultFunction);
 }
 
@@ -1228,6 +1327,86 @@ void syTaskmanStartTask(SYTaskmanSetup *tsetup)
 {
 	GCSetup gcsetup;
 
+#ifdef PORT
+	/* PORT scene arena: the decomp arena_start / arena_size come from N64
+	 * linker symbols and are not usable as a host heap. Allocate a fixed
+	 * 16 MiB block once, reuse it across every scene transition, and zero
+	 * it between scenes via memset. We also evict port-side caches that
+	 * hold pointers into the arena (DL widening, texture upload, struct
+	 * fixup, reloc file ranges) so prior-scene resolutions don't resurface.
+	 *
+	 * Why recycle (vs. free + malloc per scene): on Linux/glibc, freed
+	 * scene heaps get madvise(MADV_DONTNEED)'d, so any latent stale
+	 * pointer (issue #128 family — see docs/bugs/) SIGSEGVs on the next
+	 * read. Recycling keeps the VA mapped and zero-fills it, matching the
+	 * silently-returns-zero behaviour macOS Magazine and Windows LFH have
+	 * on freed pages. The defensive dl_link guards in objdisplay.c catch
+	 * the symptom universally; this band-aid prevents the crash on Linux
+	 * where the allocator is unforgiving. */
+	{
+		extern void port_dl_range_register(const void *base, size_t size, const char *label);
+		extern void port_dl_range_unregister(const void *base);
+		extern void port_taskman_evict_arena_caches(const void *base, size_t size);
+
+		/* SSB64_SCENE_HEAP_FREE=1 — sanitizer diagnostic mode. Instead of
+		 * recycling the singleton arena, free() it and malloc() a fresh one
+		 * on every scene transition. Under ASan the freed arena sits in
+		 * quarantine poisoned, so ANY stale cross-scene read becomes a
+		 * heap-use-after-free report with full alloc/free/read stacks —
+		 * exactly the evidence the recycle band-aid hides. Not for normal
+		 * play (deliberately reintroduces the issue #128 crash shape). */
+		static int sPortSceneHeapFreeMode = -1;
+
+		if (sPortSceneHeapFreeMode < 0)
+		{
+			const char *env = getenv("SSB64_SCENE_HEAP_FREE");
+			sPortSceneHeapFreeMode = (env != NULL && env[0] == '1') ? 1 : 0;
+			if (sPortSceneHeapFreeMode)
+			{
+				port_log("SSB64: SSB64_SCENE_HEAP_FREE=1 — scene arena free+malloc per transition (sanitizer mode)\n");
+			}
+		}
+
+		if (gPortSceneHeap != NULL)
+		{
+			port_taskman_evict_arena_caches(gPortSceneHeap, gPortSceneHeapSize);
+			if (sPortSceneHeapFreeMode)
+			{
+				port_dl_range_unregister(gPortSceneHeap);
+				free(gPortSceneHeap);
+				gPortSceneHeap = NULL;
+			}
+		}
+		if (gPortSceneHeap == NULL)
+		{
+			gPortSceneHeap = malloc(gPortSceneHeapSize);
+			if (gPortSceneHeap == NULL)
+			{
+				port_log("SSB64: syTaskmanStartTask — failed to allocate PORT heap size=0x%llx\n",
+				         (unsigned long long)gPortSceneHeapSize);
+				while (TRUE);
+			}
+			/* Register the scene arena range with the DL-range registry so
+			 * gfx_step can detect walks that escape the arena. Registered
+			 * once in recycle mode (arena never moves); re-registered per
+			 * scene in free mode. */
+			port_dl_range_register(gPortSceneHeap, gPortSceneHeapSize, "scene_arena");
+		}
+		memset(gPortSceneHeap, 0, gPortSceneHeapSize);
+		tsetup->scene_setup.arena_start = gPortSceneHeap;
+		tsetup->scene_setup.arena_size = (u32)gPortSceneHeapSize;
+
+		/* The arena contents are gone either way (wiped or freed), so
+		 * scrub long-lived globals that point into it and whose consumers
+		 * NULL-guard. Scenes that use effects re-set these in
+		 * efManagerInitEffects; scenes that don't (nSCKindTitle) would
+		 * otherwise carry non-NULL-but-stale pointers forward. */
+		{
+			extern void efManagerPortClearFileRefs(void);
+			efManagerPortClearFileRefs();
+		}
+	}
+#endif
 	syTaskmanInitGeneralHeap(tsetup->scene_setup.arena_start, tsetup->scene_setup.arena_size);
 
 	gcsetup.gobjthreads = syTaskmanMalloc(sizeof(GObjThread) * tsetup->gobjthreads_num, 0x8);
@@ -1275,6 +1454,9 @@ void syTaskmanStartTask(SYTaskmanSetup *tsetup)
 	gcsetup.cobj_size = tsetup->cobj_size;
 
 	gcSetupObjman(&gcsetup);
+#ifdef PORT
+	port_log("SSB64: syTaskmanStartTask — gcSetupObjman done, entering syTaskmanLoadScene\n");
+#endif
 
 	sSYTaskmanDefaultFunction.task_update = syTaskmanCommonTaskUpdate;
 	sSYTaskmanDefaultFunction.task_draw = syTaskmanCommonTaskDraw;

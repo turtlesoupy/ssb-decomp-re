@@ -178,6 +178,7 @@ struct dbUnknownLink
     void *unk_dbunklink_0x10;
     dbUnknownLinkStruct unk_dbunklink_0x14;
 };
+#ifndef PORT
 
 typedef struct dbUnknown8_SC {
 	s16 x0;
@@ -186,6 +187,7 @@ typedef struct dbUnknown8_SC {
 	s16 y1;
 	s32 dbUnknown8_SC_0x8;
 } dbUnknown8_SC;
+#endif
 
 typedef struct dbUnknown8_S28 {
 	s32 dbUnknown8_S28_0x0[6];
@@ -410,10 +412,12 @@ typedef struct dbUnknownS14 {
     s32 dbUnknownS14_0x10;
 } dbUnknownS14;
 
+#ifndef PORT
 typedef struct Vec2hPair
 {
 	Vec2h pos;
 	Vec2h pos2;
 } Vec2hPair;
 
+#endif
 #endif

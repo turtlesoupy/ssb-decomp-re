@@ -2,6 +2,12 @@
 #include <ft/fighter.h>
 #include <reloc_data.h>
 
+#ifdef PORT
+#include <config.h>
+extern void *func_800269C0_275C0(u16 id);
+extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       EXTERNAL VARIABLES      //
@@ -9,7 +15,11 @@
 // // // // // // // // // // // //
 
 // WARNING: Intentionally erroneous declaration. Missing two u16 arguments after f32. HAL's mistake, not mine.
-extern void itMainSetFighterRelease(GObj*, Vec3f*, f32);
+/* PORT: declared with the true 5-arg signature. The original game (and the
+ * matching decomp) declares this 3-arg here — the last two args were garbage
+ * registers on N64. WASM traps on signature-mismatched calls, so the port
+ * passes explicit benign values at the call site instead. */
+extern void itMainSetFighterRelease(GObj*, Vec3f*, f32, u16, u16);
 
 // // // // // // // // // // // //
 //                               //
@@ -21,7 +31,7 @@ ITDesc dItLinkBombItemDesc =
 {
 	nITKindLinkBomb, 						// Item Kind
 	&gFTDataLinkMain, 						// Pointer to item file data?
-	&llLinkMainBombItemAttributes,			// Offset of item attributes in file?
+	llLinkMainBombItemAttributes,			// Offset of item attributes in file?
 
 	// DObj transformation struct
 	{
@@ -147,7 +157,7 @@ void itLinkBombExplodeWaitUpdateScale(GObj *item_gobj)
 
 	if (ip->item_vars.linkbomb.scale_int == 0)
 	{
-		f32 *scales = (f32*) ((uintptr_t)*dItLinkBombItemDesc.p_file + (intptr_t)&llLinkMainBombBloatScales);
+		f32 *scales = (f32*) ((uintptr_t)*dItLinkBombItemDesc.p_file + (intptr_t)llLinkMainBombBloatScales);
 		s32 scale_id = (ip->item_vars.linkbomb.scale_id > ITLINKBOMB_SCALE_INDEX_REWIND) ?
 					      (ITLINKBOMB_SCALE_INDEX_MAX - ip->item_vars.linkbomb.scale_id) :
 					   								    ip->item_vars.linkbomb.scale_id;
@@ -399,7 +409,7 @@ sb32 itLinkBombHoldProcUpdate(GObj *item_gobj)
 			// Update 3/23/2023: itMainSetFighterRelease matches as variadic. No comment.
 			// Update  7/2/2023: variadic match confirmed fake, so does this file really use an erroneous decleration?
 
-			itMainSetFighterRelease(item_gobj, &ip->physics.vel_air, 1.0F);
+			itMainSetFighterRelease(item_gobj, &ip->physics.vel_air, 1.0F, nFTStatusAttackIDItemThrow, 0);
 			itMainClearOwnerStats(item_gobj);
 			itLinkBombExplodeInitVars(item_gobj);
 		}
@@ -522,13 +532,19 @@ void itLinkBombExplodeInitVars(GObj *item_gobj)
 void itLinkBombExplodeUpdateAttackEvent(GObj *item_gobj)
 {
 	ITStruct *ip = itGetStruct(item_gobj);
-	ITAttackEvent *ev = itGetAttackEvent(dItLinkBombItemDesc, &llLinkMainBombAttackEvents);
+	ITAttackEvent *ev = itGetAttackEvent(dItLinkBombItemDesc, llLinkMainBombAttackEvents);
 
 	if (ip->multi == ev[ip->event_id].timer)
 	{
+#ifdef PORT
+		ip->attack_coll.angle = BITFIELD_SEXT10(ev[ip->event_id].angle);
+		ip->attack_coll.damage = ev[ip->event_id].damage;
+		ip->attack_coll.size = ev[ip->event_id].size;
+#else
 		ip->attack_coll.angle = ev[ip->event_id].angle;
 		ip->attack_coll.damage = ev[ip->event_id].damage;
 		ip->attack_coll.size = ev[ip->event_id].size;
+#endif
 
 		ip->attack_coll.can_rehit_item = TRUE;
 		ip->attack_coll.can_hop = FALSE;

@@ -3,6 +3,14 @@
 #include <sc/scene.h>
 #include <sys/video.h>
 #include <reloc_data.h>
+#ifdef PORT
+#include <gr/grcommonsetup.h>
+#include <gr/grwallpaper.h>
+#include <it/itmanager.h>
+#include <sys/audio.h>
+#include <wp/wpmanager.h>
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -113,7 +121,11 @@ void mvUnknownMarioSetupFiles(void)
 	LBRelocSetup rl_setup;
 
 	rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
+#ifdef PORT
+	rl_setup.table_files_num = (u32)llRelocFileCount;
+#else
 	rl_setup.table_files_num = (u32)&llRelocFileCount;
+#endif
 	rl_setup.file_heap = NULL;
 	rl_setup.file_heap_size = 0;
 	rl_setup.status_buffer = sMVUnkownMarioStatusBuffer;

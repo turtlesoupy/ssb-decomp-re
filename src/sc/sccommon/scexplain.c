@@ -5,6 +5,31 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <gm/gmcamera.h>
+#include <gr/grcommonsetup.h>
+#include <gr/grwallpaper.h>
+#include <wp/wpmanager.h>
+extern void *func_800269C0_275C0(u16 id);
+
+#ifdef PORT
+extern void portFixupSprite(void *sprite);
+extern void portFixupBitmapArray(void *bitmaps, unsigned int count);
+extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
+
+static void scExplainPortFixupSpriteFull(Sprite *sprite)
+{
+    if (sprite == NULL) return;
+    portFixupSprite(sprite);
+    {
+        Bitmap *bitmaps = (Bitmap*)PORT_RESOLVE(sprite->bitmap);
+        if (bitmaps != NULL)
+        {
+            portFixupBitmapArray(bitmaps, sprite->nbitmaps);
+            portFixupSpriteBitmapData(sprite, bitmaps);
+        }
+    }
+}
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -22,21 +47,21 @@ s32 dSCExplainPad0x8018E6F0 = 0;
 intptr_t dSCExplainStickMatAnimJoints[/* */] = 
 {
     0x0, 
-    &llSCExplainGraphicsStickNeutralMatAnimJoint,
-    &llSCExplainGraphicsStickNeutralMatAnimJoint,
-    &llSCExplainGraphicsStickHoldUpMatAnimJoint,
-    &llSCExplainGraphicsStickTapUpMatAnimJoint,
-    &llSCExplainGraphicsStickHoldForwardMatAnimJoint,
-    &llSCExplainGraphicsStickTapForwardMatAnimJoint
+    llSCExplainGraphicsStickNeutralMatAnimJoint,
+    llSCExplainGraphicsStickNeutralMatAnimJoint,
+    llSCExplainGraphicsStickHoldUpMatAnimJoint,
+    llSCExplainGraphicsStickTapUpMatAnimJoint,
+    llSCExplainGraphicsStickHoldForwardMatAnimJoint,
+    llSCExplainGraphicsStickTapForwardMatAnimJoint
 };
 
 // 0x8018E710
 intptr_t dSCExplainKeyKeyEventss[/* */] = 
 {
-    &llSCExplainMain0KeyEvent,
-    &llSCExplainMain1KeyEvent,
-    &llSCExplainMain2KeyEvent,
-    &llSCExplainMain3KeyEvent
+    llSCExplainMain0KeyEvent,
+    llSCExplainMain1KeyEvent,
+    llSCExplainMain2KeyEvent,
+    llSCExplainMain3KeyEvent
 };
 
 // 0x8018E720
@@ -128,23 +153,23 @@ void scExplainLoadExplainFiles(void)
 {
     sSCExplainGraphicsFileHead = lbRelocGetExternHeapFile
     (
-        (u32)&llSCExplainGraphicsFileID,
+        (u32)llSCExplainGraphicsFileID,
         syTaskmanMalloc
         (
-            lbRelocGetFileSize((u32)&llSCExplainGraphicsFileID),
+            lbRelocGetFileSize((u32)llSCExplainGraphicsFileID),
             0x10
         )
     );
     sSCExplainMainFileHead = lbRelocGetExternHeapFile
     (
-        (u32)&llSCExplainMainFileID,
+        (u32)llSCExplainMainFileID,
         syTaskmanMalloc
         (
-            lbRelocGetFileSize((u32)&llSCExplainMainFileID),
+            lbRelocGetFileSize((u32)llSCExplainMainFileID),
             0x10
         )
     );
-    sSCExplainPhase = lbRelocGetFileData(SCExplainPhase*, sSCExplainMainFileHead, &llSCExplainMainExplainPhase);
+    sSCExplainPhase = lbRelocGetFileData(SCExplainPhase*, sSCExplainMainFileHead, llSCExplainMainExplainPhase);
 }
 
 // 0x8018D14C
@@ -344,7 +369,7 @@ GObj* scExplainMakeControlStickInterface(void)
     gcSetupCustomDObjs
     (
         interface_gobj, 
-        ((uintptr_t)sSCExplainGraphicsFileHead + (intptr_t)&llSCExplainGraphicsStickDObjDesc),
+        (DObjDesc *)((uintptr_t)sSCExplainGraphicsFileHead + (intptr_t)llSCExplainGraphicsStickDObjDesc),
         NULL,
         nGCMatrixKindTra,
         nGCMatrixKindNull,
@@ -357,7 +382,7 @@ GObj* scExplainMakeControlStickInterface(void)
         (
             MObjSub***, 
             sSCExplainGraphicsFileHead, 
-            &llSCExplainGraphicsStickMObjSub
+            llSCExplainGraphicsStickMObjSub
         )
     );
     gcAddGObjProcess(interface_gobj, scExplainProcUpdateControlStickSprite, nGCProcessKindFunc, 5);
@@ -398,7 +423,7 @@ void scExplainUpdateTapSparkEffect(void)
         dobj->translate.vec.f.x = pos->x + 15.0F;
         dobj->translate.vec.f.y = pos->y + 5.0F;
     }
-    gcAddAnimAll(gobj, NULL, lbRelocGetFileData(AObjEvent32***, sSCExplainGraphicsFileHead, &llSCExplainGraphicsTapSparkMatAnimJoint), 0.0F);
+    gcAddAnimAll(gobj, NULL, lbRelocGetFileData(AObjEvent32***, sSCExplainGraphicsFileHead, llSCExplainGraphicsTapSparkMatAnimJoint), 0.0F);
     gcPlayAnimAll(gobj);
 
     gobj->flags = GOBJ_FLAG_NONE;
@@ -421,9 +446,9 @@ GObj* scExplainMakeTapSpark(void)
     GObj *interface_gobj = gcMakeGObjSPAfter(nGCCommonKindInterface, NULL, nGCCommonLinkIDInterface, GOBJ_PRIORITY_DEFAULT);
 
     gcAddGObjDisplay(interface_gobj, scExplainTapSparkProcDisplay, 27, GOBJ_PRIORITY_DEFAULT, ~0);
-    gcAddDObjForGObj(interface_gobj, (void*) ((uintptr_t)sSCExplainGraphicsFileHead + (intptr_t)&llSCExplainGraphicsTapSparkDisplayList));
+    gcAddDObjForGObj(interface_gobj, (void*) ((uintptr_t)sSCExplainGraphicsFileHead + (intptr_t)llSCExplainGraphicsTapSparkDisplayList));
     gcAddXObjForDObjFixed(DObjGetStruct(interface_gobj), nGCMatrixKindTra, 0);
-    gcAddMObjAll(interface_gobj, lbRelocGetFileData(MObjSub***, sSCExplainGraphicsFileHead, &llSCExplainGraphicsTapSparkMObjSub));
+    gcAddMObjAll(interface_gobj, lbRelocGetFileData(MObjSub***, sSCExplainGraphicsFileHead, llSCExplainGraphicsTapSparkMObjSub));
     gcAddGObjProcess(interface_gobj, scExplainTapSparkProcUpdate, nGCProcessKindFunc, 5);
 
     interface_gobj->flags = GOBJ_FLAG_HIDDEN;
@@ -464,7 +489,7 @@ GObj* scExplainMakeSpecialMoveRGB(void)
         GOBJ_PRIORITY_DEFAULT
     );
     gcAddGObjDisplay(interface_gobj, scExplainTapSparkProcDisplay, 27, GOBJ_PRIORITY_DEFAULT, ~0);
-    gcAddDObjForGObj(interface_gobj, lbRelocGetFileData(void*, sSCExplainGraphicsFileHead, &llSCExplainGraphicsSpecialMoveRGBDisplayList));
+    gcAddDObjForGObj(interface_gobj, lbRelocGetFileData(void*, sSCExplainGraphicsFileHead, llSCExplainGraphicsSpecialMoveRGBDisplayList));
     gcAddXObjForDObjFixed(DObjGetStruct(interface_gobj), nGCMatrixKindTra, 0);
 
     interface_gobj->flags = GOBJ_FLAG_HIDDEN;
@@ -505,19 +530,32 @@ SObj* scExplainMakeSObjOffset(intptr_t offset)
 // 0x8018DC84
 void scExplainSetPhaseSObjs(void)
 {
-    sSCExplainStruct.textbox_sobj = scExplainMakeSObjOffset(&llSCExplainGraphicsTapTheStickSprite);
-    sSCExplainStruct.phase_sobj0 = scExplainMakeSObjOffset(&llSCExplainGraphicsAButtonSprite);
-    sSCExplainStruct.phase_sobj1 = scExplainMakeSObjOffset(&llSCExplainGraphicsBButtonSprite);
-    sSCExplainStruct.phase_sobj2 = scExplainMakeSObjOffset(&llSCExplainGraphicsZButtonSprite);
-    sSCExplainStruct.phase_sobj3 = scExplainMakeSObjOffset(&llSCExplainGraphicsHereTextSprite);
-    sSCExplainStruct.phase_sobj4 = scExplainMakeSObjOffset(&llSCExplainGraphicsPlusSymbolSprite);
-    sSCExplainStruct.phase_sobj5 = scExplainMakeSObjOffset(&llSCExplainGraphicsPlusSymbolSprite);
+    sSCExplainStruct.textbox_sobj = scExplainMakeSObjOffset(llSCExplainGraphicsTapTheStickSprite);
+    sSCExplainStruct.phase_sobj0 = scExplainMakeSObjOffset(llSCExplainGraphicsAButtonSprite);
+    sSCExplainStruct.phase_sobj1 = scExplainMakeSObjOffset(llSCExplainGraphicsBButtonSprite);
+    sSCExplainStruct.phase_sobj2 = scExplainMakeSObjOffset(llSCExplainGraphicsZButtonSprite);
+    sSCExplainStruct.phase_sobj3 = scExplainMakeSObjOffset(llSCExplainGraphicsHereTextSprite);
+    sSCExplainStruct.phase_sobj4 = scExplainMakeSObjOffset(llSCExplainGraphicsPlusSymbolSprite);
+    sSCExplainStruct.phase_sobj5 = scExplainMakeSObjOffset(llSCExplainGraphicsPlusSymbolSprite);
 }
 
 // 0x8018DD18
 void scExplainUpdateTextBoxSprite(void)
 {
+#ifdef PORT
+    /* Each tutorial phase has its own textbox sprite (sSCExplainPhase[i].sprite
+     * resolves to a Sprite* in SCExplainGraphics). Only the initial
+     * Sprite used in scExplainMakeSObjOffset got a portFixupSprite pass;
+     * the per-phase swapped-in sprites are file data that was never
+     * reached by the Sprite/Bitmap fixup path, so their header halfwords
+     * and texel data are still in pass1-BSWAP32 state. Fix them up on
+     * first use (idempotent via visited set inside the helpers). */
+    Sprite *phase_sprite = (Sprite *)PORT_RESOLVE(sSCExplainPhase->sprite);
+    scExplainPortFixupSpriteFull(phase_sprite);
+    sSCExplainStruct.textbox_sobj->sprite = *phase_sprite;
+#else
     sSCExplainStruct.textbox_sobj->sprite = *sSCExplainPhase->sprite;
+#endif
 
     sSCExplainStruct.textbox_sobj->pos.x = sSCExplainPhase->textbox_pos_x + 10;
     sSCExplainStruct.textbox_sobj->pos.y = sSCExplainPhase->textbox_pos_y + 160;

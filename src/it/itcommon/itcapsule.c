@@ -1,5 +1,8 @@
 #include <it/item.h>
 #include <reloc_data.h>
+#ifdef PORT
+extern void *func_800269C0_275C0(u16 id);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -11,7 +14,11 @@ ITDesc dITCapsuleItemDesc =
 {
     nITKindCapsule,                         // Item Kind
     &gITManagerCommonData,                  // Pointer to item file data?
+#ifdef PORT
+    llITCommonDataCapsuleItemAttributes,   // Offset of item attributes in file?
+#else
     &llITCommonDataCapsuleItemAttributes,   // Offset of item attributes in file?
+#endif
     
     // DObj transformation struct
     {
@@ -263,7 +270,11 @@ sb32 itCapsuleExplodeProcUpdate(GObj *item_gobj)
     {
         return TRUE;
     }
+#ifdef PORT
+    itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITCapsuleItemDesc, llITCommonDataCapsuleAttackEvents)); // (ITAttackEvent*) ((uintptr_t)*dITCapsuleItemDesc.p_file + (intptr_t)&D_NF_00000098); Linker thing
+#else
     itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITCapsuleItemDesc, &llITCommonDataCapsuleAttackEvents)); // (ITAttackEvent*) ((uintptr_t)*dITCapsuleItemDesc.p_file + (intptr_t)&D_NF_00000098); Linker thing
+#endif
 
     return FALSE;
 }
@@ -308,7 +319,11 @@ void itCapsuleExplodeInitVars(GObj *item_gobj)
     itMainClearOwnerStats(item_gobj);
     itMainRefreshAttackColl(item_gobj);
 
+#ifdef PORT
+    itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITCapsuleItemDesc, llITCommonDataCapsuleAttackEvents));
+#else
     itMainUpdateAttackEvent(item_gobj, itGetAttackEvent(dITCapsuleItemDesc, &llITCommonDataCapsuleAttackEvents));
+#endif
 }
 
 // 0x801743F4

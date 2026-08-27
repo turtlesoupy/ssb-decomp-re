@@ -1,5 +1,8 @@
 #include <ft/fighter.h>
 #include <wp/weapon.h>
+#ifdef PORT
+#include <ft/ftcommon/ftcommonfunctions.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -166,11 +169,20 @@ void ftSamusSpecialNLoopProcInterrupt(GObj *fighter_gobj)
     {
         ftSamusSpecialNDestroyChargeShot(fp);
 
+#ifdef PORT
+        /*
+         * WARNING: Undefined behavior in the original game — this call omits
+         * the third argument (itemthrow_buffer_tics). PORT: pass 0 so the
+         * behavior is deterministic rather than reading an uninitialized register.
+         */
+        ftCommonEscapeSetStatus(fighter_gobj, status_id, 0);
+#else
         /* 
          * WARNING: Undefined behavior. This function expects a third argument
          * for item throw buffer frames, but never receives it.
          */ 
         ftCommonEscapeSetStatus(fighter_gobj, status_id);
+#endif
     }
     else if (fp->input.pl.button_tap & fp->input.button_mask_z)
     {

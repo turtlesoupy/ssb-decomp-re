@@ -5,6 +5,12 @@
 #include <sys/matrix.h>
 #include <sys/develop.h>
 
+#ifdef PORT
+#include <enhancements/enhancements.h>
+#include "hooks/Events.h"
+extern float port_widescreen_clip_x_scale(void);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       EXTERNAL VARIABLES      //
@@ -724,6 +730,7 @@ void ftDisplayMainDecideFogDraw(u8 flags, FTStruct *fp)
 void ftDisplayMainDrawAccessory(FTStruct *fp, DObj *dobj, FTParts *parts)
 {
     DObj *root_dobj = DObjGetStruct(parts->gobj);
+    Gfx *dl;
 
     switch (parts->flags & 0xF)
     {
@@ -738,7 +745,9 @@ void ftDisplayMainDrawAccessory(FTStruct *fp, DObj *dobj, FTParts *parts)
         break;
 
     case 1:
-        if ((dobj->dls != NULL) && (dobj->dls[1] != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
+        dl = PORT_RESOLVE_ARRAY(dobj->dls, 1);
+
+        if ((dl != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
         {
             gcDrawMObjForDObj(root_dobj, gSYTaskmanDLHeads);
             ftDisplayMainDecideFogDraw(parts->flags, fp);
@@ -758,7 +767,9 @@ void ftDisplayMainDrawDefault(DObj *dobj)
     Vec3f sp48;
     FTParts *parts;
     DObj *sibling_dobj;
-    Gfx **dls;
+    void *dls;
+    Gfx *dl0;
+    Gfx *dl1;
 
     parts = ftGetParts(dobj);
 
@@ -788,21 +799,23 @@ void ftDisplayMainDrawDefault(DObj *dobj)
 
             case 1:
                 dls = dobj->dls;
+                dl0 = PORT_RESOLVE_ARRAY(dls, 0);
+                dl1 = PORT_RESOLVE_ARRAY(dls, 1);
 
-                if ((dls != NULL) && (dls[0] != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
+                if ((dl0 != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
                 {
                     ftDisplayMainDecideFogDraw(parts->flags, fp);
 
-                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dls[0]);
+                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dl0);
                 }
                 sp58 = gcPrepDObjMatrix(gSYTaskmanDLHeads, dobj);
 
-                if ((dls != NULL) && (dls[1] != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
+                if ((dl1 != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
                 {
                     gcDrawMObjForDObj(dobj, gSYTaskmanDLHeads);
                     ftDisplayMainDecideFogDraw(parts->flags, fp);
 
-                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dls[1]);
+                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dl1);
                 }
                 break;
             }
@@ -850,10 +863,13 @@ void ftDisplayMainDrawSkeleton(DObj *dobj)
     s32 sp60;
     s32 unused;
     Vec3f sp50;
-    Gfx **dls;
+    void *dls;
+    Gfx *dl0;
+    Gfx *dl1;
     FTParts *parts;
     DObj *sibling_dobj;
     FTSkeleton *skeleton;
+    u32 *skeletons;
 
     fp = ftGetStruct(dobj->parent_gobj);
     parts = ftGetParts(dobj);
@@ -864,39 +880,42 @@ void ftDisplayMainDrawSkeleton(DObj *dobj)
 
         if ((parts != NULL) && (parts->joint_id >= nFTPartsJointCommonStart))
         {
-            skeleton = &fp->attr->skeleton[fp->colanim.skeleton_id][parts->joint_id - nFTPartsJointCommonStart];
+            skeletons = PORT_RESOLVE(fp->attr->skeleton);
+            skeleton = &((FTSkeleton*)PORT_RESOLVE(skeletons[fp->colanim.skeleton_id]))[parts->joint_id - nFTPartsJointCommonStart];
 
             switch (skeleton->flags & 0xF)
             {
             case 0:
                 sp60 = gcPrepDObjMatrix(gSYTaskmanDLHeads, dobj);
 
-                if (!(dobj->flags & DOBJ_FLAG_NOTEXTURE) && (skeleton->dl != NULL))
+                if (!(dobj->flags & DOBJ_FLAG_NOTEXTURE) && (FTSKELETON_GET_DL(skeleton) != NULL))
                 {
                     gcDrawMObjForDObj(dobj, gSYTaskmanDLHeads);
                     ftDisplayMainDecideFogDraw(skeleton->flags, fp);
 
-                    gSPDisplayList(gSYTaskmanDLHeads[0]++, skeleton->dl);
+                    gSPDisplayList(gSYTaskmanDLHeads[0]++, FTSKELETON_GET_DL(skeleton));
                 }
                 break;
 
             case 1:
-                dls = skeleton->dls;
+                dls = FTSKELETON_GET_DLS(skeleton);
+                dl0 = PORT_RESOLVE_ARRAY(dls, 0);
+                dl1 = PORT_RESOLVE_ARRAY(dls, 1);
 
-                if ((dls != NULL) && (dls[0] != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
+                if ((dl0 != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
                 {
                     ftDisplayMainDecideFogDraw(skeleton->flags, fp);
 
-                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dls[0]);
+                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dl0);
                 }
                 sp60 = gcPrepDObjMatrix(gSYTaskmanDLHeads, dobj);
 
-                if ((dls != NULL) && (dls[1] != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
+                if ((dl1 != NULL) && !(dobj->flags & DOBJ_FLAG_NOTEXTURE))
                 {
                     gcDrawMObjForDObj(dobj, gSYTaskmanDLHeads);
                     ftDisplayMainDecideFogDraw(skeleton->flags, fp);
 
-                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dls[1]);
+                    gSPDisplayList(gSYTaskmanDLHeads[0]++, dl1);
                 }
                 break;
             }
@@ -930,14 +949,16 @@ void ftDisplayMainDrawAll(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
     FTAttributes *attr = fp->attr;
+    u32 *skeletons = PORT_RESOLVE(attr->skeleton);
 
     if
     (
-        (fp->colanim.skeleton_id)                           &&
-        (attr->skeleton != NULL)                            &&
-        (attr->skeleton[fp->colanim.skeleton_id] != NULL)   &&
-        (fp->joints[(s32)(attr->skeleton[0])] != NULL)      &&  // ???
-        (fp->joints[(s32)(attr->skeleton[0])]->dl != NULL)      // Hello???
+        (fp->colanim.skeleton_id)                                                                   &&
+        (attr->skeleton != 0)                                                                       &&
+        (skeletons != NULL)                                                                         &&
+        (PORT_RESOLVE(skeletons[fp->colanim.skeleton_id]) != NULL)                                  &&
+        (fp->joints[(s32)skeletons[0]] != NULL)                                                     &&  // ???
+        (fp->joints[(s32)skeletons[0]]->dl != NULL)                                                     // Hello???
     )
     {
         ftDisplayMainDrawSkeleton(DObjGetStruct(fighter_gobj));
@@ -1081,6 +1102,10 @@ void ftDisplayMainProcDisplay(GObj *fighter_gobj)
     fp = ftGetStruct(fighter_gobj);
     attr = fp->attr;
 
+#ifdef PORT
+    fp->display_mode = port_enhancement_hitbox_display_override(fp->display_mode);
+#endif
+
     sFTDisplayMainSkyFogAlpha = 0xFF;
     sFTDisplayMainIsShadeFog = FALSE;
 
@@ -1135,6 +1160,32 @@ void ftDisplayMainProcDisplay(GObj *fighter_gobj)
 
                     func_ovl2_800EB924(CObjGetStruct(gGMCameraGObj), gGMCameraMatrix, &ft_pos, &fp->magnify_pos.x, &fp->magnify_pos.y);
 
+#ifdef PORT
+                    /* Widescreen: func_ovl2_800EB924 compresses *rx by the
+                     * same factor libultraship's AdjXForAspectRatio applies
+                     * to 3D vertices, so HUD sprites that attach to projected
+                     * world points track the rendered character. The magnify
+                     * (offscreen-fighter bubble) is the exception: it uses
+                     * fp->magnify_pos to (a) compute the arrow's rotation
+                     * via atan2(y, x) and (b) trace the ray from origin to
+                     * the viewport edge in ifCommonPlayerMagnifyGetPosition.
+                     * Both want the *un-compressed direction* — atan2 with
+                     * a shrunk x produces an over-vertical angle, and the
+                     * traced edge intersection lands in the wrong direction.
+                     * Undo the compression here so the magnify path sees the
+                     * true 4:3 projection. The arrow's translate then gets
+                     * pre-divided by the same scale in ifCommonPlayerMagnify-
+                     * ProcDisplay so AdjX brings it back to align with the
+                     * (non-AdjX'd) bubble frame texture. */
+                    {
+                        f32 scale = port_widescreen_clip_x_scale();
+                        if (scale > 0.0F && scale < 1.0F)
+                        {
+                            fp->magnify_pos.x /= scale;
+                        }
+                    }
+#endif
+
                     fp->is_magnify_show = TRUE;
 
                     if (gIFCommonPlayerInterface.is_magnify_display != FALSE)
@@ -1177,6 +1228,29 @@ void ftDisplayMainProcDisplay(GObj *fighter_gobj)
         gSPSetGeometryMode(gSYTaskmanDLHeads[0]++, G_ZBUFFER | G_SHADE | G_CULL_BACK | G_LIGHTING | G_SHADING_SMOOTH);
         gDPSetRenderMode(gSYTaskmanDLHeads[0]++, G_RM_FOG_PRIM_A, G_RM_AA_ZB_OPA_SURF2);
 
+        {
+#ifdef PORT
+        /* override_env_color_ (0x800FC9DC, battle path): mods (e.g. CE's SR
+         * command 0xD9 support) can force the fighter's env color to an RGBA
+         * word instead of the colanim2 / fog / stage-light value. With no
+         * listener the query returns 0 = no override = vanilla path. */
+        u32 sr_env_color;
+        CALL_EVENT(FighterEnvColorQueryEvent, fp->player, 0u);
+        sr_env_color = FighterEnvColorQueryEvent_.rgba;
+        if (sr_env_color != 0u)
+        {
+            gDPSetEnvColor
+            (
+                gSYTaskmanDLHeads[0]++,
+                (u8)((sr_env_color >> 24) & 0xFFu),
+                (u8)((sr_env_color >> 16) & 0xFFu),
+                (u8)((sr_env_color >>  8) & 0xFFu),
+                (u8)( sr_env_color        & 0xFFu)
+            );
+            sFTDisplayMainSkyFogAlpha = (u8)(sr_env_color & 0xFFu);
+        }
+        else
+#endif
         if (fp->colanim.is_use_color2)
         {
             gDPSetEnvColor(gSYTaskmanDLHeads[0]++, fp->colanim.color2.r, fp->colanim.color2.g, fp->colanim.color2.b, fp->colanim.color2.a);
@@ -1194,6 +1268,7 @@ void ftDisplayMainProcDisplay(GObj *fighter_gobj)
             sFTDisplayMainSkyFogAlpha = mpCollisionSetLightColorGetAlpha(gSYTaskmanDLHeads);
         }
         else sFTDisplayMainSkyFogAlpha = scSubsysFighterDrawLightColorGetAlpha(gSYTaskmanDLHeads);
+        }
 
         if (fp->colanim.is_use_color1)
         {

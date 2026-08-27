@@ -2,6 +2,23 @@
 #include <n_audio/n_synthInternals.h>
 #include <n_audio/n_seqp.h>
 
+#ifdef PORT
+/* PORT: Replace standard N64 ABI macros (aSetBuffer, aLoadBuffer, etc.)
+ * with CPU function calls.  Must come AFTER abi.h (via mbi.h → n_libaudio.h)
+ * so the original macros exist to be #undef'd. */
+#include "audio/mixer.h"
+#include <stddef.h>
+#include <assert.h>
+#endif
+
+#include <n_audio/n_libaudio.h>
+// LUS: Audio Slider Hooks
+extern float port_get_sfx_volume(void);
+extern float port_get_voice_volume(void);
+extern float port_get_master_volume(void);
+
+u8 g_port_current_is_voice = 0; // Thread handoff flag
+
 #define KILL_TIME	50000	/* 50 ms */
 
 typedef struct ALWhatever80026094_sub
@@ -43,7 +60,14 @@ typedef struct N_ALUnk80026204
     void *unk_80026204_0x10;
     void *fgm_ucode_data;
     void *fgm_table_data;
+#ifdef PORT
+    /* PORT: holds a native pointer into the FGM unk44 package
+     * (ALWhatever8009EE0C_3 *).  N64 stored it as s32 (32-bit pointer);
+     * widen so it survives LP64 without truncation. */
+    void *unk_80026204_0x1C;
+#else
     s32 unk_80026204_0x1C;
+#endif
     ALHeap *heap;
     u8 unk_80026204_0x24;
     u16 unk_80026204_0x26;
@@ -104,6 +128,69 @@ typedef struct ALWhatever8009EDD0_siz24
     f32 unkALWhatever8009EDD0_siz24_0x20;
 } ALWhatever8009EDD0_siz24;
 
+#ifdef PORT
+/* PORT: Unified FGM-node struct.  Decomp had two N64-equivalent typedefs
+ * for the same heap allocation: `ALWhatever8009EE0C` (header view with
+ * pad arrays + s32 ucode-pointer fields) and `ALWhatever8009EE0C_2`
+ * (parser view with inline N_ALVoice + u8* ucode fields).  Both relied
+ * on N64 ILP32 layout where pointers fit in 4 bytes — on LP64 the two
+ * views diverge: pad arrays under-size relative to 8-byte pointers, s32
+ * truncates ucode addresses, and inline N_ALVoice grew from 0x1C to
+ * 0x30, so &this_node->voice → n_alSynAllocVoice/StopVoice no longer
+ * lands at the same offset both writers and the parser agree on.
+ *
+ * Single canonical layout below: native-width `next` pointer, inline
+ * N_ALVoice voice (parser takes its address), u8* ucode pointers, and
+ * struct-typed unk44.  EE0C_2 typedef'd to the same struct so all
+ * existing code paths keep compiling unchanged.  func_80026A6C_2766C's
+ * `(s32)(uintptr_t)arg0` truncating cast is also replaced below to
+ * store the full 64-bit ucode pointer. */
+typedef struct ALWhatever8009EE0C
+{
+    struct ALWhatever8009EE0C *next;
+    /* Anonymous union: parser uses &voice (n_alSynAllocVoice/etc.); FGM
+     * cleanup helpers read/write `unkC` which on N64 aliased the byte
+     * slot occupied by N_ALVoice.pvoice (an N_PVoice*).  Keep both
+     * names live without changing call sites. */
+    union {
+        N_ALVoice voice;
+        struct {
+            ALLink _aliaslink;
+            ALWhatever8009EDD0_off5C_offC *unkC;
+        };
+    };
+    u8 *unk20;
+    u8 *unk24;
+    u16 unk28;
+    u8 unk2A;
+    u8 unk2B;
+    s16 unk2C;
+    s16 unk2E;
+    s16 unk30;
+    u8 unk32;
+    u8 unk33;
+    u8 unk34;
+    u8 unk35;
+    u8 unk36;
+    u8 unk37;
+    u8 unk38;
+    u8 unk39;
+    u8 unk3A;
+    u8 unk3B;
+    u8 unk3C;
+    u8 unk3D;
+    u8 port_is_voice; // LUS: Flags this specific synth node
+    /* PORT: unk40 holds an ALWaveTable* (assigned from ALSound.wavetable
+     * by ucode opcode 0x60).  N64 stored it as s32 (a 32-bit pointer);
+     * widen to native pointer so the read at func_80027460_28060's voice
+     * start path can pass a real address to n_alSynStartVoiceParams. */
+    ALWaveTable *unk40;
+    ALWhatever8009EDD0_siz24 *unk44;
+    u16 unk48;
+} ALWhatever8009EE0C;
+
+typedef ALWhatever8009EE0C ALWhatever8009EE0C_2;
+#else
 typedef struct ALWhatever8009EE0C
 {
 	struct ALWhatever8009EE0C *next;
@@ -130,6 +217,7 @@ typedef struct ALWhatever8009EE0C
     u8 unk3A;
     u8 unk3B;
     u8 unk3C;
+    u8 port_is_voice; // LUS: Flags this specific synth node
     s32 unk40;
     ALWhatever8009EDD0_siz24 *unk44;
 	u16 unk48;
@@ -167,6 +255,7 @@ struct ALWhatever8009EE0C_2
     void *unk44;
 	u16 unk48;
 };
+#endif
 
 typedef struct ALWhatever8009EE0C_3
 {
@@ -202,8 +291,32 @@ typedef struct ALWhatever8009EDD0_siz34
     u8 unkALWhatever8009EDD0_siz34_0x2E;
     u8 unkALWhatever8009EDD0_siz34_0x2F;
     u8 unkALWhatever8009EDD0_siz34_0x30;
-
+    u8 port_is_voice; // LUS: Propagates voice identity to the audio thread
 } ALWhatever8009EDD0_siz34;
+
+#ifdef PORT
+/* Pointer-bearing audio structs widen on 8-byte host pointers and revert to
+ * N64-native layout on ILP32. Keep both layouts asserted without relying on
+ * compiler-specific preprocessor macros. */
+_Static_assert((sizeof(uintptr_t) == 8 && offsetof(ALWhatever8009EE0C, unk30) == 0x50) ||
+               (sizeof(uintptr_t) == 4 && offsetof(ALWhatever8009EE0C, unk30) == 0x30),
+    "EE0C.unk30 offset must match host pointer width");
+_Static_assert((sizeof(uintptr_t) == 8 && offsetof(ALWhatever8009EDD0_siz34, unkALWhatever8009EDD0_siz34_0x28) == 0x38) ||
+               (sizeof(uintptr_t) == 4 && offsetof(ALWhatever8009EDD0_siz34, unkALWhatever8009EDD0_siz34_0x28) == 0x28),
+    "siz34.unk_0x28 offset must match host pointer width");
+_Static_assert((sizeof(uintptr_t) == 8 && sizeof(ALWhatever8009EDD0_siz34) == 0x48) ||
+               (sizeof(uintptr_t) == 4 && sizeof(ALWhatever8009EDD0_siz34) == 0x34),
+    "siz34 sizeof must match host pointer width");
+_Static_assert((sizeof(uintptr_t) == 8 && offsetof(ALWhatever8009EDD0_siz34, unkALWhatever8009EDD0_siz34_0x2F) == 0x43) ||
+               (sizeof(uintptr_t) == 4 && offsetof(ALWhatever8009EDD0_siz34, unkALWhatever8009EDD0_siz34_0x2F) == 0x2F),
+    "siz34.unk_0x2F offset must match lbCommonMakePositionFGM byte poke");
+_Static_assert((sizeof(uintptr_t) == 8 && offsetof(ALWhatever8009EE0C, unk44) == 0x68) ||
+               (sizeof(uintptr_t) == 4 && offsetof(ALWhatever8009EE0C, unk44) == 0x44),
+    "EE0C.unk44 offset must match host pointer width");
+_Static_assert((sizeof(uintptr_t) == 8 && offsetof(ALWhatever8009EE0C, unk48) == 0x70) ||
+               (sizeof(uintptr_t) == 4 && offsetof(ALWhatever8009EE0C, unk48) == 0x48),
+    "EE0C.unk48 offset must match host pointer width");
+#endif
 
 typedef struct ALWhatever8009EDD0_off18
 {
@@ -242,6 +355,105 @@ typedef struct ALWhatever8009EDD0
 } ALWhatever8009EDD0;
 
 ALWhatever8009EDD0 D_8009EDD0_406D0;
+
+#ifdef PORT
+/* See docs/bugs/boss_defeat_sfx_max_typepun_2026-05-01.md.
+ *
+ * The decomp declares `extern alSoundEffect D_8009EDD0_406D0;` in
+ * sc1pgame.c, but the actual definition (above) is type
+ * ALWhatever8009EDD0.  On N64 the two struct layouts coincidentally
+ * aligned at byte offset 0x28: alSoundEffect's `sfx_max` (u16)
+ * overlaid ALWhatever8009EDD0's `fgm_ucode_count` (u16), so the boss-
+ * defeat code's `D_8009EDD0_406D0.sfx_max = 0` was an intentional
+ * type-pun for "block FGM playback while the cinematic plays".
+ *
+ * On LP64 the layouts diverge: ALPlayer grew 16 → 32 bytes and three
+ * `**` fields each grew 4 → 8 bytes, shifting fgm_ucode_count to
+ * struct offset 0x40 — but alSoundEffect's sfx_max only shifted to
+ * offset 0x38, where it now overlaps the LOW 16 BITS of
+ * `fgm_table_data` (a u8** pointer).  The boss-defeat write zeros
+ * those 16 bits, and every subsequent FGM-table lookup reads
+ * `fgm_table_data[id]` from a wild address → crash on the audio
+ * thread when the bytecode parser dereferences a NULL ucode.
+ *
+ * Accessors below preserve the original semantic ("save / zero /
+ * restore the FGM playback gate") via the field that actually carries
+ * it on every platform. */
+void portAudioSaveAndBlockFGMs(u16 *out_saved)
+{
+    *out_saved = D_8009EDD0_406D0.fgm_ucode_count;
+    D_8009EDD0_406D0.fgm_ucode_count = 0;
+}
+
+void portAudioRestoreFGMs(u16 saved)
+{
+    D_8009EDD0_406D0.fgm_ucode_count = saved;
+}
+
+extern void n_alSynStopVoice(N_ALVoice *v);
+extern void n_alSynFreeVoice(N_ALVoice *v);
+
+/* Force-stop every active FGM voice and detach every fighter's cached
+ * EE0C ptr. Called from ftParamStopAllFightersLoopSFX on pause-init.
+ *
+ * On N64 the looping voice winds down naturally during pause because
+ * the audio thread is gated by osRecvMesg(&sSYAudioSPTaskMesgQueue) —
+ * with the SP busy serving the pause menu, the FGM bytecode tick stops
+ * advancing and the wavetable loop region stops getting re-armed. The
+ * port's audio thread runs on the VI tick alone, no SP gate, so the
+ * bytecode keeps cycling regardless of game state.
+ *
+ * The "polite" stop signal (set EE0C->unk2A = 2 via func_80026738_27338)
+ * isn't reliable here: it's looked up via fp->p_loop_sfx → siz34 →
+ * unk_0x28, and that EE0C ptr goes stale across the bytecode's natural
+ * case-2→0→free cycle. By the time pause-init runs, the audible voice
+ * is on a *different* EE0C than the one cached in siz34, so writing
+ * unk2A=2 on the cached ptr lands on a freed slot the FGM tick will
+ * never see again.
+ *
+ * Walking unk_alsound_0x3C directly hits whichever EE0C is currently
+ * holding the audible voice. n_alSynStopVoice + n_alSynFreeVoice
+ * tears the voice down at the synthesizer level, bypassing the
+ * envelope-mixer fade-to-zero path. The pause beep
+ * (func_800269C0_275C0(nSYAudioFGMGamePause)) is allocated *after*
+ * this purge on a fresh slot, so it plays normally. BGM lives on the
+ * unrelated CSPlayer pipeline and is untouched. */
+void portAudioPurgeFGMs(void)
+{
+    u32 sp = osSetIntMask(1);
+    ALWhatever8009EE0C *node = D_8009EDD0_406D0.unk_alsound_0x3C;
+    while (node != NULL)
+    {
+        ALWhatever8009EE0C *next = (ALWhatever8009EE0C*)node->next;
+        N_ALVoice *v = (N_ALVoice *)&node->voice;
+        if (v->pvoice != NULL)
+        {
+            n_alSynStopVoice(v);
+            n_alSynFreeVoice(v);
+        }
+        node->unk28 = 0;
+        node->unk2A = 0;
+        node->unk48 = 0;
+        node = next;
+    }
+    {
+        /* NULL each siz34's cached EE0C ptr so the next bytecode tick
+         * (or another path that reads unk_0x28) doesn't dereference a
+         * just-freed node. ftParamStopAllFightersLoopSFX already
+         * detached fighter fp->p_loop_sfx; this covers in-flight
+         * non-loop FGM siz34 entries that were referencing the same
+         * EE0C nodes. */
+        ALWhatever8009EDD0_siz34 *s = D_8009EDD0_406D0.unk_alsound_0x40;
+        while (s != NULL)
+        {
+            s->unkALWhatever8009EDD0_siz34_0x28 = NULL;
+            s = s->next;
+        }
+    }
+    osSetIntMask(sp);
+}
+#endif
+
 f32 randFloat1(void);
 f32 randFloat2(void);
 
@@ -396,9 +608,8 @@ void n_alFxNew(ALFx **fx_ar, ALSynConfig *c, ALHeap *hp)
 	d->gain   = param[j++];
 
 	if (param[j]) {
+#define RANGE 2.0f
 /*	    d->rsinc     = ((f32) param[j++])/0xffffff; */
-		float RANGE = 2.0f;
-		float CONVERT = 173123.404906676f;
 		d->rsinc = ((((f32)param[j++])/1000) * RANGE)/c->outputRate;
 
 		/*
@@ -413,7 +624,9 @@ void n_alFxNew(ALFx **fx_ar, ALSynConfig *c, ALHeap *hp)
 		 * where
 		 *		120,000/ln(2) = 173123.40...
 		 */
-		d->rsgain 	 = (((f32) param[j++])/CONVERT) * (d->output - d->input);
+#define CONVERT 173123.404906676f
+#define LENGTH	(d->output - d->input)
+		d->rsgain 	 = (((f32) param[j++])/CONVERT) * LENGTH;
 		d->rsval	 = 1.0;
 		d->rsdelta	 = 0.0;
 		d->rs 	 = alHeapAlloc(hp, 1, sizeof(ALResampler));
@@ -511,7 +724,7 @@ Acmd *n_alAdpcmPull(N_PVoice *filter, s16 *outp, s32 outCount, Acmd *p)
   if (outCount == 0)
     return ptr;
 
-#ifndef N_MICRO  
+#ifndef N_MICRO
   inp = AL_DECODER_IN;
 #else
   inp = N_AL_DECODER_IN;
@@ -553,8 +766,13 @@ Acmd *n_alAdpcmPull(N_PVoice *filter, s16 *outp, s32 outCount, Acmd *p)
      * Now fix up state info to reflect the loop start point
      */
     f->dc_lastsam = f->dc_loop.start &0xf;
+#ifdef PORT
+    f->dc_memin = (uintptr_t) f->dc_table->base + ADPCMFBYTES *
+      ((s32) (f->dc_loop.start>>LFSAMPLES) + 1);
+#else
     f->dc_memin = (s32) f->dc_table->base + ADPCMFBYTES *
       ((s32) (f->dc_loop.start>>LFSAMPLES) + 1);
+#endif
     f->dc_sample = f->dc_loop.start;
     
     bEnd = *outp;
@@ -615,7 +833,11 @@ Acmd *n_alAdpcmPull(N_PVoice *filter, s16 *outp, s32 outCount, Acmd *p)
    * overFlow is the number of bytes past the end
    * of the bitstream I try to generate
    */
+#ifdef PORT
+  overFlow = f->dc_memin + nbytes - ((uintptr_t) f->dc_table->base + f->dc_table->len);
+#else
   overFlow = f->dc_memin + nbytes - ((s32) f->dc_table->base + f->dc_table->len);
+#endif
   if (overFlow < 0)
     overFlow = 0;
   nOver = (overFlow/ADPCMFBYTES)<<LFSAMPLES;
@@ -670,7 +892,34 @@ s32
   switch (paramID) {
   case (AL_FILTER_SET_WAVETABLE):
     a->dc_table = (ALWaveTable *) param;
+#ifdef PORT
+    a->dc_memin = (uintptr_t) a->dc_table->base;
+    /* PORT: reset ADPCM decode state on new wavetable assignment.
+     *
+     * Without this, when a pvoice gets reused for a new note (without an
+     * explicit AL_FILTER_STOP_VOICE → AL_FILTER_RESET sequence in between),
+     * dc_first stays at 0 from the prior note's decode and dc_state[] still
+     * holds the prior note's last-16-sample predictor history.  The new
+     * note's first aADPCMdec call then runs with A_CONTINUE flag and seeds
+     * its predictor (prev1, prev2) from those stale samples — producing a
+     * 16-sample predictor click at the start of every reused voice.
+     *
+     * Audible as the "scratching popping glitchy" pattern with discontinuity
+     * spikes clustering at multiples of 16 samples (verified empirically:
+     * 10.6% of large sample-to-sample jumps in the WAV dump align to N×16).
+     *
+     * The em_first flag for the envelope mixer IS already explicitly reset
+     * in START_VOICE_ALT (n_env.c:925); only the ADPCM decode side was
+     * missing the matching reset on this path. */
+    a->dc_first = 1;
+    a->dc_lastsam = 0;
+    if (a->dc_state) {
+        s32 _i;
+        for (_i = 0; _i < ADPCMFSIZE; _i++) (*a->dc_state)[_i] = 0;
+    }
+#else
     a->dc_memin = (s32) a->dc_table->base;
+#endif
     a->dc_sample = 0;
     switch (a->dc_table->type){
     case (AL_ADPCM_WAVE):
@@ -716,7 +965,11 @@ s32
     /* Get loop info according to table type. */
     if (a->dc_table)
       {
+#ifdef PORT
+	a->dc_memin  = (uintptr_t) a->dc_table->base;
+#else
 	a->dc_memin  = (s32) a->dc_table->base;
+#endif
 	if (a->dc_table->type == AL_ADPCM_WAVE)
 	  {
 	    if (a->dc_table->waveInfo.adpcmWave.loop)
@@ -734,13 +987,19 @@ s32
   default:
     break;
   }
+  return 0;
 }
 
 Acmd *_decodeChunk(Acmd *ptr, N_PVoice *f, s32 tsam,
 		   s32 nbytes, s16 outp, s16 inp, u32 flags)
 {
+#ifdef PORT
+  uintptr_t dramLoc;
+  s32 dramAlign;
+#else
   s32 dramAlign, dramLoc;
-  
+#endif
+
   if (nbytes > 0){
     dramLoc = (f->dc_dma)(f->dc_memin, nbytes, f->dc_dmaState);
     /*
@@ -810,9 +1069,17 @@ s16 n_eqpower[ N_EQPOWER_LENGTH ] = {
 };
 
 #ifndef N_MICRO
+#ifdef PORT
+/* PORT: IDO math → standard C math library */
+#include <math.h>
+#define __pow   pow
+#define _frexpf frexp
+#define _ldexpf ldexp
+#else
 extern	f64	__pow(f64, f64);
 extern f64 _frexpf(f64 value, s32 *eptr);
 extern f64 _ldexpf(f64 in, s32 ex);
+#endif
 #endif
 
 /*
@@ -883,15 +1150,14 @@ Acmd *n_alEnvmixerPull(N_PVoice *filter, s32 sampleOffset, Acmd *p)
 
     switch (e->em_ctrlList->type) {
     case (AL_FILTER_START_VOICE_ALT):
-      {                  
+      {
 	ALStartParamAlt *param = (ALStartParamAlt *)e->em_ctrlList;
 	ALFilter     *f = (ALFilter *) e;
 	s32 tmp;
-	
 	if (param->unity) {
 	  e->rs_upitch = 1;
 	}
-	
+
 	n_alLoadParam(e, AL_FILTER_SET_WAVETABLE, param->wave);
 	e->em_motion = AL_PLAYING;
 	e->em_first  = 1;
@@ -1117,7 +1383,7 @@ s32
       e->em_ctrlTail->next = (ALParam *)param;
     } else {
       e->em_ctrlList = (ALParam *)param;
-    }            
+    }
     e->em_ctrlTail = (ALParam *)param;
     break;
   case (AL_FILTER_RESET):
@@ -1454,17 +1720,18 @@ Acmd *n_alAuxBusPull(s32 sampleOffset, Acmd *p)
 /***********************************************************************
  * Resampler filter public interfaces
  ***********************************************************************/
-Acmd *n_alResamplePull(N_PVoice *e, s16 *outp, Acmd *p) 
+Acmd *n_alResamplePull(N_PVoice *e, s16 *outp, Acmd *p)
 {
     Acmd        *ptr = p;
     s16         inp;
     s32         inCount;
     s32		incr;
     f32         finCount;
-    
+
 #ifdef AUD_PROFILE
     lastCnt[++cnt_index] = osGetCount();
 #endif
+
 
 #ifndef N_MICRO
     inp = AL_DECODER_OUT;
@@ -1639,8 +1906,8 @@ Acmd *n_alFxPull(s32 sampleOffset,
   
   for (i = 0; i < r->section_count; i++) {
     d  = &r->delay[i];  /* get the ALDelay structure */
-    in_ptr  = &r->input[-d->input];
-    out_ptr = &r->input[-d->output];
+    in_ptr  = &r->input[-(s32)d->input];
+    out_ptr = &r->input[-(s32)d->output];
     
     if (in_ptr == prev_out_ptr) {
       SWAP(buff1, buff2);
@@ -1670,7 +1937,7 @@ Acmd *n_alFxPull(s32 sampleOffset,
     if (d->gain)
       aMix(ptr++, 0, (u16)d->gain, buff2, output);
     
-    prev_out_ptr = &r->input[d->output];
+    prev_out_ptr = &r->input[(s32)d->output];
   }
   
   /*
@@ -1795,7 +2062,7 @@ Acmd *_n_loadOutputBuffer(ALFx *r, ALDelay *d, s32 buff, Acmd *p)
     fincount = d->rs->delta + (fratio * (f32)incount);
     count = (s32) fincount;
     d->rs->delta = fincount - (f32)count;
-    out_ptr = &r->input[-(d->output - d->rsdelta)];
+    out_ptr = &r->input[-((s32)d->output - d->rsdelta)];
     ramalign = ((s32)out_ptr & 0x7) >> 1;
     ptr = _n_loadBuffer(r, out_ptr - ramalign, rbuff, count + ramalign, ptr);
     
@@ -1814,7 +2081,7 @@ Acmd *_n_loadOutputBuffer(ALFx *r, ALDelay *d, s32 buff, Acmd *p)
     d->rs->first = 0;
     d->rsdelta += count - incount;
   } else {
-    out_ptr = &r->input[-d->output];
+    out_ptr = &r->input[-(s32)d->output];
     ptr = _n_loadBuffer(r, out_ptr, buff, FIXED_SAMPLE, ptr);
   }
   
@@ -2020,6 +2287,8 @@ extern u32 cnt_index, drvr_num, drvr_cnt, drvr_max, drvr_min, lastCnt[];
 extern u32 client_num, client_cnt, client_max, client_min;
 #endif
 
+extern void __n_setInstChanState_Alt(N_ALSeqPlayer *seqp, ALInstrument *inst, s32 chan);
+
 #ifndef MIN
 #   define MIN(a,b) (((a)<(b))?(a):(b))
 #endif
@@ -2186,7 +2455,11 @@ Acmd *n_alAudioFrame(Acmd *cmdList, s32 *cmdLen, s16 *outBuf, s32 outLen)
 #ifndef N_MICRO
     aSegment(cmdPtr++, 0, 0);
 #endif
+#ifdef PORT
+    n_syn->sv_dramout = (uintptr_t)lOutBuf;
+#else
     n_syn->sv_dramout = (s32)lOutBuf;
+#endif
     cmdlEnd = n_alSavePull(n_syn->curSamples, cmdPtr);
     
     outLen -= nOut;
@@ -2226,9 +2499,21 @@ Acmd *n_alSavePull( s32 sampleOffset, Acmd *p)
 	aInterleave(ptr++, AL_MAIN_L_OUT, AL_MAIN_R_OUT);
 	aSetBuffer (ptr++, 0, 0, 0, FIXED_SAMPLE<<2);
 	aSaveBuffer(ptr++, n_syn->sv_dramout);
+#elif defined(PORT)
+	/* PORT: Inline the interleave+save directly.  The n_a* macros from
+	 * n_abi.h don't expand correctly through mixer.h's #undef/#define
+	 * cycle on MSVC, so we call the CPU impl functions directly. */
+	(void)(ptr++);
+	acmd_trace_log_cmd(_SHIFTL(A_INTERLEAVE, 24, 8), 0);
+	aSetBufferImpl(0, 0, PORT_NAUDIO_MAIN, PORT_NAUDIO_COUNT << 1);
+	aInterleaveImpl(PORT_NAUDIO_DRY_LEFT, PORT_NAUDIO_DRY_RIGHT);
+	(void)(ptr++);
+	acmd_trace_log_cmd(_SHIFTL(A_SAVEBUFF, 24, 8) | _SHIFTL(FIXED_SAMPLE<<2, 12, 12),
+	                   (uint32_t)(uintptr_t)n_syn->sv_dramout);
+	aSetBufferImpl(0, PORT_NAUDIO_MAIN, 0, FIXED_SAMPLE<<2);
+	aSaveBufferImpl((uintptr_t)n_syn->sv_dramout);
 #else
-	// Oneliner
-	n_aInterleave(ptr++); \
+	n_aInterleave(ptr++);
 	n_aSaveBuffer(ptr++, FIXED_SAMPLE<<2, 0, n_syn->sv_dramout);
 #endif
 	return ptr;
@@ -2657,13 +2942,22 @@ static ALMicroTime __n_CSPVoiceHandler(void *node)
 	 now be handled by __n_CSPHandleNextSeqEvent */
 
     case (AL_SEQ_END_EVT+20):
-        // TODO: may be wrong case, may be wrong RHS
-        seqp->unknown0 = seqp->nextEvent.msg.spseq.seq;
+        /* PORT: unknown0 is an extra ALBank* slot addressed via
+         * `(&seqp->bank)[1]`.  The RHS carries an ALBank* through
+         * the spseq.seq union alias — cast directly, don't truncate. */
+#ifdef PORT
+        seqp->unknown0 = (ALBank *)seqp->nextEvent.msg.spseq.seq;
+#else
+        seqp->unknown0 = (s32)(intptr_t)seqp->nextEvent.msg.spseq.seq;
+#endif
         __n_initFromBank((N_ALSeqPlayer *)seqp, seqp->nextEvent.msg.spseq.seq);
         break;
     case (AL_SEQ_END_EVT+21):
-        // TODO: may be wrong case, may be wrong RHS
-        seqp->unknown1 = seqp->nextEvent.msg.spseq.seq;
+#ifdef PORT
+        seqp->unknown1 = (ALBank *)seqp->nextEvent.msg.spseq.seq;
+#else
+        seqp->unknown1 = (s32)(intptr_t)seqp->nextEvent.msg.spseq.seq;
+#endif
         __n_initFromBank((N_ALSeqPlayer *)seqp, seqp->nextEvent.msg.spseq.seq);
         break;
     case (AL_SEQ_END_EVT):
@@ -2762,10 +3056,10 @@ static void __n_CSPHandleMIDIMsg(N_ALCSPlayer *seqp, N_ALEvent *event)
   chan = midi->status & AL_MIDI_ChannelMask;
   byte1 = key  = midi->byte1;
   byte2 = vel  = midi->byte2;
-  
+
   switch (status) {
   case (AL_MIDI_NoteOn):
-    
+
     if (vel != 0) /* a real note on */ {
       ALVoiceConfig   config;
       ALSound        *sound;
@@ -2784,12 +3078,12 @@ static void __n_CSPHandleMIDIMsg(N_ALCSPlayer *seqp, N_ALEvent *event)
       
       sound = __n_lookupSoundQuick((N_ALSeqPlayer*)seqp, key, vel, chan);
       ALFlagFailIf(!sound, seqp->debugFlags & NO_SOUND_ERR_MASK,
-		   ERR_ALSEQP_NO_SOUND); 
-      
+		   ERR_ALSEQP_NO_SOUND);
+
       config.priority = seqp->chanState[chan].priority;
       config.fxBus    = 0;
       config.unityPitch = 0;
-      
+
       vstate = __n_mapVoice((N_ALSeqPlayer*)seqp, key, vel, chan);
       ALFlagFailIf(!vstate, seqp->debugFlags & NO_VOICE_ERR_MASK,
 		   ERR_ALSEQP_NO_VOICE );
@@ -3447,7 +3741,11 @@ void n_alCSeqNew(ALCSeq *seq, u8 *ptr)
 		{
 			flagTmp = 1 << i;
 			seq->validTracks |= flagTmp;
+#ifdef PORT
+			seq->curLoc[i] = ptr + tmpOff;
+#else
 			seq->curLoc[i] = (u8*)((u32)ptr + tmpOff);
+#endif
 			seq->evtDeltaTicks[i] = __readVarLen(seq,i);
 			/*__n_alCSeqGetTrackEvent(seq,i); prime the event buffers  */
 		}
@@ -3773,11 +4071,11 @@ void func_80027460_28060(ALWhatever8009EE0C_2 *arg0)
     if (arg0->unk28 != 0)
     {
         arg0->unk28--;
-        
+
         if (arg0->unk28 == 0)
         {
             ucode = arg0->unk20;
-            
+
             do
             {
                 instr = *ucode++;
@@ -4047,8 +4345,20 @@ void func_80027460_28060(ALWhatever8009EE0C_2 *arg0)
                     }
                     if (param2 < D_8009EDD0_406D0.unk_alsound_0x14)
                     {
+#ifdef PORT
+                        /* PORT: unk_alsound_0x18 is the SFX bank's
+                         * inst[0]->soundArray (ALSound** ).  N64 read
+                         * the wavetable pointer through a parallel
+                         * `off18` view at byte offset 0x8 — but on LP64
+                         * the `envelope` and `keyMap` ptrs grew to 8B
+                         * each, so ALSound.wavetable now lives at
+                         * offset 0x10, not 0x8.  Read it through the
+                         * real ALSound type. */
+                        arg0->unk40 = ((ALSound *)D_8009EDD0_406D0.unk_alsound_0x18[param2])->wavetable;
+#else
                         // This is probably an actual struct?
                         arg0->unk40 = D_8009EDD0_406D0.unk_alsound_0x18[param2]->unkALWhatever8009EDD0_off18_0x8;
+#endif
                         arg0->unk2A = 3;
                     }
                     break;
@@ -4343,7 +4653,13 @@ void func_80027460_28060(ALWhatever8009EE0C_2 *arg0)
         }
         if ((arg0->unk32 != arg0->unk33) || (arg0->unk38 != arg0->unk39))
         {
-            n_alSynSetVol(&arg0->voice, ((arg0->unk32 * arg0->unk38 * D_8009EDD0_406D0.unk_alsound_0x5A) >> 7), D_8009EDD0_406D0.unk_alsound_0x44);
+          // LUS: Fetch the multiplier based on this specific node's identity!
+          float type_mult = arg0->port_is_voice ? port_get_voice_volume() : port_get_sfx_volume();
+
+          s16 fgm_vanilla_vol = ((arg0->unk32 * arg0->unk38 * D_8009EDD0_406D0.unk_alsound_0x5A) >> 7);
+          s16 fgm_scaled_vol = (s16)(fgm_vanilla_vol * type_mult * port_get_master_volume());
+
+          n_alSynSetVol(&arg0->voice, fgm_scaled_vol, D_8009EDD0_406D0.unk_alsound_0x44);
         }
         if ((arg0->unk34 != arg0->unk35) || (arg0->unk3A != arg0->unk3B))
         {
@@ -4407,7 +4723,17 @@ void func_80027460_28060(ALWhatever8009EE0C_2 *arg0)
             {
                 param3 = 0x7F;
             }
-            n_alSynStartVoiceParams(&arg0->voice, arg0->unk40, alCents2Ratio(arg0->unk2C + arg0->unk30), (arg0->unk32 * arg0->unk38 * D_8009EDD0_406D0.unk_alsound_0x5A) >> 7, param, param3, 0);
+
+            // LUS: Fetch the multiplier!
+            float type_mult = arg0->port_is_voice ? port_get_voice_volume() : port_get_sfx_volume();
+#ifdef PORT
+            /* PORT: unk40 is a real ALWaveTable* (widened in the
+             * unified PORT struct); skip the (intptr_t) sign-extension
+             * cast that N64's s32-stored 32-bit pointer required. */
+            n_alSynStartVoiceParams(&arg0->voice, arg0->unk40, alCents2Ratio(arg0->unk2C + arg0->unk30), (s16)(((arg0->unk32 * arg0->unk38 * D_8009EDD0_406D0.unk_alsound_0x5A) >> 7) * type_mult * port_get_master_volume()), param, param3, 0);
+#else
+            n_alSynStartVoiceParams(&arg0->voice, (ALWaveTable *)(intptr_t)arg0->unk40, alCents2Ratio(arg0->unk2C + arg0->unk30), (s16)(((arg0->unk32 * arg0->unk38 * D_8009EDD0_406D0.unk_alsound_0x5A) >> 7) * type_mult * port_get_master_volume()), param, param3, 0);
+#endif
             arg0->unk2A = 1;
         }
         else arg0->unk2A = 0;
@@ -4430,7 +4756,7 @@ void func_80027458_28058(void)
 
 s32 func_800264A4_270A4();
 void func_8002668C_2728C(ALWhatever8009EE0C*);
-ALWhatever8009EDD0_siz34* func_80026844_27444(void *id);
+static ALWhatever8009EDD0_siz34* func_80026844_27444(void *id);
 ALWhatever8009EDD0_siz34* func_80026958_27558(void *id);
 ALWhatever8009EE0C* func_80026A6C_2766C(void *arg0);
 ALWhatever8009EE0C* func_80026B40_27740(u16 id);
@@ -4439,7 +4765,7 @@ f32 randFloat1();
 void func_80026B90_27790(ALWhatever8009EDD0_siz34 *arg0);
 
 // TODO: where does this go?
-static s32 func_800293A8_29FA8(s32 arg0) 
+static s32 func_800293A8_29FA8(s32 arg0)
 {
     ALWhatever8009EDD0_siz24* temp_a0;
     ALWhatever8009EE0C* next_node;
@@ -4453,13 +4779,13 @@ static s32 func_800293A8_29FA8(s32 arg0)
 
     this_node = D_8009EDD0_406D0.unk_alsound_0x3C;
     var_s4 = NULL;
-    
-    while (this_node != NULL) 
+
+    while (this_node != NULL)
     {
         next_node = (ALWhatever8009EE0C*)this_node->next;
-        temp_s0 = &this_node->voice;
-        
-        if (this_node->unk2A == 0) 
+        temp_s0 = (N_ALVoice *)&this_node->voice;
+
+        if (this_node->unk2A == 0)
         {
             n_alSynStopVoice(temp_s0);
             n_alSynFreeVoice(temp_s0);
@@ -4517,21 +4843,21 @@ static s32 func_800293A8_29FA8(s32 arg0)
     }
     
     var_s0 = D_8009EDD0_406D0.unk_alsound_0x40;
-    
-    while (var_s0 != NULL) 
+
+    while (var_s0 != NULL)
     {
         func_80026B90_27790(var_s0);
         var_s0 = var_s0->next;
     }
     
     this_node = D_8009EDD0_406D0.unk_alsound_0x3C;
-    
-    while (this_node != NULL) 
+
+    while (this_node != NULL)
     {
-        func_80027460_28060(this_node);
+        func_80027460_28060((ALWhatever8009EE0C_2 *)this_node);
         this_node = this_node->next;
     }
-    
+
     var_s0 = D_8009EDD0_406D0.unk_alsound_0x40;
     var_v0 = NULL;
     
@@ -4544,11 +4870,11 @@ static s32 func_800293A8_29FA8(s32 arg0)
             var_s0->unkALWhatever8009EDD0_siz34_0x10 = 0U;
             var_s0->unkALWhatever8009EDD0_siz34_0x26 = 0;
             
-            if (var_v0 != NULL) 
+            if (var_v0 != NULL)
             {
-                var_v0->next = var_s0->next;
-            } 
-            else 
+                var_v0->next = (struct ALWhatever8009EDD0_siz24 *)var_s0->next;
+            }
+            else
             {
                 D_8009EDD0_406D0.unk_alsound_0x40 = (ALWhatever8009EDD0_siz34* ) var_s0->next;
             }
@@ -4556,9 +4882,9 @@ static s32 func_800293A8_29FA8(s32 arg0)
             var_s0->next = D_8009EDD0_406D0.unk_alsound_0x38;
             D_8009EDD0_406D0.unk_alsound_0x38 = var_s0;
         } 
-        else 
+        else
         {
-            var_v0 = var_s0;
+            var_v0 = (ALWhatever8009EDD0_siz24 *)var_s0;
         }
         var_s0 = temp_v1;
     }
@@ -4898,6 +5224,9 @@ void func_80026B90_27790(ALWhatever8009EDD0_siz34 *arg0)
 
 								if (arg0->unkALWhatever8009EDD0_siz34_0x28 != NULL)
 								{
+                                    // LUS: Hand the identity from the queue node to the hardware node!
+                                    arg0->unkALWhatever8009EDD0_siz34_0x28->port_is_voice = arg0->port_is_voice;
+
 									arg0->unkALWhatever8009EDD0_siz34_0x28->unk2B = arg0->unkALWhatever8009EDD0_siz34_0x1F;
 									arg0->unkALWhatever8009EDD0_siz34_0x28->unk30 = (s16)(((instr >> 3) * 100) - 1300) + var_t5;
 									var_t5 = 0;
@@ -4939,14 +5268,13 @@ ALWhatever8009EE0C* func_80026B40_27740(u16 id)
     {
         return NULL;
     }
-    else return func_80026A6C_2766C(D_8009EDD0_406D0.fgm_table_data[id]);
+    return func_80026A6C_2766C(D_8009EDD0_406D0.fgm_table_data[id]);
 }
 
 ALWhatever8009EE0C* func_80026A6C_2766C(void *arg0)
 {
     ALWhatever8009EE0C *temp_v1;
     OSIntMask temp_a1;
-    
     temp_a1 = osSetIntMask(1);
     temp_v1 = D_8009EDD0_406D0.unk_alsound_0x34;
     
@@ -4957,8 +5285,15 @@ ALWhatever8009EE0C* func_80026A6C_2766C(void *arg0)
         D_8009EDD0_406D0.unk_alsound_0x3C = temp_v1;
         
         temp_v1->unk28 = 1;
-        temp_v1->unk20 = arg0;
-        temp_v1->unk24 = arg0;
+#ifdef PORT
+        /* PORT: unified EE0C layout makes unk20/unk24 native u8* — store
+         * full 64-bit ucode pointer instead of truncating via (s32). */
+        temp_v1->unk20 = (u8*)arg0;
+        temp_v1->unk24 = (u8*)arg0;
+#else
+        temp_v1->unk20 = (s32)(uintptr_t)arg0;
+        temp_v1->unk24 = (s32)(uintptr_t)arg0;
+#endif
         temp_v1->unk2A = 3;
         temp_v1->unk32 = 0x7F;
         temp_v1->unk34 = 0x40;
@@ -4986,20 +5321,36 @@ ALWhatever8009EE0C* func_80026A6C_2766C(void *arg0)
 
 ALWhatever8009EDD0_siz34* func_80026A10_27610(u16 id)
 {
-	if (id >= D_8009EDD0_406D0.fgm_ucode_count)
-	{
-		return NULL;
-	}
-	else return func_80026844_27444(D_8009EDD0_406D0.fgm_ucode_data[id]);
+  g_port_current_is_voice = (id >= 0x135) ? 1 : 0; // LUS: Tag the thread!
+
+  if (id >= D_8009EDD0_406D0.fgm_ucode_count)
+  {
+    return NULL;
+  }
+  return func_80026844_27444(D_8009EDD0_406D0.fgm_ucode_data[id]);
 }
 
 ALWhatever8009EDD0_siz34* func_800269C0_275C0(u16 id)
 {
-	if (id >= D_8009EDD0_406D0.fgm_ucode_count)
-	{
-		return NULL;
-	}
-	else return func_80026958_27558(D_8009EDD0_406D0.fgm_ucode_data[id]);
+#ifdef PORT
+  /* Injection harness: the target fighter's announcer name plays as a WAV
+   * overlay (SSB64_INJECT_VOICE) instead of the vanilla FGM clip. Callers
+   * null-check the returned handle. */
+  {
+    extern s32 port_voice_announce_filter(u16 id);
+    if (port_voice_announce_filter(id))
+    {
+      return NULL;
+    }
+  }
+#endif
+  g_port_current_is_voice = (id >= 0x135) ? 1 : 0; // LUS: Tag the thread!
+
+  if (id >= D_8009EDD0_406D0.fgm_ucode_count)
+  {
+    return NULL;
+  }
+  return func_80026958_27558(D_8009EDD0_406D0.fgm_ucode_data[id]);
 }
 
 ALWhatever8009EDD0_siz34* func_80026958_27558(void *id)
@@ -5025,7 +5376,6 @@ static ALWhatever8009EDD0_siz34* func_80026844_27444(void *id)
     ALWhatever8009EDD0_siz34* temp_s0;
     OSIntMask temp_a3;
     s32 i;
-    
     temp_a3 = osSetIntMask(1);
     temp_s0 = D_8009EDD0_406D0.unk_alsound_0x38;
 
@@ -5052,6 +5402,7 @@ static ALWhatever8009EDD0_siz34* func_80026844_27444(void *id)
         temp_s0->unkALWhatever8009EDD0_siz34_0x2E = 0x7F;
         temp_s0->unkALWhatever8009EDD0_siz34_0x2F = 0x80;
         temp_s0->unkALWhatever8009EDD0_siz34_0x30 = 0x80;
+        temp_s0->port_is_voice = g_port_current_is_voice; // LUS: Save the identity to the queue item!
         
         D_8009EDD0_406D0.unk_alsound_0x4A++;
         
@@ -5231,6 +5582,7 @@ s32 func_80026594_27194(void)
         var_v1_2 = var_v0_2;
     }
     osSetIntMask(im);
+    return 0;
 }
 
 s32 func_800264A4_270A4(void)
@@ -5241,6 +5593,31 @@ s32 func_800264A4_270A4(void)
   ALWhatever8009EE0C *var_v1;
   ALWhatever8009EDD0_siz34 *var_v1_2;
   u32 im = osSetIntMask(1);
+#ifdef PORT
+  /*
+   * Short-circuit under PORT: on macOS/arm64 the first call into this
+   * function crashes with a NULL-plus-1 deref (fault addr 0x1) walking
+   * `D_8009EDD0_406D0.unk_alsound_0x60`. The field holds the value 1
+   * before func_800264A4_270A4 is ever entered, which means something
+   * earlier writes it — almost certainly via one of the several
+   * duplicated / inconsistent audio-state typedefs the decomp carries
+   * (see the three different `alSoundEffect` typedefs in n_env.c,
+   * sys/audio.c and gm/gmsound.h, and the `extern alSoundEffect
+   * D_8009EDD0_406D0` in sc1pmode/sc1pgame.c that disagrees with the
+   * real type `ALWhatever8009EDD0`). Tracking down which typedef
+   * aliases which byte of the real struct is deep n_audio archaeology
+   * and blocks every attempt to see the intro cinematic render.
+   *
+   * This function walks the pending-delete queues and moves their
+   * contents to the free lists; skipping it means those queues never
+   * drain on the port. For the rendering-validation pass that is
+   * fine — audio is not the feature we are proving out today. Revisit
+   * once we have a visible game loop and can reason about the n_audio
+   * state machine more carefully.
+   */
+  osSetIntMask(im);
+  return 0;
+#endif
     
     var_v1 = D_8009EDD0_406D0.unk_alsound_0x5C;
     
@@ -5333,7 +5710,14 @@ void func_80026204_26E04(N_ALUnk80026204 *arg0)
     D_8009EDD0_406D0.fgm_ucode_count = arg0->fgm_ucode_count;
     D_8009EDD0_406D0.fgm_table_data = arg0->fgm_table_data;
     D_8009EDD0_406D0.fgm_table_count = arg0->fgm_table_count;
-    D_8009EDD0_406D0.unk_alsound_0x24 = arg0->unk_80026204_0x1C;
+#ifdef PORT
+    /* PORT: unk_80026204_0x1C is now a native pointer; skip the
+     * (intptr_t) sign-extension cast that was needed when the
+     * field was s32 holding a truncated 32-bit pointer. */
+    D_8009EDD0_406D0.unk_alsound_0x24 = (ALWhatever8009EE0C_3 *)arg0->unk_80026204_0x1C;
+#else
+    D_8009EDD0_406D0.unk_alsound_0x24 = (ALWhatever8009EE0C_3 *)(intptr_t)arg0->unk_80026204_0x1C;
+#endif
     D_8009EDD0_406D0.unk_alsound_0x2C = arg0->unk_80026204_0xC;
     D_8009EDD0_406D0.unk_alsound_0x14 = arg0->unk_80026204_0x6;
     D_8009EDD0_406D0.unk_alsound_0x18 =  arg0->unk_80026204_0x10;
@@ -5343,7 +5727,7 @@ void func_80026204_26E04(N_ALUnk80026204 *arg0)
     client = &D_8009EDD0_406D0.node;
     
     client->next = NULL;
-    client->handler = func_800293A8_29FA8;
+    client->handler = (ALVoiceHandler)func_800293A8_29FA8;
     client->clientData = NULL;
     
     n_alSynAddSndPlayer(client);

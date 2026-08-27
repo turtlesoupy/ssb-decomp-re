@@ -4,6 +4,13 @@
 #include <if/interface.h>
 #include <sc/scene.h>
 #include <sys/rdp.h>
+#ifdef PORT
+#include <sys/debug.h>
+/* Enhanced-framerate frame interpolation recording hook — observational
+ * only. Tag 1 = projection-stack matrix (combined view*persp here).
+ * See port/interpolation/frame_interpolation.h. */
+extern void portInterpRecordMtx(void *mtx, void *owner, int ordinal, int tag);
+#endif
 // #include <sys/taskman.h>
 
 // // // // // // // // // // // //
@@ -1023,6 +1030,9 @@ sb32 gmCameraPrepLookAtFuncMatrix(Mtx *mtx, CObj *cobj, Gfx **dls)
     gSPLookAtX(dls[0]++, &gGMCameraStruct.look_at.l[0]);
     gSPLookAtY(dls[0]++, &gGMCameraStruct.look_at.l[1]);
 
+#ifdef PORT
+    portInterpRecordMtx(mtx, cobj, 0, 1 /* combined view*persp projection */);
+#endif
     gSPMatrix(dls[0]++, mtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
 
     gSPPerspNormalize(dls[0]++, cobj->projection.persp.norm);
@@ -1109,6 +1119,24 @@ GObj* gmCameraMakeDefaultCamera(u8 tk1, u8 tk2, void (*proc)(GObj*))
     CObj *cobj;
     Vec3f sp4C;
     f32 temp_f0;
+
+#ifdef PORT
+    /* Issue #128 follow-on: gGMCameraGObj and gGMCameraStruct.{pzoom,pfollow}
+     * _fighter_gobj are BSS-resident GObj* fields. gGMCameraGObj is written
+     * unconditionally at the bottom of this function, but the {pzoom,pfollow}
+     * fighter fields are only written by gmCameraSetZoomFighter/gmCameraSet
+     * FollowFighter (lines 899/912) — paths that don't fire in bonus stages,
+     * the menu, or any non-multi-player scene. They are read during gameplay
+     * (lines 711-712, 748, 847-848) via DObjGetStruct/ftGetStruct, which
+     * deref the GObj. On N64, BSS re-DMA cleared these between scenes; on
+     * the port the BSS persists, so a previous match's fighter_gobj survives
+     * even after taskman.c:1352 frees its arena. NULL all three on every
+     * camera setup so any stale read after this point is a clean NULL deref
+     * instead of an arena-freed deref. */
+    gGMCameraGObj = NULL;
+    gGMCameraStruct.pzoom_fighter_gobj = NULL;
+    gGMCameraStruct.pfollow_fighter_gobj = NULL;
+#endif
 
     camera_gobj = gcMakeCameraGObj
     (
@@ -1202,6 +1230,21 @@ void gmCameraMakeBattleCamera(void)
 // 0x8010DB2C
 GObj* gmCameraMakeMovieCamera(void (*func_camera)(GObj*))
 {
+#ifdef PORT
+    /* Issue #72: the opening-montage motion windows are created mid-scene
+     * (FuncRun tic 15) together with stage setup + fighter creation. On N64
+     * that work overruns the frame by a few VIs, so the first tics after
+     * creation — whose authored camera state is display-degenerate (eye-at
+     * dist.z == 0 slams the wallpaper parallax to its clamps, showing a
+     * full-window gold smear) — never reach the screen; VI keeps scanning
+     * the previous frame. The port completes setup within one host frame,
+     * so suppress the next two gfx submissions to reproduce the held-frame
+     * behavior verified against a cycle-accurate emulator. */
+    {
+        extern void port_sim_load_stall(int n);
+        port_sim_load_stall(2);
+    }
+#endif
     return gmCameraMakeDefaultCamera(nGCMatrixKindPerspFastF, 8, func_camera);
 }
 
@@ -1354,6 +1397,9 @@ sb32 gmCameraOrthoLookAtFuncMatrix(Mtx *mtx, CObj *cobj, Gfx **dls)
 // 0x8010E10C
 sb32 gmCameraPrepProjectionFuncMatrix(Mtx *mtx, CObj *cobj, Gfx **dls)
 {
+#ifdef PORT
+    portInterpRecordMtx(mtx, cobj, 0, 1 /* combined view*persp projection */);
+#endif
     gSPMatrix(dls[0]++, mtx, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
 
     return 0;

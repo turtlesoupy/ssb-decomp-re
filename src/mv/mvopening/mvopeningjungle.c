@@ -6,9 +6,15 @@
 #include <sys/video.h>
 #include <sys/rdp.h>
 #include <reloc_data.h>
+#include <it/itmanager.h>
+#include <sys/debug.h>
+#include <wp/wpmanager.h>
 
 extern void syTaskmanSetLoadScene();
 extern u32 sySchedulerGetTicCount();
+#ifdef PORT
+extern void port_coroutine_yield(void);
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -88,7 +94,7 @@ FTKeyEvent dMVOpeningJungleSamusKeyEvents[/* */] =
 };
 
 // 0x8018D934
-u32 dMVOpeningJungleFileIDs[/* */] = { &llIFCommonAnnounceCommonFileID, &llMVOpeningJungleFileID };
+u32 dMVOpeningJungleFileIDs[/* */] = { llIFCommonAnnounceCommonFileID, llMVOpeningJungleFileID };
 
 // 0x8018D93C
 SYVideoSetup dMVOpeningJungleVideoSetup = SYVIDEO_SETUP_DEFAULT();
@@ -195,7 +201,7 @@ void mvOpeningJungleSetupFiles(void)
     LBRelocSetup rl_setup;
 
     rl_setup.table_addr = (uintptr_t)&lLBRelocTableAddr;
-    rl_setup.table_files_num = (u32)&llRelocFileCount;
+    rl_setup.table_files_num = (u32)llRelocFileCount;
     rl_setup.file_heap = NULL;
     rl_setup.file_heap_size = 0;
     rl_setup.status_buffer = sMVOpeningJungleStatusBuffer;
@@ -234,7 +240,7 @@ void mvOpeningJungleMakeGroundViewport(Vec3f unused)
     cobj->projection.persp.near = 50.0F;
     cobj->projection.persp.far = 15000.0F;
 
-    gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningJungleFiles[1], &llMVOpeningJungleCamAnimJoint), 0.0F);
+    gcAddCObjCamAnimJoint(cobj, lbRelocGetFileData(AObjEvent32*, sMVOpeningJungleFiles[1], llMVOpeningJungleCamAnimJoint), 0.0F);
     gcAddGObjProcess(sMVOpeningJungleStageCameraGObj, gcPlayCamAnim, nGCProcessKindFunc, 1);
 
     gcPlayCamAnim(sMVOpeningJungleStageCameraGObj);
@@ -376,9 +382,15 @@ void func_ovl51_8018D668(void)
     return;
 }
 
+void mvOpeningJungleInitTotalTimeTics(void)
+{
+    sMVOpeningJungleTotalTimeTics = 0;
+}
+
 // 0x8018D670
 void mvOpeningJungleFuncStart(void)
 {
+    mvOpeningJungleInitTotalTimeTics();
     sMVOpeningJungleBattleState = dSCManagerDefaultBattleState;
     gSCManagerBattleState = &sMVOpeningJungleBattleState;
 
@@ -409,6 +421,9 @@ void mvOpeningJungleFuncStart(void)
 
     while (sySchedulerGetTicCount() < 2880)
     {
+#ifdef PORT
+		port_coroutine_yield();
+#endif
         continue;
     }
 }

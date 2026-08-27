@@ -1,5 +1,9 @@
 #include <ft/fighter.h>
 #include <wp/weapon.h>
+#ifdef PORT
+#include <sc/scmanager.h>
+#include <sys/debug.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //

@@ -1,9 +1,19 @@
 #include "controller.h"
 
+#ifdef PORT
+extern void port_log(const char *fmt, ...);
+#endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include <sys/main.h>
 #include <sys/scheduler.h>
 #include <missing_libultra.h>
 #include <PR/os.h>
+#include "enhancements/enhancements.h"
+#include "sc/scmanager.h"
+#include "sc/sctypes.h"
 
 // 0x800450F0
 OSMesgQueue sSYControllerInitMesgQueue; // Queue for OS controller Init, Status, and Read
@@ -180,6 +190,60 @@ void syControllerUpdateGlobalData(void)
             gSYControllerDevices[i].stick_range.x = sSYControllerDescs[i].unk0E;
             gSYControllerDevices[i].stick_range.y = sSYControllerDescs[i].unk0F;
 
+            // NRage-style per-axis stick remap. Runs unconditionally (also in
+            // menus / CSS) because the formula is the user's chosen stick
+            // shaping. No-op when the per-player toggle is off — LUS's stock
+            // octagon-clamped output flows through unchanged in that case.
+            // Must come BEFORE c_stick_smash so the synthetic ±80 values that
+            // c_stick_smash writes into stick_range are not subsequently
+            // re-rescaled by our deadzone/range formula.
+            port_enhancement_analog_remap(i,
+                &gSYControllerDevices[i].stick_range.x,
+                &gSYControllerDevices[i].stick_range.y);
+
+            // Apply input remap enhancements only during gameplay. Gate on
+            // gSCManagerSceneData.scene_curr (the source of truth) rather than
+            // on BattleState->players[i].fighter_gobj — the BattleState
+            // pointer is owned by whichever gameplay scene last assigned it
+            // and is never NULLed at scene exit, so its fighter_gobj fields
+            // can hold stale non-NULL values after returning to CSS from
+            // 1P/Bonus modes (issue #97 [3]). Without the scene-curr gate,
+            // C-Stick Smash fires in CSS, hijacking palette cycling.
+            //
+            // Bound `i` against GMCOMMON_PLAYERS_MAX explicitly because the
+            // loop limit is `(ARRAY_COUNT(descs)+ARRAY_COUNT(devs))/2` —
+            // equal to GMCOMMON_PLAYERS_MAX today but the math is fragile
+            // and overruns would clobber the next field on LP64 with the
+            // same fingerprint as past per-player-array bugs (see
+            // docs/bugs/per_gkind_table_inishie_short).
+            // Classic mode (1P): sc1pintro.c on exit clobbers scene_curr to
+            // nSCKindTitle before returning to sc1pmanager, which then calls
+            // sc1PGameStartScene() without ever restoring it. sc1pchallenger.c
+            // does the same. Both paths are patched in sc1pmanager.c
+            // (PORT-only) to set scene_curr = nSCKind1PGame right before
+            // sc1PGameStartScene, so this gate sees the intended value during
+            // classic-mode fighter / challenger / Bonus3 stages.
+            // nSCKind1PBonusStage (Bonus1/Bonus2 from classic or menu) is set
+            // explicitly at sc1pmanager.c:396 and mnplayers1pbonus.c:2792.
+            u8 scene = gSCManagerSceneData.scene_curr;
+            sb32 in_gameplay = (scene == nSCKindVSBattle
+                                || scene == nSCKind1PGame
+                                || scene == nSCKind1PBonusStage
+                                || scene == nSCKind1PTrainingMode);
+            if (i < GMCOMMON_PLAYERS_MAX && in_gameplay) {
+                port_enhancement_c_stick_smash(i,
+                    &gSYControllerDevices[i].button_hold,
+                    &gSYControllerDevices[i].button_tap,
+                    &gSYControllerDevices[i].stick_range.x,
+                    &gSYControllerDevices[i].stick_range.y,
+                    sSYControllerDescs[i].unk04);
+
+                port_enhancement_dpad_jump(i,
+                    &gSYControllerDevices[i].button_hold,
+                    &gSYControllerDevices[i].button_tap,
+                    sSYControllerDescs[i].unk04);
+            }
+
             sSYControllerDescs[i].unk04 = sSYControllerDescs[i].unk08 = sSYControllerDescs[i].unk0C = 0;
         }
     }
@@ -203,8 +267,17 @@ void syControllerInitDevices(void)
     u8 pattern;
 
     osCreateMesgQueue(&sSYControllerInitMesgQueue, sSYControllerInitMesg, ARRAY_COUNT(sSYControllerInitMesg));
+#ifdef PORT
+    port_log("SSB64: Thread6 — mesg queue created, setting event mesg\n");
+#endif
     osSetEventMesg(OS_EVENT_SI, &sSYControllerInitMesgQueue, (OSMesg)1);
+#ifdef PORT
+    port_log("SSB64: Thread6 — event mesg set, calling osContInit\n");
+#endif
     osContInit(&sSYControllerInitMesgQueue, &pattern, sSYControllerDeviceStatuses);
+#ifdef PORT
+    port_log("SSB64: Thread6 — osContInit returned pattern=%d\n", (int)pattern);
+#endif
 
     for (i = 0; i < (ARRAY_COUNT(sSYControllerDeviceStatuses) + ARRAY_COUNT(sSYControllerMotorPfs)) / 2; i++)
     {
@@ -312,6 +385,7 @@ void syControllerSetStatusDelay(s32 delay)
 void syControllerUpdateRumbleEvent(s32 port, s32 ev_kind)
 {
     s32 i;
+    OSMesg msg;
 
     for (i = 0; i < MAXCONTROLLERS; i++)
     {
@@ -322,13 +396,32 @@ void syControllerUpdateRumbleEvent(s32 port, s32 ev_kind)
     }
     if (i == MAXCONTROLLERS)
     {
-        osRecvMesg(&sSYControllerDeviceMesgQueue, (OSMesg*)&i, OS_MESG_BLOCK);
+        osRecvMesg(&sSYControllerDeviceMesgQueue, &msg, OS_MESG_BLOCK);
+        i = (s32)(intptr_t)msg;
     }
     else D_80045268[i].unk00 = 1;
     
     D_80045268[i].unk10 = port;
     D_80045268[i].unk14 = ev_kind;
+#ifdef PORT
+    /* N64 punned &D_80045268[i].unk04 as a ContMotorEvt* because the
+     * fixed-4-byte pointer N64 ABI let (unk04,unk08,unk0C,unk10,unk14)
+     * line up exactly with (type,mesg,cbQueue,contID,cmd).  On LP64 that
+     * pun is broken — OSMesg / OSMesgQueue* grow to 8 bytes and the
+     * receiver's `((ContMotorEvt*)evt)->cbQueue` ends up reading unrelated
+     * memory (typically decoding to 0x1, which crashes in osSendMesg at
+     * &mq->validCount == 0x11).  Populate the dedicated port_motor_evt
+     * field and dispatch that address instead so the struct layout is
+     * natural on both ABIs. */
+    D_80045268[i].port_motor_evt.evt.type    = CONT_EVENT_MOTOR;
+    D_80045268[i].port_motor_evt.evt.mesg    = (OSMesg)(intptr_t)i;
+    D_80045268[i].port_motor_evt.evt.cbQueue = &sSYControllerDeviceMesgQueue;
+    D_80045268[i].port_motor_evt.contID      = port;
+    D_80045268[i].port_motor_evt.cmd         = (MotorCmd)ev_kind;
+    osSendMesg(&sSYControllerEventMesgQueue, (OSMesg)&D_80045268[i].port_motor_evt, OS_MESG_NOBLOCK);
+#else
     osSendMesg(&sSYControllerEventMesgQueue, (OSMesg)&D_80045268[i].unk04, OS_MESG_NOBLOCK);
+#endif
 }
 
 // 0x80004474
@@ -452,7 +545,13 @@ void syControllerThreadMain(void *unused)
 {
     OSMesg mesg;
 
+#ifdef PORT
+    port_log("SSB64: Thread6 — controller thread entered, initializing devices\n");
+#endif
     syControllerInitDevices();
+#ifdef PORT
+    port_log("SSB64: Thread6 — devices initialized\n");
+#endif
     sySchedulerAddClient(&sSYControllerClient, &sSYControllerEventMesgQueue, sSYControllerEventMesgs, ARRAY_COUNT(sSYControllerEventMesgs));
     osSendMesg(&gSYMainThreadingMesgQueue, (OSMesg)1, OS_MESG_NOBLOCK);
 

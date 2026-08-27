@@ -2,6 +2,10 @@
 #include <lb/library.h>
 #include <sc/scene.h>
 #include <sys/video.h>
+#ifdef PORT
+#include <sys/audio.h>
+#include <sys/dma.h>
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -73,30 +77,61 @@ void lbBackupApplyOptions(void)
     );
 }
 
+#ifdef PORT
+/* synth fkinds (>= 32 with enough mods) make the unlock-mask shift UB, and a
+ * synth is never in the u16 mask anyway; treat anything past the vanilla
+ * playables as not locked so synth selections survive uncorrected */
+static sb32 lbBackupFighterIsLocked(u32 fkind)
+{
+    return (fkind < GMCOMMON_FIGHTERS_PLAYABLE_NUM) &&
+           !((gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER) & (1 << fkind));
+}
+#endif
+
 // 0x800D473C
 void lbBackupCorrectErrors(void)
 {
     s32 i;
 
+#ifdef PORT
+    if (lbBackupFighterIsLocked(gSCManagerBackupData.characters_fkind))
+#else
     if (!((gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER) & (1 << gSCManagerBackupData.characters_fkind)))
+#endif
     {
         gSCManagerBackupData.characters_fkind = dSCManagerDefaultBackupData.characters_fkind;
     }
+#ifdef PORT
+    if (lbBackupFighterIsLocked(gSCManagerSceneData.fkind))
+#else
     if (!((gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER) & (1 << gSCManagerSceneData.fkind)))
+#endif
     {
         gSCManagerSceneData.fkind = nFTKindNull;
     }
+#ifdef PORT
+    if (lbBackupFighterIsLocked(gSCManagerSceneData.training_man_fkind))
+#else
     if (!((gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER) & (1 << gSCManagerSceneData.training_man_fkind)))
+#endif
     {
         gSCManagerSceneData.training_man_fkind = nFTKindNull;
     }
+#ifdef PORT
+    if (lbBackupFighterIsLocked(gSCManagerSceneData.training_com_fkind))
+#else
     if (!((gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER) & (1 << gSCManagerSceneData.training_com_fkind)))
+#endif
     {
         gSCManagerSceneData.training_com_fkind = nFTKindNull;
     }
     for (i = 0; i < ARRAY_COUNT(gSCManagerTransferBattleState.players); i++)
     {
+#ifdef PORT
+        if (lbBackupFighterIsLocked(gSCManagerTransferBattleState.players[i].fkind))
+#else
         if (!((1 << gSCManagerTransferBattleState.players[i].fkind) & (gSCManagerBackupData.fighter_mask | LBBACKUP_CHARACTER_MASK_STARTER)))
+#endif
         {
             gSCManagerTransferBattleState.players[i].fkind = nFTKindNull;
             gSCManagerTransferBattleState.players[i].pkind = nFTPlayerKindMan;
@@ -192,4 +227,31 @@ void lbBackupClearAllData(void)
 void func_ovl0_800D4C90(void)
 {
     return;
+}
+
+extern int port_cheat_unlock_all(void);
+extern int port_cheat_unlock_luigi(void);
+extern int port_cheat_unlock_ness(void);
+extern int port_cheat_unlock_captain(void);
+extern int port_cheat_unlock_purin(void);
+extern int port_cheat_unlock_inishie(void);
+extern int port_cheat_unlock_soundtest(void);
+extern int port_cheat_unlock_itemswitch(void);
+
+void lbBackupApplyCheats(void) {
+    // If the master cheat is checked, unlock everything instantly
+    if (port_cheat_unlock_all()) {
+        gSCManagerBackupData.fighter_mask |= LBBACKUP_CHARACTER_MASK_ALL;
+        gSCManagerBackupData.unlock_mask  |= LBBACKUP_UNLOCK_MASK_ALL;
+    } else {
+        // Otherwise, check them individually
+        if (port_cheat_unlock_luigi())   gSCManagerBackupData.fighter_mask |= LBBACKUP_MASK_FIGHTER(nFTKindLuigi);
+        if (port_cheat_unlock_ness())    gSCManagerBackupData.fighter_mask |= LBBACKUP_MASK_FIGHTER(nFTKindNess);
+        if (port_cheat_unlock_captain()) gSCManagerBackupData.fighter_mask |= LBBACKUP_MASK_FIGHTER(nFTKindCaptain);
+        if (port_cheat_unlock_purin())   gSCManagerBackupData.fighter_mask |= LBBACKUP_MASK_FIGHTER(nFTKindPurin);
+
+        if (port_cheat_unlock_inishie())    gSCManagerBackupData.unlock_mask |= LBBACKUP_UNLOCK_MASK_INISHIE;
+        if (port_cheat_unlock_soundtest())  gSCManagerBackupData.unlock_mask |= LBBACKUP_UNLOCK_MASK_SOUNDTEST;
+        if (port_cheat_unlock_itemswitch()) gSCManagerBackupData.unlock_mask |= LBBACKUP_UNLOCK_MASK_ITEMSWITCH;
+    }
 }

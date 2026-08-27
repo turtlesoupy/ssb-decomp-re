@@ -64,6 +64,18 @@ typedef struct GRCommonGroundVarsPupupu
 
 typedef struct GRSectorDesc
 {
+#ifdef PORT
+	/* ROM layout has 4-byte pointer slots; keep these as u32 tokens on
+	 * LP64 so field offsets match the file data. Resolve with
+	 * PORT_RESOLVE() at call sites. Same pattern as MPGroundDesc. */
+	u32 anim_joint_0x0;
+	u8 filler_0x4[0x1C - 0x4];
+	u32 anim_joint_0x1C;
+	u32 unk_sectordesc_0x20;
+	u32 anim_joint_0x24;
+	u32 unk_sectordesc_0x28;
+	u32 anim_joint_0x2C;
+#else
 	AObjEvent32 *anim_joint_0x0;
 	u8 filler_0x4[0x1C - 0x4];
 	AObjEvent32 *anim_joint_0x1C;
@@ -71,6 +83,7 @@ typedef struct GRSectorDesc
 	AObjEvent32 *anim_joint_0x24;
 	void *unk_sectordesc_0x28;
 	AObjEvent32 *anim_joint_0x2C;
+#endif
 
 } GRSectorDesc;
 
