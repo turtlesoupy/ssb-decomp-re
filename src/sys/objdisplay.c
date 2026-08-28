@@ -3247,14 +3247,15 @@ void func_8001663C(Gfx **dls, CObj *cobj, s32 buffer_id)
 #ifdef PORT
     /* pose-capture: with the stage draw filtered out nothing covers the
      * frame, so the color buffer accumulates ghosts of every prior tick
-     * (visible on the GL/wasm backend). Clear to a neutral grey. */
+     * (visible on the GL/wasm backend). Clear to white (reads better in
+     * eval contact sheets than the old neutral grey). */
     {
         extern s32 port_pose_capture_active(void);
         if (port_pose_capture_active() && !(cobj->flags & COBJ_FLAG_FILLCOLOR))
         {
             gDPSetCycleType(dl++, G_CYC_FILL);
             gDPSetRenderMode(dl++, G_RM_NOOP, G_RM_NOOP2);
-            gDPSetFillColor(dl++, syVideoGetFillColor(GPACK_RGBA8888(52, 52, 58, 255)));
+            gDPSetFillColor(dl++, syVideoGetFillColor(GPACK_RGBA8888(255, 255, 255, 255)));
             gDPFillRectangle(dl++, ulx, uly, lrx, lry);
         }
     }

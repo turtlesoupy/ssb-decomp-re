@@ -5,6 +5,11 @@
 #include <sc/scene.h>
 #include <sys/rdp.h>
 #ifdef PORT
+#include <stdio.h>
+#include <string.h>
+extern char *getenv(const char *);   /* decomp's stdlib.h shadows libc */
+#endif
+#ifdef PORT
 #include <sys/debug.h>
 /* Enhanced-framerate frame interpolation recording hook — observational
  * only. Tag 1 = projection-stack matrix (combined view*persp here).
@@ -875,9 +880,99 @@ void gmCameraPlayerFollowFuncCamera(GObj *camera_gobj)
 }
 
 // 0x8010CECC
+#ifdef PORT
+/* SSB64_CAM_PLAN: eval camera pin. Semicolon-separated entries
+ *   frame:ex,ey,ez:ax,ay,az[:ux,uy,uz]
+ * — from VI frame `frame` on, force the camera to look from eye at `at`
+ * (optional up vector, default +y). Overrides whatever the game camera
+ * computed, every frame. Pairs with SSB64_POSE_OVERRIDE for deterministic
+ * eval renders (true top-down views etc.). Eval-only. */
+#define CAM_PLAN_MAX 8
+static struct
+{
+    s32 state;      /* 0=unchecked, 1=active, -1=off */
+    s32 n;
+    s32 from[CAM_PLAN_MAX];
+    Vec3f eye[CAM_PLAN_MAX], at[CAM_PLAN_MAX], up[CAM_PLAN_MAX];
+} sCamPlan;
+
+static s32 cam_plan_active(void)
+{
+    const char *s;
+    if (sCamPlan.state != 0)
+    {
+        return sCamPlan.state > 0;
+    }
+    sCamPlan.state = -1;
+    s = getenv("SSB64_CAM_PLAN");
+    if (s == NULL)
+    {
+        return 0;
+    }
+    while (*s != '\0' && sCamPlan.n < CAM_PLAN_MAX)
+    {
+        s32 i = sCamPlan.n;
+        f32 ux = 0.0f, uy = 1.0f, uz = 0.0f;
+        s32 got = sscanf(s, "%d:%f,%f,%f:%f,%f,%f:%f,%f,%f",
+                         &sCamPlan.from[i],
+                         &sCamPlan.eye[i].x, &sCamPlan.eye[i].y, &sCamPlan.eye[i].z,
+                         &sCamPlan.at[i].x, &sCamPlan.at[i].y, &sCamPlan.at[i].z,
+                         &ux, &uy, &uz);
+        if (got >= 7)
+        {
+            sCamPlan.up[i].x = ux; sCamPlan.up[i].y = uy; sCamPlan.up[i].z = uz;
+            sCamPlan.n++;
+        }
+        s = strchr(s, ';');
+        if (s == NULL)
+        {
+            break;
+        }
+        s++;
+    }
+    if (sCamPlan.n > 0)
+    {
+        sCamPlan.state = 1;
+    }
+    return sCamPlan.state > 0;
+}
+#endif
+
 void gmCameraRunFuncCamera(GObj *camera_gobj)
 {
     gGMCameraStruct.func_camera(camera_gobj);
+#ifdef PORT
+    if (cam_plan_active())
+    {
+        extern int port_get_frame_count(void);
+        CObj *cobj = CObjGetStruct(camera_gobj);
+        s32 fr = (s32)port_get_frame_count();
+        s32 k, best = -1;
+        for (k = 0; k < sCamPlan.n; k++)
+        {
+            if (sCamPlan.from[k] <= fr &&
+                (best < 0 || sCamPlan.from[k] >= sCamPlan.from[best]))
+            {
+                best = k;
+            }
+        }
+        if (best >= 0)
+        {
+            static s32 sLogged = -1;
+            cobj->vec.eye = sCamPlan.eye[best];
+            cobj->vec.at = sCamPlan.at[best];
+            cobj->vec.up = sCamPlan.up[best];
+            if (sLogged != best)
+            {
+                extern void port_log(const char *fmt, ...);
+                port_log("CAM_PLAN: sec %d @f%d eye=(%.0f,%.0f,%.0f) at=(%.0f,%.0f,%.0f)\n",
+                         best, fr, cobj->vec.eye.x, cobj->vec.eye.y, cobj->vec.eye.z,
+                         cobj->vec.at.x, cobj->vec.at.y, cobj->vec.at.z);
+                sLogged = best;
+            }
+        }
+    }
+#endif
 }
 
 // 0x8010CEF4

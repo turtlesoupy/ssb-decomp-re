@@ -1565,6 +1565,124 @@ static void osb5_inv3(f32 m[3][3], f32 out[3][3])
     out[2][0] = C/det;            out[2][1] = -(a*h - b*g)/det;  out[2][2] = (a*e - b*d)/det;
 }
 
+/* SSB64_POSE_OVERRIDE=<skel file>: freeze the skinned mesh in the pose
+ * given by SKELDUMP2 lines (world frames; x/y/z rows are the axis
+ * images, row-vector convention) instead of the live animation —
+ * apples-to-apples eval renders against the offline T-pose preview.
+ * A joint=0 line overrides the root frame the mesh is rebased against,
+ * so the pose lands at the live root's position/facing. Eval-only. */
+#define POSE_OVR_MAX 64
+#define POSE_OVR_SECS 8
+typedef struct
+{
+    s32 from_frame;               /* active from this VI frame on */
+    u8 have[POSE_OVR_MAX];
+    f32 o[POSE_OVR_MAX][3];
+    f32 m[POSE_OVR_MAX][3][3];    /* game convention: basis as columns */
+} PoseOvrSec;
+static struct
+{
+    s32 state;                    /* 0=unchecked, 1=active, -1=off */
+    s32 nsec;
+    PoseOvrSec sec[POSE_OVR_SECS];
+} sPoseOvr;
+
+static s32 pose_override_active(void)
+{
+    const char *path;
+    FILE *f;
+    char line[512];
+    PoseOvrSec *cur;
+    if (sPoseOvr.state != 0)
+    {
+        return sPoseOvr.state > 0;
+    }
+    sPoseOvr.state = -1;
+    path = getenv("SSB64_POSE_OVERRIDE");
+    if (path == NULL)
+    {
+        return 0;
+    }
+    f = fopen(path, "r");
+    if (f == NULL)
+    {
+        port_log("POSE_OVERRIDE: cannot open %s\n", path);
+        return 0;
+    }
+    sPoseOvr.nsec = 1;
+    sPoseOvr.sec[0].from_frame = 0;
+    cur = &sPoseOvr.sec[0];
+    while (fgets(line, sizeof(line), f) != NULL)
+    {
+        s32 j;
+        f32 o0, o1, o2, x0, x1, x2, y0, y1, y2, z0, z1, z2;
+        /* "POSEAT frame=N" starts a new section active from VI frame N —
+         * several poses per boot, one screenshot each */
+        if (sscanf(line, "POSEAT frame=%d", &j) == 1)
+        {
+            if (sPoseOvr.nsec < POSE_OVR_SECS)
+            {
+                cur = &sPoseOvr.sec[sPoseOvr.nsec++];
+                memset(cur, 0, sizeof(*cur));
+                cur->from_frame = j;
+            }
+            continue;
+        }
+        if (sscanf(line,
+                   "SKELDUMP2: joint=%d o=(%f,%f,%f) x=(%f,%f,%f) "
+                   "y=(%f,%f,%f) z=(%f,%f,%f)",
+                   &j, &o0, &o1, &o2, &x0, &x1, &x2,
+                   &y0, &y1, &y2, &z0, &z1, &z2) != 13)
+        {
+            continue;
+        }
+        if (j < 0 || j >= POSE_OVR_MAX)
+        {
+            continue;
+        }
+        cur->have[j] = 1;
+        cur->o[j][0] = o0; cur->o[j][1] = o1; cur->o[j][2] = o2;
+        /* rows are axis images -> game matrix wants them as columns */
+        cur->m[j][0][0] = x0; cur->m[j][1][0] = x1; cur->m[j][2][0] = x2;
+        cur->m[j][0][1] = y0; cur->m[j][1][1] = y1; cur->m[j][2][1] = y2;
+        cur->m[j][0][2] = z0; cur->m[j][1][2] = z1; cur->m[j][2][2] = z2;
+    }
+    fclose(f);
+    /* drop an empty leading section (file that starts with POSEAT) */
+    if (sPoseOvr.nsec > 1)
+    {
+        s32 any = 0, k2;
+        for (k2 = 0; k2 < POSE_OVR_MAX; k2++) any |= sPoseOvr.sec[0].have[k2];
+        if (!any)
+        {
+            for (k2 = 1; k2 < sPoseOvr.nsec; k2++)
+            {
+                sPoseOvr.sec[k2 - 1] = sPoseOvr.sec[k2];
+            }
+            sPoseOvr.nsec--;
+        }
+    }
+    sPoseOvr.state = 1;
+    port_log("POSE_OVERRIDE: loaded %s (%d section(s))\n", path, sPoseOvr.nsec);
+    return 1;
+}
+
+static PoseOvrSec *pose_override_sec(void)
+{
+    extern int port_get_frame_count(void);
+    s32 fr = (s32)port_get_frame_count();
+    s32 k, best = 0;
+    for (k = 1; k < sPoseOvr.nsec; k++)
+    {
+        if (sPoseOvr.sec[k].from_frame <= fr &&
+            sPoseOvr.sec[k].from_frame >= sPoseOvr.sec[best].from_frame)
+        {
+            best = k;
+        }
+    }
+    return &sPoseOvr.sec[best];
+}
+
 void port_osb5_skin_update(GObj *fighter_gobj)
 {
     FTStruct *fp;
@@ -1675,6 +1793,15 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             if (upto != NULL && k >= atoi(upto)) continue;
         }
         osb5_joint_frame(fp, jid, jo[k], jm[k]);
+        if (pose_override_active() && jid < POSE_OVR_MAX)
+        {
+            PoseOvrSec *ps = pose_override_sec();
+            if (ps->have[jid])
+            {
+                memcpy(jo[k], ps->o[jid], sizeof(jo[k]));
+                memcpy(jm[k], ps->m[jid], sizeof(jm[k]));
+            }
+        }
     }
     if (fp->joints[0] == NULL)
     {
@@ -1687,6 +1814,19 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     }
     if (getenv("SSB64_NO_ROOTFRAME") != NULL) return;
     osb5_joint_frame(fp, 0, t0o, t0m);
+    if (pose_override_active())
+    {
+        /* a joint=0 line rebases the pose at the live root (pose follows
+         * the fighter); WITHOUT one the local/draw transforms cancel and
+         * the pose renders at its absolute dump coordinates — immune to
+         * the animation's root lean/facing (what eval renders want). */
+        PoseOvrSec *ps = pose_override_sec();
+        if (ps->have[0])
+        {
+            memcpy(t0o, ps->o[0], sizeof(t0o));
+            memcpy(t0m, ps->m[0], sizeof(t0m));
+        }
+    }
     /* SSB64_OSB5_DEBUG=1: dump the frames the skinner actually reads for
      * the first ticks after each attach — pin down WHICH values are
      * garbage on the CSS-flash tick. */
