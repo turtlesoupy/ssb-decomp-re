@@ -36,7 +36,14 @@ void ftSamusSpecialNGetChargeShotPosition(FTStruct *fp, Vec3f *pos)
 {
     pos->y = pos->z = 0.0F;
     pos->x = FTSAMUS_CHARGE_OFF_X;
-
+#ifdef PORT
+    /* canonical (chibi) retargets: the 180u muzzle offset is sized for
+     * the vanilla arm — scale it so the shot leaves the visible gun tip */
+    {
+        extern f32 port_osb5_charge_scale(GObj *fighter_gobj);
+        pos->x *= port_osb5_charge_scale(fp->fighter_gobj);
+    }
+#endif
     gmCollisionGetFighterPartsWorldPosition(fp->joints[FTSAMUS_CHARGE_JOINT], pos);
 }
 

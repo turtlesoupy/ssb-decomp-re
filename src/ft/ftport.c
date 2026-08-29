@@ -785,6 +785,36 @@ typedef struct OSB5State
      * practice, unlike the misplaced flash. */
     s32 fills;
     s32 dbg_ticks;          /* SSB64_OSB5_DEBUG frame-dump counter */
+    /* CAN1 canonical retarget: the bundle's mesh/weights/BIND are the
+     * validated MARIO build; each frame we rebuild VIRTUAL joint frames
+     * (mario bone offsets driven by the target joints' rotation deltas
+     * from their own spawn bind) and skin against those. */
+    u8 canonical;
+    s8 can_parent[32];      /* slot index of canonical parent, -1 = root */
+    f32 can_root[3];        /* canonical anchor (ground under the chest) */
+    f32 cbind_o[32][3];     /* canonical (mario) bind frames */
+    f32 cbind_m[32][3][3];
+    f32 tbind_inv[32][3][3];/* target joints' spawn-bind rotation inverses */
+    f32 tbind0_inv[3][3];   /* target root (TopN) spawn-bind inverse */
+    f32 cint_bind[3];       /* chest parent's world offset from TopN at
+                             * spawn bind, in TopN-bind frame. The interior
+                             * chain (TransN/XRotN/YRotN) carries TRANSLATE
+                             * channels some figatrees animate (the appear
+                             * beams the body in from z=-323; crouches drop
+                             * it) — the vanilla mesh follows them, and the
+                             * virtual root must follow the deviation too */
+    f32 can_scale;          /* canonical/target height ratio for accessories */
+    f32 can_chainoff[32][3];/* per mapped slot: world-space bind sum of the
+                             * intermediate (unmapped) nub translates between
+                             * this joint and its canonical parent — their
+                             * ghost matrices stack this offset onto the
+                             * composition, so the exact virtual-local must
+                             * subtract ts * chainoff */
+    f32 can_snap[64][3];    /* unmapped joints' spawn translates (mount offsets) */
+    s8 can_snap_have[64];
+    s8 can_interior[64];    /* unmapped joint with mapped DESCENDANTS: its
+                             * translation is absorbed by the mapped child's
+                             * exact virtual-local -> emit ZERO translation */
     GObj *owner;
     /* GObjs are pool-allocated: after the owner despawns (match end, CSS
      * chip move) the next fighter can reuse the same address, and a bare
@@ -1552,6 +1582,14 @@ static void osb5_dobj_frame(DObj *j, f32 o[3], f32 m[3][3])
     m[0][2] = vz.x - vo.x; m[1][2] = vz.y - vo.y; m[2][2] = vz.z - vo.z;
 }
 
+static void osb5_mul3(f32 out[3][3], f32 a[3][3], f32 b[3][3])
+{
+    s32 r, c;
+    for (r = 0; r < 3; r++)
+        for (c = 0; c < 3; c++)
+            out[r][c] = a[r][0]*b[0][c] + a[r][1]*b[1][c] + a[r][2]*b[2][c];
+}
+
 static void osb5_inv3(f32 m[3][3], f32 out[3][3])
 {
     f32 a = m[0][0], b = m[0][1], c = m[0][2];
@@ -1681,6 +1719,464 @@ static PoseOvrSec *pose_override_sec(void)
         }
     }
     return &sPoseOvr.sec[best];
+}
+
+static struct { f32 vjo[32][3]; f32 rd[32][3][3]; u8 valid; } sOsb5LateSeat[OSB5_PLAYER_SLOTS];
+
+/* kind-75 hook: for a MAPPED joint of a canonical fighter, emit the local
+ * matrix that composes to EXACTLY the virtual frame under its canonical
+ * parent's virtual frame: local = inv(Wp) * Wj, W = [rd*cbind | vjo].
+ * Returns 1 and fills out_l (row-major local, translation in [3][0..2]),
+ * or 0 when not applicable. Intermediate unmapped chain joints emit
+ * near-zero scaled locals, so composing under the DObj parent is a close
+ * stand-in for the canonical parent; residual is absorbed here at every
+ * mapped joint, keeping ghost == virtual at all anchors gear hangs from. */
+/* per-joint stored last-unlocked local (row-major float 4x4). store=1
+ * saves m; store=0 loads into m, returning 0 when nothing stored yet. */
+s32 port_osb5_seat_local(FTStruct *fp, DObj *dobj, f32 m[4][4], s32 store)
+{
+    static f32 sSeat[OSB5_PLAYER_SLOTS][64][4][4];
+    static u8 sSeatValid[OSB5_PLAYER_SLOTS][64];
+    s32 pl, jid, r, c;
+    if (fp == NULL) return 0;
+    pl = (s32)fp->player;
+    if ((u32)pl >= OSB5_PLAYER_SLOTS) return 0;
+    for (jid = 1; jid < FTPARTS_JOINT_NUM_MAX && jid < 64; jid++)
+        if (fp->joints[jid] == dobj) break;
+    if (jid >= FTPARTS_JOINT_NUM_MAX || jid >= 64) return 0;
+    if (store)
+    {
+        for (r = 0; r < 4; r++) for (c = 0; c < 4; c++) sSeat[pl][jid][r][c] = m[r][c];
+        sSeatValid[pl][jid] = 1;
+        return 1;
+    }
+    if (!sSeatValid[pl][jid]) return 0;
+    for (r = 0; r < 4; r++) for (c = 0; c < 4; c++) m[r][c] = sSeat[pl][jid][r][c];
+    return 1;
+}
+
+/* is this DObj a RENDERING accessory mount of a canonical fighter (unmapped
+ * joint that carries a display list)? Those are the gear joints whose
+ * anim-lock snapshots need the in-hand/stow magnitude split; body chain
+ * bones (no DL) must never be hidden. */
+s32 port_osb5_is_gear(FTStruct *fp, DObj *dobj)
+{
+    OSB5State *o;
+    s32 pl, kk;
+    if (fp == NULL || dobj == NULL) return 0;
+    pl = (s32)fp->player;
+    if ((u32)pl >= OSB5_PLAYER_SLOTS) return 0;
+    o = osb5_slot(pl);
+    if (o == NULL || !o->canonical || o->vtx == NULL) return 0;
+    if (dobj->dv == NULL || dobj->dv == (void *)sOsb5NullDL) return 0;
+    for (kk = 0; kk < o->njoints; kk++)
+    {
+        s32 tid = (s32)o->joint_ids[kk];
+        if (tid > 0 && tid < FTPARTS_JOINT_NUM_MAX && fp->joints[tid] == dobj)
+            return 0;   /* mapped body joint */
+    }
+    return 1;
+}
+
+s32 port_osb5_virtual_local(FTStruct *fp, DObj *dobj, f32 out_l[4][4])
+{
+    OSB5State *o;
+    s32 pl, kk, slot = -1, pslot;
+    f32 Wj[3][3], Wp[3][3], WpInv[3][3], d[3];
+    s32 r, c;
+    if (fp == NULL) return 0;
+    pl = (s32)fp->player;
+    if ((u32)pl >= OSB5_PLAYER_SLOTS) return 0;
+    o = osb5_slot(pl);
+    if (o == NULL || !o->canonical || o->vtx == NULL || !sOsb5LateSeat[pl].valid)
+        return 0;
+    for (kk = 0; kk < o->njoints; kk++)
+    {
+        s32 tid = (s32)o->joint_ids[kk];
+        if (tid > 0 && tid < FTPARTS_JOINT_NUM_MAX && fp->joints[tid] == dobj)
+            slot = kk;   /* last slot wins (collapsed chains) */
+    }
+    if (slot < 0) return 0;
+    pslot = (s32)o->can_parent[slot];
+    /* collapsed chains (samus cannon: canonical forearm AND hand map onto
+     * target joint 16) make the canonical parent resolve to the SAME
+     * target joint — self-parenting degenerates the local. Walk up until
+     * the target id differs. */
+    while (pslot >= 0 && (s32)o->joint_ids[pslot] == (s32)o->joint_ids[slot])
+        pslot = (s32)o->can_parent[pslot];
+    /* world rotations: rd * cbind */
+    osb5_mul3(Wj, sOsb5LateSeat[pl].rd[slot], o->cbind_m[slot]);
+    if (pslot >= 0)
+    {
+        osb5_mul3(Wp, sOsb5LateSeat[pl].rd[pslot], o->cbind_m[pslot]);
+        osb5_inv3(Wp, WpInv);
+        d[0] = sOsb5LateSeat[pl].vjo[slot][0] - sOsb5LateSeat[pl].vjo[pslot][0];
+        d[1] = sOsb5LateSeat[pl].vjo[slot][1] - sOsb5LateSeat[pl].vjo[pslot][1];
+        d[2] = sOsb5LateSeat[pl].vjo[slot][2] - sOsb5LateSeat[pl].vjo[pslot][2];
+    }
+    else
+    {
+        /* root-anchored: parent is the fighter's TopN */
+        f32 t0o[3];
+        osb5_joint_frame(fp, 0, t0o, Wp);
+        osb5_inv3(Wp, WpInv);
+        d[0] = sOsb5LateSeat[pl].vjo[slot][0] - t0o[0];
+        d[1] = sOsb5LateSeat[pl].vjo[slot][1] - t0o[1];
+        d[2] = sOsb5LateSeat[pl].vjo[slot][2] - t0o[2];
+    }
+    /* local rotation = WpInv * Wj; local translation = WpInv * d */
+    {
+        f32 L[3][3];
+        osb5_mul3(L, WpInv, Wj);
+        for (r = 0; r < 3; r++)
+        {
+            /* engine Mtx44f is row-vector (rows = basis images); our
+             * composition is column-convention — transpose on write */
+            for (c = 0; c < 3; c++) out_l[r][c] = L[c][r];
+            out_l[r][3] = 0.0f;
+        }
+        if (slot < 32)
+        {
+            /* the intermediate nubs' ghost matrices add ts*chainoff to the
+             * composition before this local applies — pre-subtract it */
+            d[0] -= o->can_scale * o->can_chainoff[slot][0];
+            d[1] -= o->can_scale * o->can_chainoff[slot][1];
+            d[2] -= o->can_scale * o->can_chainoff[slot][2];
+        }
+        out_l[3][0] = WpInv[0][0]*d[0] + WpInv[0][1]*d[1] + WpInv[0][2]*d[2];
+        out_l[3][1] = WpInv[1][0]*d[0] + WpInv[1][1]*d[1] + WpInv[1][2]*d[2];
+        out_l[3][2] = WpInv[2][0]*d[0] + WpInv[2][1]*d[1] + WpInv[2][2]*d[2];
+        out_l[3][3] = 1.0f;
+    }
+    return 1;
+}
+
+static void osb5_reseat_kept(OSB5State *o, FTStruct *fp, f32 vjo[32][3])
+{
+    f32 (*rd)[3][3] = sOsb5LateSeat[fp->player].rd;
+    s32 kk, jj, r;
+    static s32 sLogged = 0;
+    if (!sLogged) { port_log("OSB5: RESEAT ACTIVE\n"); sLogged = 1; }
+    for (kk = 0; kk < o->njoints; kk++)
+    {
+        s32 tid = (s32)o->joint_ids[kk];
+        s32 kept = 1;
+        DObj *aj;
+        f32 po[3], pm[3][3], pinv[3][3], d[3];
+        if (tid <= 0 || tid >= FTPARTS_JOINT_NUM_MAX)
+            continue;
+        for (jj = kk + 1; jj < o->njoints; jj++)
+            if ((s32)o->joint_ids[jj] == tid) { kept = 0; break; }
+        if (!kept)
+            continue;
+        aj = fp->joints[tid];
+        if (aj == NULL || aj->parent == NULL)
+            continue;
+        osb5_dobj_frame(aj->parent, po, pm);
+        osb5_inv3(pm, pinv);
+        d[0] = vjo[kk][0] - po[0];
+        d[1] = vjo[kk][1] - po[1];
+        d[2] = vjo[kk][2] - po[2];
+        aj->translate.vec.f.x = pinv[0][0]*d[0] + pinv[0][1]*d[1] + pinv[0][2]*d[2];
+        aj->translate.vec.f.y = pinv[1][0]*d[0] + pinv[1][1]*d[1] + pinv[1][2]*d[2];
+        aj->translate.vec.f.z = pinv[2][0]*d[0] + pinv[2][1]*d[1] + pinv[2][2]*d[2];
+        /* one-frame-flash fix, scoped: if THIS reseated joint is
+         * anim-locked, its snapshot was captured from the pre-reseat
+         * transform on the engage tick — re-capture it from the value we
+         * just wrote. Only reseated joints: their TRS is always ours;
+         * gear mounts keep the engine's own snapshots. */
+        {
+            FTParts *pt = (FTParts *)aj->user_data.p;
+            if (pt != NULL && pt->transform_update_mode != 0)
+            {
+                extern void gmCollisionTransformMatrixAll(DObj *dobj, FTParts *parts, Mtx44f mtx);
+                gmCollisionTransformMatrixAll(aj, pt, pt->unk_dobjtrans_0x10);
+            }
+        }
+    }
+    (void)r;
+
+    /* THE one-frame-flash fix: the engine captures anim-lock snapshot
+     * matrices (parts->unk_dobjtrans_0x10) when a lock engages — BEFORE
+     * this reseat has moved the joints that tick — so the first locked
+     * frame renders from pre-reseat values. Re-capture every locked
+     * joint's snapshot from the CURRENT (post-reseat) TRS. */
+
+    /* unmapped-joint compression: every fighter joint OUTSIDE the mapped
+     * set (accessory mounts, sheathed-gear copies, intermediate chain
+     * joints) keeps following the tall real skeleton's arcs. Scaling each
+     * unmapped joint's LOCAL translate by the canonical/target height
+     * ratio compresses those arcs toward the mapped ancestors at any
+     * chain depth — the sheathe animation happens, at chibi scale. Runs
+     * every tick right after the animation wrote fresh translates. */
+    {
+        s32 jid, kk2;
+        s8 mapped[FTPARTS_JOINT_NUM_MAX];
+        for (jid = 0; jid < FTPARTS_JOINT_NUM_MAX; jid++) mapped[jid] = 0;
+        mapped[0] = 1;
+        for (kk2 = 0; kk2 < o->njoints; kk2++)
+        {
+            s32 tid = (s32)o->joint_ids[kk2];
+            if (tid > 0 && tid < FTPARTS_JOINT_NUM_MAX) mapped[tid] = 1;
+        }
+        if (getenv("SSB64_COMPRESS_DEBUG") != NULL)
+        {
+            static s32 sLog = 0;
+            if (sLog < 3 && fp->joints[19] != NULL && fp->joints[20] != NULL)
+            {
+                port_log("COMPRESS: scale=%.2f j11t=(%.1f,%.1f,%.1f) j19t=(%.1f,%.1f,%.1f) j20t=(%.1f,%.1f,%.1f)\n",
+                         o->can_scale,
+                         fp->joints[11] ? fp->joints[11]->translate.vec.f.x : -999.0f,
+                         fp->joints[11] ? fp->joints[11]->translate.vec.f.y : -999.0f,
+                         fp->joints[11] ? fp->joints[11]->translate.vec.f.z : -999.0f,
+                         fp->joints[19]->translate.vec.f.x, fp->joints[19]->translate.vec.f.y, fp->joints[19]->translate.vec.f.z,
+                         fp->joints[20]->translate.vec.f.x, fp->joints[20]->translate.vec.f.y, fp->joints[20]->translate.vec.f.z);
+                sLog++;
+            }
+        }
+        /* unmapped joints are handled at matrix-build time via
+     * port_osb5_dobj_tscale() — translate writes here are overwritten by
+     * the lazy animation evaluation during display and never render */
+    }
+}
+
+static f32 sOsb5SeatWrote[OSB5_PLAYER_SLOTS][3];
+
+void port_osb5_drop_probe(GObj *fighter_gobj, const char *site)
+{
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    OSB5State *o;
+    static s32 sT = 0;
+    f32 w11[3] = {0,0,0}, w19[3] = {0,0,0}, w20[3] = {0,0,0}, m_[3][3];
+    if (getenv("SSB64_DROP_DEBUG") == NULL) return;
+    if (fp == NULL || fp->player != 0) return;
+    o = osb5_slot(0);
+    if (o == NULL || !o->canonical) return;
+    if (fp->joints[11]) osb5_dobj_frame(fp->joints[11], w11, m_);
+    if (fp->joints[19]) osb5_dobj_frame(fp->joints[19], w19, m_);
+    if (fp->joints[20]) osb5_dobj_frame(fp->joints[20], w20, m_);
+    port_log("DROP2[%s %d]: j11=(%.0f,%.0f,%.0f) j19=(%.0f,%.0f,%.0f) j20=(%.0f,%.0f,%.0f) dv=%d%d%d\n",
+             site, sT++,
+             w11[0], w11[1], w11[2], w19[0], w19[1], w19[2], w20[0], w20[1], w20[2],
+             fp->joints[11] && fp->joints[11]->dv && fp->joints[11]->dv != (void*)sOsb5NullDL,
+             fp->joints[19] && fp->joints[19]->dv && fp->joints[19]->dv != (void*)sOsb5NullDL,
+             fp->joints[20] && fp->joints[20]->dv && fp->joints[20]->dv != (void*)sOsb5NullDL);
+}
+
+f32 port_osb5_dobj_tscale(DObj *dobj)
+{
+    /* canonical retarget: local-translate scale at matrix-build time.
+     * 1.0 for everything except UNMAPPED registry joints of a fighter
+     * with an active canonical injection — their animation tracks move
+     * gear at vanilla amplitudes on the taller skeleton. */
+    GObj *g;
+    FTStruct *fp;
+    OSB5State *o;
+    s32 pl, jid, kk;
+    if (1) return 1.0f;   /* NEUTRALIZED: state-1 revert — the ghost
+                            * skeleton stays at vanilla scale; gear rides
+                            * reseated joints + refreshed snapshots */
+    if (dobj == NULL) return 1.0f;
+    g = dobj->parent_gobj;
+    if (g == NULL) return 1.0f;
+    for (pl = 0; pl < OSB5_PLAYER_SLOTS; pl++)
+    {
+        o = &sOsb5Slots[pl];
+        if (o->owner != g || !o->canonical || o->vtx == NULL) continue;
+        if (o->can_scale <= 0.05f || o->can_scale >= 0.98f) return 1.0f;
+        fp = ftGetStruct(g);
+        if (fp == NULL) return 1.0f;
+        if (fp->joints[0] == dobj) return 1.0f;
+        /* scale EVERY non-root joint: the DObj tree is an invisible
+         * full-height vanilla skeleton that all vanilla-rendered parts
+         * (gear, kept accessories) ride; compressing every local
+         * translate shrinks that whole skeleton to chibi height about
+         * the root. The injected mesh is CPU-skinned from the virtual
+         * frames and never reads these matrices. */
+        for (kk = 0; kk < o->njoints; kk++)
+        {
+            s32 tid = (s32)o->joint_ids[kk];
+            if (tid > 0 && tid < FTPARTS_JOINT_NUM_MAX && fp->joints[tid] == dobj)
+                return 1.0f;   /* mapped: handled by the exact virtual-local */
+        }
+        {
+            extern double atof(const char *);
+            const char *fs = getenv("SSB64_TSCALE_FORCE");
+            if (fs != NULL) return (f32)atof(fs);
+        }
+        if (getenv("SSB64_TSCALE_DEBUG") != NULL)
+        {
+            static s32 sN = 0;
+            if (sN < 8)
+            {
+                port_log("TSCALE: scaling dobj %p (t=%.1f,%.1f,%.1f)\n", (void *)dobj,
+                         dobj->translate.vec.f.x, dobj->translate.vec.f.y, dobj->translate.vec.f.z);
+                sN++;
+            }
+        }
+        return o->can_scale;
+    }
+    return 1.0f;
+}
+
+void port_osb5_dl_debug(GObj *fighter_gobj)
+{
+    (void)fighter_gobj;   /* superseded by port_osb5_drop_probe */
+}
+
+void port_osb5_heal_blanks(GObj *fighter_gobj)
+{
+    /* display-proc self-heal: face-blink / model-part / LOD code that runs
+     * AFTER the params-proc heal re-points vanilla DLs onto replaced
+     * joints for a single frame — the vanilla arm (with sword and shield)
+     * flashes in at the tall skeleton's positions. Heal again right
+     * before the DL build. */
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    OSB5State *o;
+    s32 k;
+    if (fp == NULL) return;
+    o = osb5_slot((s32)fp->player);
+    if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj) return;
+    for (k = 0; k < osb5_blank_count(o); k++)
+    {
+        s32 jid = osb5_blank_id(o, k);
+        if (jid != 0 && jid < FTPARTS_JOINT_NUM_MAX && !osb5_joint_is_blanked(fp, jid))
+        {
+            osb5_blank_joint(o, fp, jid);
+        }
+    }
+}
+
+void port_osb5_reseat_late(GObj *fighter_gobj)
+{
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    OSB5State *o;
+    if (fp == NULL) return;
+    o = osb5_slot((s32)fp->player);
+    if (o == NULL || !o->canonical || o->owner != fighter_gobj) return;
+    if (!sOsb5LateSeat[fp->player].valid) return;
+
+    /* accessory state-swap blink: when an unmapped joint's display list
+     * pointer CHANGES (in-hand gear <-> sheathed copies), its matrix
+     * track is stale for that first tick and the gear renders mid-air at
+     * raw offsets. Hide the joint for exactly that one tick — a 1-frame
+     * blink at 60fps beats a mid-air pop. */
+    if (0)
+    {
+        static void *sLastDv[OSB5_PLAYER_SLOTS][64];
+        static void *sSavedDv[OSB5_PLAYER_SLOTS][64];
+        static u8 sPending[OSB5_PLAYER_SLOTS][64];
+        s32 jid2, kk2, m2;
+        s32 pl = (s32)fp->player;
+        for (jid2 = 1; jid2 < FTPARTS_JOINT_NUM_MAX && jid2 < 64; jid2++)
+        {
+            DObj *dj = fp->joints[jid2];
+            void *cur;
+            if (dj == NULL) continue;
+            m2 = 0;
+            for (kk2 = 0; kk2 < o->njoints; kk2++)
+                if ((s32)o->joint_ids[kk2] == jid2) { m2 = 1; break; }
+            if (m2) continue;
+            if (sPending[pl][jid2])
+            {
+                dj->dv = sSavedDv[pl][jid2];
+                sPending[pl][jid2] = 0;
+            }
+            cur = dj->dv;
+            {
+                /* hide for exactly one tick when the anim-lock engages or
+                 * releases (transform_update_mode changes): the snapshot
+                 * captured on the engage tick holds a transitional pose
+                 * that renders one frame of mid-air gear */
+                FTParts *pt = (FTParts *)dj->user_data.p;
+                s32 mode = (pt != NULL) ? (s32)pt->transform_update_mode : -1;
+                {
+                    static s8 sLastMode[OSB5_PLAYER_SLOTS][64];
+                    if (sLastMode[pl][jid2] != (s8)mode)
+                    {
+                        if (cur != NULL && cur != (void *)sOsb5NullDL
+                            && sLastMode[pl][jid2] != -128)
+                        {
+                            sSavedDv[pl][jid2] = cur;
+                            dj->dv = (void *)sOsb5NullDL;
+                            sPending[pl][jid2] = 1;
+                        }
+                        sLastMode[pl][jid2] = (s8)mode;
+                    }
+                }
+            }
+            sLastDv[pl][jid2] = cur;
+        }
+    }
+    if (getenv("SSB64_NO_RESEAT") != NULL) return;
+    osb5_reseat_kept(o, fp, sOsb5LateSeat[fp->player].vjo);
+    /* invalidate the part-matrix memo AFTER the writes: the draw pass
+     * consumes memoized matrices, and without this the re-seat is only
+     * visible on ticks where some later engine branch happened to
+     * re-invalidate — the alternating-frame accessory flicker. */
+    {
+        extern void ftParamsUpdateFighterPartsTransformAll(DObj *root_dobj);
+        if (fp->joints[0] != NULL)
+            ftParamsUpdateFighterPartsTransformAll(fp->joints[0]);
+    }
+    if (getenv("SSB64_SEAT_DEBUG") != NULL && o->njoints > 3)
+    {
+        /* probe: canonical hand slot 3 (mario joint 10) */
+        s32 tid = (s32)o->joint_ids[3];
+        DObj *aj = (tid > 0 && tid < FTPARTS_JOINT_NUM_MAX) ? fp->joints[tid] : NULL;
+        if (aj != NULL)
+        {
+            sOsb5SeatWrote[fp->player][0] = aj->translate.vec.f.x;
+            sOsb5SeatWrote[fp->player][1] = aj->translate.vec.f.y;
+            sOsb5SeatWrote[fp->player][2] = aj->translate.vec.f.z;
+        }
+    }
+}
+
+void port_osb5_seat_probe(GObj *fighter_gobj, const char *site)
+{
+    /* call from arbitrary points: log the hand translate vs what the late
+     * reseat wrote, revealing WHO moves it and when */
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    OSB5State *o;
+    s32 tid;
+    DObj *aj;
+    if (getenv("SSB64_SEAT_DEBUG") == NULL) return;
+    if (fp == NULL || fp->player != 0) return;
+    o = osb5_slot(0);
+    if (o == NULL || !o->canonical || o->njoints <= 3) return;
+    tid = (s32)o->joint_ids[3];
+    aj = (tid > 0 && tid < FTPARTS_JOINT_NUM_MAX) ? fp->joints[tid] : NULL;
+    if (aj == NULL) return;
+    port_log("SEAT[%s]: t=(%.1f,%.1f,%.1f) wrote=(%.1f,%.1f,%.1f)\n", site,
+             aj->translate.vec.f.x, aj->translate.vec.f.y, aj->translate.vec.f.z,
+             sOsb5SeatWrote[0][0], sOsb5SeatWrote[0][1], sOsb5SeatWrote[0][2]);
+}
+
+void port_osb5_skin_update(GObj *fighter_gobj);
+
+void port_osb5_proc_post(GObj *fighter_gobj)
+{
+    extern void port_osb5_copy_windows(void);
+    port_osb5_skin_update(fighter_gobj);
+    port_osb5_copy_windows();
+    port_osb5_reseat_late(fighter_gobj);
+}
+
+/* Projectile/muzzle lever-arm scale for gameplay code: hardcoded joint
+ * offsets (samus's 180u cannon muzzle) are sized for the vanilla body;
+ * scale them down to the canonical (chibi) proportions so shots leave the
+ * visible gun tip. 1.0 for vanilla and non-canonical fighters. */
+f32 port_osb5_charge_scale(GObj *fighter_gobj)
+{
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    OSB5State *o;
+    if (fp == NULL) return 1.0f;
+    o = osb5_slot((s32)fp->player);
+    if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj ||
+        (s32)fp->fkind != o->owner_fkind || !o->canonical)
+        return 1.0f;
+    return o->can_scale;
 }
 
 void port_osb5_skin_update(GObj *fighter_gobj)
@@ -1827,6 +2323,126 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             memcpy(t0m, ps->m[0], sizeof(t0m));
         }
     }
+    /* CANONICAL retarget: replace the target's frames with VIRTUAL ones —
+     * mario's bone offsets walked down the canonical parent chain, each
+     * joint rotated by the target joint's world rotation delta from its
+     * own spawn bind (rd = R_now * R_tbind^-1). The skinning frame is
+     * rd * cbind, so bind_local (computed against the canonical bind)
+     * reproduces the validated mario geometry at the target's pose. */
+    if (o->canonical && !pose_override_active())
+    {
+        static f32 rd[32][3][3];
+        static f32 vjo[32][3];
+        f32 rd0[3][3], tmp[3][3], t0a[3];
+        s32 kk, r;
+        osb5_mul3(rd0, t0m, o->tbind0_inv);
+        /* the interior chain (TopN -> TransN/XRotN/YRotN -> chest) carries
+         * TRANSLATE channels some figatrees animate: the appear beams the
+         * body in from z=-323, crouches drop it — the vanilla mesh follows
+         * them but the virtual skeleton's rigid bone offsets drop them,
+         * which stranded the entry mesh off the spawn pod. Follow the
+         * chest parent's world deviation from its spawn bind (the interior
+         * joints are never reseated, so this stays a clean vanilla read).
+         * Zero whenever the anim only rotates — validated poses unchanged. */
+        {
+            DObj *cj = fp->joints[(s32)o->joint_ids[0]];
+            t0a[0] = t0o[0]; t0a[1] = t0o[1]; t0a[2] = t0o[2];
+            if (cj != NULL && cj->parent != NULL && cj->parent != DOBJ_PARENT_NULL)
+            {
+                f32 po[3], pm[3][3];
+                osb5_dobj_frame(cj->parent, po, pm);
+                /* anchor = chest_parent_world - R0now*cint_bind; NOT
+                 * written into t0o — the vert localization below must keep
+                 * the real TopN frame or the DL render cancels the shift */
+                for (r = 0; r < 3; r++)
+                    t0a[r] = po[r] - (t0m[r][0]*o->cint_bind[0]
+                                    + t0m[r][1]*o->cint_bind[1]
+                                    + t0m[r][2]*o->cint_bind[2]);
+            }
+        }
+        for (kk = 0; kk < o->njoints; kk++)
+        {
+            osb5_mul3(rd[kk], jm[kk], o->tbind_inv[kk]);
+            osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
+            memcpy(jm[kk], tmp, sizeof(tmp));
+        }
+        for (kk = 0; kk < o->njoints; kk++)
+        {
+            s32 pp = (s32)o->can_parent[kk];
+            f32 d[3];
+            if (pp < 0)
+            {
+                d[0] = o->cbind_o[kk][0] - o->can_root[0];
+                d[1] = o->cbind_o[kk][1] - o->can_root[1];
+                d[2] = o->cbind_o[kk][2] - o->can_root[2];
+                for (r = 0; r < 3; r++)
+                    vjo[kk][r] = t0a[r] + rd0[r][0]*d[0] + rd0[r][1]*d[1] + rd0[r][2]*d[2];
+            }
+            else
+            {
+                d[0] = o->cbind_o[kk][0] - o->cbind_o[pp][0];
+                d[1] = o->cbind_o[kk][1] - o->cbind_o[pp][1];
+                d[2] = o->cbind_o[kk][2] - o->cbind_o[pp][2];
+                for (r = 0; r < 3; r++)
+                    vjo[kk][r] = vjo[pp][r] + rd[pp][r][0]*d[0] + rd[pp][r][1]*d[1] + rd[pp][r][2]*d[2];
+            }
+            memcpy(jo[kk], vjo[kk], sizeof(vjo[kk]));
+        }
+
+        /* remember the virtual seats so the LATE reseat (end of the
+         * fighter tick) can re-apply them after any model-part/LOD code
+         * has rewritten translates — the mid-tick write alone flickered
+         * accessories between the virtual and vanilla positions on
+         * alternating frames. */
+        memcpy(sOsb5LateSeat[fp->player].vjo, vjo, sizeof(vjo));
+        memcpy(sOsb5LateSeat[fp->player].rd, rd, sizeof(rd));
+        sOsb5LateSeat[fp->player].valid = 1;
+        {
+        s32 pass;
+        for (pass = 0; pass < 1; pass++)
+        {
+        /* kept-vanilla joints (samus's arm cannon) ride the REAL skeleton,
+         * which is taller than the virtual chibi one — the cannon rendered
+         * across the face. Re-seat each kept mapped joint onto its virtual
+         * position, solved through the real parent's frame (same approach
+         * as the ACC2 accessory pins below). Duplicate slots (collapsed
+         * chains map two canonical joints onto one target joint) resolve
+         * to the LAST slot: the canonical hand, so the fist sits in the
+         * cannon. */
+        for (kk = 0; kk < o->njoints; kk++)
+        {
+            s32 tid = (s32)o->joint_ids[kk];
+            s32 kept = 1, jj;
+            DObj *aj;
+            f32 po[3], pm[3][3], pinv[3][3], d[3];
+            if (tid <= 0 || tid >= FTPARTS_JOINT_NUM_MAX)
+                continue;
+            for (jj = kk + 1; jj < o->njoints; jj++)
+                if ((s32)o->joint_ids[jj] == tid) { kept = 0; break; }
+            if (!kept)
+                continue;
+            /* blanked joints are re-seated too: their own geometry is
+             * hidden, but accessory CHILDREN (link's sword and shield
+             * hang off the hand joints) inherit the position — without
+             * this they float at the taller real skeleton's hands. Note
+             * this also moves the joints game logic reads, so hit/hurt
+             * ranges track the chibi skeleton — flagged for review. */
+            aj = fp->joints[tid];
+            if (aj == NULL || aj->parent == NULL)
+                continue;
+            osb5_dobj_frame(aj->parent, po, pm);
+            osb5_inv3(pm, pinv);
+            d[0] = vjo[kk][0] - po[0];
+            d[1] = vjo[kk][1] - po[1];
+            d[2] = vjo[kk][2] - po[2];
+            aj->translate.vec.f.x = pinv[0][0]*d[0] + pinv[0][1]*d[1] + pinv[0][2]*d[2];
+            aj->translate.vec.f.y = pinv[1][0]*d[0] + pinv[1][1]*d[1] + pinv[1][2]*d[2];
+            aj->translate.vec.f.z = pinv[2][0]*d[0] + pinv[2][1]*d[1] + pinv[2][2]*d[2];
+        }
+        }
+        }
+    }
+
     /* SSB64_OSB5_DEBUG=1: dump the frames the skinner actually reads for
      * the first ticks after each attach — pin down WHICH values are
      * garbage on the CSS-flash tick. */
@@ -2180,6 +2796,43 @@ static void osb5_load(FTStruct *fp, FILE *f)
             }
             have_tag = (fread(tag, 1, 4, f) == 4);
         }
+        if (have_tag && tag[0] == 'C' && tag[1] == 'A' && tag[2] == 'N' && tag[3] == '1')
+        {
+            s32 pars[32];
+            if (have_bind && njoints <= 32 &&
+                fread(o->can_root, 4, 3, f) == 3 &&
+                fread(pars, 4, njoints, f) == (size_t)njoints)
+            {
+                for (k = 0; k < njoints; k++)
+                {
+                    o->can_parent[k] = (s8)pars[k];
+                    memcpy(o->cbind_o[k], jo[k], sizeof(o->cbind_o[k]));
+                    memcpy(o->cbind_m[k], jm[k], sizeof(o->cbind_m[k]));
+                }
+                o->canonical = 1;
+                /* accessory lever-arm scale: canonical chest height over
+                 * target chest height (both above their ground anchors) */
+                o->can_scale = 1.0f;
+                {
+                    f32 ch = jo[0][1] - o->can_root[1];   /* slot 0 = chest */
+                    f32 tjo_[3], tjm_[3][3];
+                    if (fp->joints[(s32)o->joint_ids[0]] != NULL)
+                    {
+                        osb5_joint_frame(fp, (s32)o->joint_ids[0], tjo_, tjm_);
+                        if (tjo_[1] > 1.0f && ch > 1.0f)
+                        {
+                            f32 t0o_[3], t0m_[3][3];
+                            osb5_joint_frame(fp, 0, t0o_, t0m_);
+                            if (tjo_[1] - t0o_[1] > 1.0f)
+                                o->can_scale = ch / (tjo_[1] - t0o_[1]);
+                        }
+                    }
+                }
+                port_log("OSB5: CANONICAL retarget (%d joints, scale %.2f)\n",
+                         (int)njoints, o->can_scale);
+            }
+            have_tag = (fread(tag, 1, 4, f) == 4);
+        }
         if (have_tag && tag[0] == 'S' && tag[1] == 'C' && tag[2] == 'A' && tag[3] == 'L')
         {
             f32 fs = 1.0f;
@@ -2231,6 +2884,115 @@ static void osb5_load(FTStruct *fp, FILE *f)
             o->bind_nrm[i][t][0] = jinv[kk][0][0]*n0 + jinv[kk][0][1]*n1 + jinv[kk][0][2]*n2;
             o->bind_nrm[i][t][1] = jinv[kk][1][0]*n0 + jinv[kk][1][1]*n1 + jinv[kk][1][2]*n2;
             o->bind_nrm[i][t][2] = jinv[kk][2][0]*n0 + jinv[kk][2][1]*n1 + jinv[kk][2][2]*n2;
+        }
+    }
+
+    if (o->canonical)
+    {
+        f32 tjo[3], tjm[3][3];
+        for (k = 0; k < njoints; k++)
+        {
+            s32 jid = (s32)o->joint_ids[k];
+            if (fp->joints[jid] == NULL)
+            {
+                port_log("OSB5: canonical: target joint %d missing, disabling\n", jid);
+                o->canonical = 0;
+                break;
+            }
+            osb5_joint_frame(fp, jid, tjo, tjm);
+            osb5_inv3(tjm, o->tbind_inv[k]);
+        }
+        if (o->canonical)
+        {
+            s32 jid2, kk2;
+            osb5_joint_frame(fp, 0, tjo, tjm);
+            osb5_inv3(tjm, o->tbind0_inv);
+            o->cint_bind[0] = o->cint_bind[1] = o->cint_bind[2] = 0.0f;
+            {
+                DObj *cj = fp->joints[(s32)o->joint_ids[0]];
+                if (cj != NULL && cj->parent != NULL && cj->parent != DOBJ_PARENT_NULL)
+                {
+                    f32 po[3], pm[3][3], d[3];
+                    s32 r2;
+                    osb5_dobj_frame(cj->parent, po, pm);
+                    d[0] = po[0] - tjo[0];
+                    d[1] = po[1] - tjo[1];
+                    d[2] = po[2] - tjo[2];
+                    for (r2 = 0; r2 < 3; r2++)
+                        o->cint_bind[r2] = o->tbind0_inv[r2][0]*d[0]
+                                         + o->tbind0_inv[r2][1]*d[1]
+                                         + o->tbind0_inv[r2][2]*d[2];
+                }
+            }
+            /* spawn-translate snapshot for every UNMAPPED registry joint:
+             * accessory mounts (link's sword/shield/sheath joints) keep
+             * static local offsets sized for the tall vanilla body. Each
+             * tick they are SET to snapshot*scale — a per-tick multiply
+             * compounded on joints the animation never rewrites and
+             * collapsed the gear onto its parents. */
+            for (jid2 = 0; jid2 < 64; jid2++)
+            {
+                o->can_snap_have[jid2] = 0;
+                o->can_interior[jid2] = 0;
+            }
+            /* interior = ancestors of mapped joints (walk each mapped
+             * joint's DObj parent chain to the root, flagging unmapped
+             * nodes on the way) */
+            for (kk2 = 0; kk2 < o->njoints && kk2 < 32; kk2++)
+            {
+                s32 tid2 = (s32)o->joint_ids[kk2];
+                s32 ptid = -1, pk;
+                DObj *walk, *stopj = NULL;
+                o->can_chainoff[kk2][0] = o->can_chainoff[kk2][1] = o->can_chainoff[kk2][2] = 0.0f;
+                if (tid2 <= 0 || tid2 >= FTPARTS_JOINT_NUM_MAX || fp->joints[tid2] == NULL)
+                    continue;
+                pk = (s32)o->can_parent[kk2];
+                if (pk >= 0)
+                {
+                    ptid = (s32)o->joint_ids[pk];
+                    if (ptid > 0 && ptid < FTPARTS_JOINT_NUM_MAX)
+                        stopj = fp->joints[ptid];
+                }
+                else stopj = fp->joints[0];
+                for (walk = fp->joints[tid2]->parent;
+                     walk != NULL && walk != DOBJ_PARENT_NULL && walk != stopj;
+                     walk = walk->parent)
+                {
+                    /* world-space approximation: nub rotations at bind are
+                     * near-identity, so raw translate sums suffice */
+                    o->can_chainoff[kk2][0] += walk->translate.vec.f.x;
+                    o->can_chainoff[kk2][1] += walk->translate.vec.f.y;
+                    o->can_chainoff[kk2][2] += walk->translate.vec.f.z;
+                }
+            }
+            if (getenv("SSB64_NO_INTERIOR") == NULL)
+            for (kk2 = 0; kk2 < o->njoints; kk2++)
+            {
+                s32 tid2 = (s32)o->joint_ids[kk2];
+                DObj *walk;
+                if (tid2 <= 0 || tid2 >= FTPARTS_JOINT_NUM_MAX) continue;
+                if (fp->joints[tid2] == NULL) continue;
+                for (walk = fp->joints[tid2]->parent;
+                     walk != NULL && walk != DOBJ_PARENT_NULL;
+                     walk = walk->parent)
+                {
+                    s32 wj;
+                    for (wj = 1; wj < FTPARTS_JOINT_NUM_MAX && wj < 64; wj++)
+                        if (fp->joints[wj] == walk) { o->can_interior[wj] = 1; break; }
+                }
+            }
+            for (jid2 = 1; jid2 < FTPARTS_JOINT_NUM_MAX && jid2 < 64; jid2++)
+            {
+                s32 m = 0;
+                if (fp->joints[jid2] == NULL) continue;
+                for (kk2 = 0; kk2 < o->njoints; kk2++)
+                    if ((s32)o->joint_ids[kk2] == jid2) { m = 1; break; }
+                if (m) continue;
+                o->can_snap[jid2][0] = fp->joints[jid2]->translate.vec.f.x;
+                o->can_snap[jid2][1] = fp->joints[jid2]->translate.vec.f.y;
+                o->can_snap[jid2][2] = fp->joints[jid2]->translate.vec.f.z;
+                o->can_snap_have[jid2] = 1;
+            }
         }
     }
 

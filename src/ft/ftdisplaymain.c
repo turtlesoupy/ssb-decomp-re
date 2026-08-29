@@ -1104,6 +1104,24 @@ void ftDisplayMainProcDisplay(GObj *fighter_gobj)
 
 #ifdef PORT
     fp->display_mode = port_enhancement_hitbox_display_override(fp->display_mode);
+    {
+        extern void port_osb5_heal_blanks(GObj *fighter_gobj);
+        extern void port_osb5_drop_probe(GObj *g, const char *s);
+        extern void port_osb5_skin_update(GObj *fighter_gobj);
+        extern void port_osb5_copy_windows(void);
+        port_osb5_heal_blanks(fighter_gobj);
+        {
+            extern void port_osb5_dl_debug(GObj *g);
+            port_osb5_dl_debug(fighter_gobj);
+        }
+        /* re-skin + re-seat at display time: DObj animation advances
+         * during the display walk, so params-time skinning lags the
+         * vanilla parts by the advance delta - visible as accessories
+         * leading the mesh on fast-motion ticks */
+        port_osb5_skin_update(fighter_gobj);
+        port_osb5_copy_windows();
+        port_osb5_drop_probe(fighter_gobj, "display");
+    }
 #endif
 
     sFTDisplayMainSkyFogAlpha = 0xFF;
@@ -1186,7 +1204,22 @@ void ftDisplayMainProcDisplay(GObj *fighter_gobj)
                     }
 #endif
 
+#ifdef PORT
+                    /* pose-capture eval: the fixed camera lets the tour
+                     * carry the fighter to the frame edge, and the magnify
+                     * bubble draws a SECOND copy of fighter+accessories at
+                     * the screen corner — read as accessory "flashes" in
+                     * the clips. No magnify in clean captures. */
+                    {
+                        extern char *getenv(const char *);
+                        if (getenv("SSB64_POSE_CAPTURE") == NULL)
+                            fp->is_magnify_show = TRUE;
+                    }
+                    if (0)
+                        fp->is_magnify_show = TRUE;
+#else
                     fp->is_magnify_show = TRUE;
+#endif
 
                     if (gIFCommonPlayerInterface.is_magnify_display != FALSE)
                     {

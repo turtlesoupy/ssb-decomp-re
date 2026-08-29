@@ -3951,6 +3951,10 @@ void ftMainProcParams(GObj *fighter_gobj)
     FTStruct *fp = ftGetStruct(fighter_gobj);
 #ifdef PORT
     port_dump_frame(fighter_gobj);
+    {
+        extern void port_osb5_seat_probe(GObj *g, const char *site);
+        port_osb5_seat_probe(fighter_gobj, "params-top");
+    }
     /* OSB5 CPU skinning: recompute the injected mesh every fighter tick */
     port_osb5_skin_update(fighter_gobj);
     port_osb5_copy_windows();
@@ -4235,6 +4239,12 @@ void ftMainProcParams(GObj *fighter_gobj)
             break;
         }
     }
+#ifdef PORT
+    {
+        extern void port_osb5_reseat_late(GObj *fighter_gobj);
+        port_osb5_reseat_late(fighter_gobj);
+    }
+#endif
 }
 
 // 0x800E69C4
