@@ -45,6 +45,20 @@ void ftSamusSpecialNGetChargeShotPosition(FTStruct *fp, Vec3f *pos)
     }
 #endif
     gmCollisionGetFighterPartsWorldPosition(fp->joints[FTSAMUS_CHARGE_JOINT], pos);
+#ifdef PORT
+    {
+        extern f32 port_osb5_charge_scale(GObj *fighter_gobj);
+        extern void port_log(const char *fmt, ...);
+        extern char *getenv(const char *);
+        Vec3f jw;
+        if (getenv("SSB64_TN_DEBUG") == NULL) return;
+        jw.x = jw.y = jw.z = 0.0f;
+        gmCollisionGetFighterPartsWorldPosition(fp->joints[FTSAMUS_CHARGE_JOINT], &jw);
+        port_log("CHGDBG scale=%.3f joint16=(%.1f %.1f %.1f) ball=(%.1f %.1f %.1f)\n",
+                 port_osb5_charge_scale(fp->fighter_gobj), jw.x, jw.y, jw.z,
+                 pos->x, pos->y, pos->z);
+    }
+#endif
 }
 
 // 0x8015D394
