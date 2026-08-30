@@ -4964,6 +4964,9 @@ void ftMainSetStatus(GObj *fighter_gobj, s32 status_id, f32 frame_begin, f32 ani
              * fault_addr=0x0. The per-slot RelocPointerTable correctly
              * returns NULL for arena-allocated stale tokens; this
              * consumer check turns that NULL into a clean skip. */
+            if (dobjdesc == NULL)
+                port_log("SSB64: ftMainSetStatus TRS-RESET SKIPPED (stale dobjdesc token) fkind=%d player=%d motion=%d\n",
+                         (int)fp->fkind, (int)fp->player, (int)fp->motion_id);
             if (dobjdesc != NULL)
 #endif
             for (i = nFTPartsJointCommonStart; dobjdesc->id != DOBJ_ARRAY_MAX; i++, dobjdesc++)

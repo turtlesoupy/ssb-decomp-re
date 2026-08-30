@@ -2203,7 +2203,146 @@ f32 port_osb5_charge_scale(GObj *fighter_gobj)
     return o->can_scale;
 }
 
+static void osb5_skin_update_body(GObj *fighter_gobj);
+
+/* Menu scenes (CSS previews, results podium) animate fighters without the
+ * battle tick's per-frame invalidation of transform_update_mode. The
+ * kind-75 display func draws from live TRS only while that mode is 0; any
+ * collision query we make flips the queried chain to snapshot mode, and
+ * the display then renders the FROZEN snapshot forever — the select-card
+ * banana bend, and the rigid mid-anim tumble when the snapshots were
+ * force-refreshed a frame behind. So on menu scenes, clear the mode across
+ * the rig before skinning (our walk reads live TRS) and again after (the
+ * display walk composes fresh TRS, exactly like an uninjected preview).
+ * Never in battle: there the game owns the invalidation, and anim-locked
+ * joints carry garbage TRS mid-lock. */
+/* joints the canonical reseat wrote this tick on a menu scene: their
+ * snapshots carry the reseated translate and must stay authoritative
+ * (mode 1) through the display walk, because menu anims advance lazily
+ * DURING that walk and would otherwise overwrite the reseat with the
+ * vanilla-skeleton translate — Link's sword/shield floated at the chibi
+ * preview's face while carrying the token. */
+static u8 sOsb5MenuSeated[OSB5_PLAYER_SLOTS][64];
+
+static s32 osb5_on_menu_scene(void)
+{
+    extern s32 port_current_scene(void);
+    s32 sc = port_current_scene();
+    return (sc == 16 || sc == 17 || sc == 18 || sc == 19 || sc == 20 || sc == 24);
+}
+
+static void osb5_menu_unfreeze(GObj *fighter_gobj, s32 keep_seated)
+{
+    FTStruct *fp;
+    s32 j, pl;
+    if (!osb5_on_menu_scene())
+        return;
+    fp = ftGetStruct(fighter_gobj);
+    if (fp == NULL) return;
+    pl = (s32)fp->player;
+    for (j = 0; j < FTPARTS_JOINT_NUM_MAX; j++)
+    {
+        DObj *dj = fp->joints[j];
+        FTParts *pt = (dj != NULL) ? (FTParts *)dj->user_data.p : NULL;
+        if (pt == NULL) continue;
+        if (!keep_seated && (u32)pl < OSB5_PLAYER_SLOTS && j < 64)
+            sOsb5MenuSeated[pl][j] = 0;
+        if (keep_seated && (u32)pl < OSB5_PLAYER_SLOTS && j < 64 &&
+            sOsb5MenuSeated[pl][j])
+            continue;
+        /* ONLY the lazy collision cache (mode 1). Mode 3 is an ANIM LOCK:
+         * ftParamSetAnimLocks froze that joint's snapshot on purpose and
+         * its TRS is garbage until ftParamClearAnimLocks releases it —
+         * flattening 3 -> 0 mid-anim twisted the selected preview. */
+        if (pt->transform_update_mode == 1)
+            pt->transform_update_mode = 0;
+    }
+}
+
 void port_osb5_skin_update(GObj *fighter_gobj)
+{
+    if (getenv("SSB64_CSS_DEBUG") != NULL)
+    {
+        extern s32 port_current_scene(void);
+        static s32 sCssDbg = 0;
+        FTStruct *fpd = ftGetStruct(fighter_gobj);
+        s32 scd = port_current_scene();
+        if (fpd != NULL && (s32)fpd->player == 0 &&
+            (scd == 16 || scd == 24) && ((sCssDbg++ % 20) == 0))
+        {
+            extern float atan2f(float, float);
+            s32 jd;
+            s32 nm0 = 0, nm1 = 0, nm3 = 0, nmx = 0;
+            for (jd = 0; jd < FTPARTS_JOINT_NUM_MAX; jd++)
+            {
+                DObj *dj = fpd->joints[jd];
+                FTParts *pt = (dj != NULL) ? (FTParts *)dj->user_data.p : NULL;
+                if (pt == NULL) continue;
+                if (pt->transform_update_mode == 0) nm0++;
+                else if (pt->transform_update_mode == 1) nm1++;
+                else if (pt->transform_update_mode == 3) nm3++;
+                else nmx++;
+            }
+            {
+                u32 fsum = 0;
+                if (fpd->figatree != NULL)
+                {
+                    const u32 *fw = (const u32 *)fpd->figatree;
+                    s32 fi;
+                    for (fi = 0; fi < 0x180; fi++) fsum += fw[fi];
+                }
+                port_log("CSSDBG t=%d locks=%d motion=%d modes 0/1/3/x=%d/%d/%d/%d figsum=0x%08x\n",
+                         sCssDbg, (int)fpd->is_use_animlocks, (int)fpd->motion_id,
+                         nm0, nm1, nm3, nmx, fsum);
+            }
+            for (jd = 0; jd < FTPARTS_JOINT_NUM_MAX; jd++)
+            {
+                DObj *dj = fpd->joints[jd];
+                FTParts *pt = (dj != NULL) ? (FTParts *)dj->user_data.p : NULL;
+                if (pt == NULL) continue;
+                port_log("CSSDBG  j%d m%d dj=%p gobj=%p rot=(%.3f %.3f %.3f) tra=(%.1f %.1f %.1f)\n",
+                         jd, (int)pt->transform_update_mode, (void *)dj, (void *)fighter_gobj,
+                         dj->rotate.vec.f.x, dj->rotate.vec.f.y, dj->rotate.vec.f.z,
+                         dj->translate.vec.f.x, dj->translate.vec.f.y, dj->translate.vec.f.z);
+                if (jd == 20)
+                {
+                    AObj *ao = dj->aobj;
+                    char tl[96];
+                    s32 tn = 0;
+                    tl[0] = '\0';
+                    while (ao != NULL && tn < 80)
+                    {
+                        tn += snprintf(tl + tn, sizeof(tl) - tn, "%d:%d ",
+                                       (int)ao->track, (int)ao->kind);
+                        ao = ao->next;
+                    }
+                    port_log("CSSDBG  j20 aobjs [%s] wait=%.1f\n", tl, dj->anim_wait);
+                }
+            }
+            for (jd = 0; jd <= 3; jd++)
+            {
+                DObj *dj = fpd->joints[jd];
+                FTParts *pt = (dj != NULL) ? (FTParts *)dj->user_data.p : NULL;
+                f32 co[3], cm[3][3];
+                if (dj == NULL) continue;
+                osb5_dobj_frame(dj, co, cm);
+                port_log("CSSDBG  j%d mode=%d 0x5=%d trs_rot=(%.2f %.2f %.2f) collYaw=%.2f collPitch=%.2f o=(%.0f %.0f %.0f)\n",
+                         jd,
+                         pt != NULL ? (int)pt->transform_update_mode : -1,
+                         pt != NULL ? (int)pt->unk_dobjtrans_0x5 : -1,
+                         dj->rotate.vec.f.x, dj->rotate.vec.f.y, dj->rotate.vec.f.z,
+                         atan2f(cm[2][0], cm[0][0]),
+                         atan2f(-cm[1][0], cm[1][1]),
+                         co[0], co[1], co[2]);
+            }
+        }
+    }
+    osb5_menu_unfreeze(fighter_gobj, 0);
+    osb5_skin_update_body(fighter_gobj);
+    osb5_menu_unfreeze(fighter_gobj, 1);
+}
+
+static void osb5_skin_update_body(GObj *fighter_gobj)
 {
     FTStruct *fp;
     OSB5State *o;
@@ -2486,6 +2625,25 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             aj->translate.vec.f.x = pinv[0][0]*d[0] + pinv[0][1]*d[1] + pinv[0][2]*d[2];
             aj->translate.vec.f.y = pinv[1][0]*d[0] + pinv[1][1]*d[1] + pinv[1][2]*d[2];
             aj->translate.vec.f.z = pinv[2][0]*d[0] + pinv[2][1]*d[1] + pinv[2][2]*d[2];
+            /* menu scenes: the anim advances lazily during the display
+             * walk and would rewrite this translate before the joint is
+             * drawn. Bake the reseated TRS into the collision snapshot
+             * and pin the joint to snapshot mode for this frame (the
+             * menu unfreeze sweep skips flagged joints), so the display
+             * renders the reseated position. Battle keeps its existing
+             * late-reseat mechanism. */
+            if (osb5_on_menu_scene() && tid < 64 &&
+                (u32)fp->player < OSB5_PLAYER_SLOTS)
+            {
+                FTParts *spt = (FTParts *)aj->user_data.p;
+                if (spt != NULL)
+                {
+                    extern void gmCollisionTransformMatrixAll(DObj *dobj, FTParts *parts, Mtx44f mtx);
+                    gmCollisionTransformMatrixAll(aj, spt, spt->unk_dobjtrans_0x10);
+                    spt->transform_update_mode = 1;
+                    sOsb5MenuSeated[fp->player][tid] = 1;
+                }
+            }
         }
         }
         }
@@ -2801,6 +2959,16 @@ static void osb5_load(FTStruct *fp, FILE *f)
     o->nblank = 0;
     o->naccs = 0;
     o->have_tbnd = 0;
+    /* canonical is set ONLY by a CAN1 section. Without this reset, a
+     * CLASSIC bundle attached into a slot that previously wore a
+     * canonical character (CSS hover previews cycle characters through
+     * the same player slot) inherits canonical=1 plus the previous
+     * character's joint mapping, and the per-tick canonical reseat then
+     * rewrites the classic rig's joint translates with stale virtual
+     * seats — the select-card bent/hunched pose after dragging across
+     * canonical tiles. */
+    o->canonical = 0;
+    sOsb5LateSeat[fp->player].valid = 0;
     for (k = 0; k < 8; k++) { o->acc_pitch[k] = 0.0f; o->acc_orient[k] = 0.0f; o->acc_scale[k] = 0.0f; }
     o->fit_scale = 1.0f;
     o->scl_applied = 0.0f;

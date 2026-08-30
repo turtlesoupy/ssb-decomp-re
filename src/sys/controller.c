@@ -119,6 +119,71 @@ void syControllerUpdateDeviceStatuses(void)
     }
 }
 
+#ifdef PORT
+#include <stdio.h>
+extern char *getenv(const char *name);
+/* SSB64_PAD_SCRIPT=<file>: scripted P1 pad input, applied after the real
+ * read so menus and battles see it through the normal edge detection.
+ * Lines: "<start> <end> <buttons-hex> <stick_x> <stick_y>" (frames
+ * inclusive, counted from the first read; '#' comments). Frames not
+ * covered by any line read as neutral. */
+static void syControllerApplyPadScript(void)
+{
+    typedef struct { s32 s, e; u16 btn; s8 sx, sy; } PadScriptLine;
+    static PadScriptLine sLines[256];
+    static s32 sNLines = -1;
+    static s32 sFrame = 0;
+    s32 i;
+
+    if (sNLines < 0)
+    {
+        const char *path = getenv("SSB64_PAD_SCRIPT");
+        sNLines = 0;
+        if (path != NULL)
+        {
+            FILE *f = fopen(path, "r");
+            if (f != NULL)
+            {
+                char buf[128];
+                while (fgets(buf, sizeof buf, f) != NULL && sNLines < 256)
+                {
+                    long s2, e2, b2, x2, y2;
+                    if (buf[0] == '#' || buf[0] == '\n') continue;
+                    if (sscanf(buf, "%ld %ld %lx %ld %ld", &s2, &e2, &b2, &x2, &y2) == 5)
+                    {
+                        sLines[sNLines].s = (s32)s2;
+                        sLines[sNLines].e = (s32)e2;
+                        sLines[sNLines].btn = (u16)b2;
+                        sLines[sNLines].sx = (s8)x2;
+                        sLines[sNLines].sy = (s8)y2;
+                        sNLines++;
+                    }
+                }
+                fclose(f);
+                port_log("PADSCRIPT: %d lines from %s\n", (int)sNLines, path);
+            }
+            else port_log("PADSCRIPT: cannot open %s\n", path);
+        }
+    }
+    if (sNLines <= 0) return;
+
+    sFrame++;
+    sSYControllerData[0].errno = 0;
+    sSYControllerData[0].button = 0;
+    sSYControllerData[0].stick_x = 0;
+    sSYControllerData[0].stick_y = 0;
+    for (i = 0; i < sNLines; i++)
+    {
+        if (sFrame >= sLines[i].s && sFrame <= sLines[i].e)
+        {
+            sSYControllerData[0].button |= sLines[i].btn;
+            if (sLines[i].sx != 0) sSYControllerData[0].stick_x = sLines[i].sx;
+            if (sLines[i].sy != 0) sSYControllerData[0].stick_y = sLines[i].sy;
+        }
+    }
+}
+#endif
+
 // 0x80003DD4
 void syControllerReadDeviceData(void)
 {
@@ -127,6 +192,9 @@ void syControllerReadDeviceData(void)
     osContStartReadData(&sSYControllerInitMesgQueue);
     osRecvMesg(&sSYControllerInitMesgQueue, NULL, OS_MESG_BLOCK);
     osContGetReadData(sSYControllerData);
+#ifdef PORT
+    syControllerApplyPadScript();
+#endif
 
     for (i = 0; i != MAXCONTROLLERS; i++)
     {

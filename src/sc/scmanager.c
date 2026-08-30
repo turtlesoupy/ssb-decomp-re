@@ -2182,3 +2182,12 @@ sb32 portSCManagerConsumeReset(void)
 	return TRUE;
 }
 #endif
+
+
+#ifdef PORT
+/* OpenSmash: scene id accessor for ftport (SCCommonData is sc-private) */
+s32 port_current_scene(void)
+{
+    return (s32)gSCManagerSceneData.scene_curr;
+}
+#endif

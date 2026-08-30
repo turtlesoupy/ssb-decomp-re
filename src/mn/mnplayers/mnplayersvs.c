@@ -3782,6 +3782,28 @@ void mnPlayersVSCursorProcUpdate(GObj *gobj)
 
 	mnPlayersVSAdjustCursor(gobj, player);
 
+#ifdef PORT
+	/* pad-script calibration: cursor position + slot state trace */
+	if (getenv("SSB64_CSS_DEBUG") != NULL && player == 0)
+	{
+		static s32 sCurDbg = 0;
+		if ((sCurDbg++ % 20) == 0)
+		{
+			extern void port_log(const char *fmt, ...);
+			port_log("CURDBG t=%d pos=(%.0f %.0f) puck=(%.0f %.0f) held=%d sel=%d fk=%d status=%d\n",
+			         sCurDbg,
+			         SObjGetStruct(gobj)->pos.x,
+			         SObjGetStruct(gobj)->pos.y,
+			         (sMNPlayersVSSlots[0].puck != NULL) ? SObjGetStruct(sMNPlayersVSSlots[0].puck)->pos.x : -999.0f,
+			         (sMNPlayersVSSlots[0].puck != NULL) ? SObjGetStruct(sMNPlayersVSSlots[0].puck)->pos.y : -999.0f,
+			         (int)sMNPlayersVSSlots[0].held_player,
+			         (int)sMNPlayersVSSlots[0].is_selected,
+			         (int)sMNPlayersVSSlots[0].fkind,
+			         (int)sMNPlayersVSSlots[0].cursor_status);
+		}
+	}
+#endif
+
 	if
 	(
 		(gSYControllerDevices[player].button_tap & A_BUTTON) &&
@@ -4583,6 +4605,56 @@ void mnPlayersVSSpotlightProcUpdate(GObj *gobj)
 		1.5F, 1.5F, 2.0F, 1.5F, 1.5F, 1.5F,
 		1.5F, 1.5F, 1.5F, 1.5F, 1.5F, 1.5F
 	};
+
+#ifdef PORT
+	/* SSB64_CSS_RESELECT="frame,player,fkind,page": at the given scene
+	 * frame, flip to the roster page and re-make the player's preview on
+	 * that tile — the exact pin-drop path (destroy + MakeFighter mid-
+	 * scene) that live selection takes, for headless reproduction. */
+	if (player == 0)
+	{
+		static s32 sReselFrame = 0;
+		static s32 sReselDone = 0;
+		const char *rs = getenv("SSB64_CSS_RESELECT");
+		sReselFrame++;
+		if (rs != NULL && !sReselDone)
+		{
+			s32 v[4] = {0, 0, 0, 0};
+			s32 vi = 0, acc = 0, any = 0;
+			const char *p2;
+			for (p2 = rs; ; p2++)
+			{
+				if (*p2 == ',' || *p2 == '\0')
+				{
+					if (vi < 4 && any) v[vi] = acc;
+					vi++; acc = 0; any = 0;
+					if (*p2 == '\0') break;
+				}
+				else if (*p2 >= '0' && *p2 <= '9')
+				{
+					acc = acc * 10 + (*p2 - '0');
+					any = 1;
+				}
+			}
+			if (sReselFrame >= v[0])
+			{
+				extern void port_roster_set_page(s32 page);
+				extern void port_log(const char *fmt, ...);
+				s32 pl = v[1], fk = v[2];
+				sReselDone = 1;
+				port_roster_set_page(v[3]);
+				sMNPlayersVSSlots[pl].fkind = fk;
+				sMNPlayersVSSlots[pl].costume = 0;
+				sMNPlayersVSSlots[pl].pkind = nFTPlayerKindMan;
+				sMNPlayersVSSlots[pl].is_selected = TRUE;
+				sMNPlayersVSSlots[pl].is_fighter_selected = TRUE;
+				port_log("CSS_RESELECT: frame=%d player=%d fkind=%d page=%d\n",
+				         (int)sReselFrame, (int)pl, (int)fk, (int)v[3]);
+				mnPlayersVSMakeFighter(sMNPlayersVSSlots[pl].player, pl, fk, 0);
+			}
+		}
+	}
+#endif
 
 	if ((sMNPlayersVSSlots[player].is_fighter_selected == FALSE) && (sMNPlayersVSSlots[player].fkind != nFTKindNull))
 	{
@@ -5776,6 +5848,42 @@ void mnPlayersVSInitSlot(s32 player)
 
 	mnPlayersVSMakePuck(player);
 	mnPlayersVSMakeGate(player);
+
+#ifdef PORT
+	/* SSB64_CSS_SELECT="fk0[,fk1[,...]]": debug boot with players already
+	 * selected on the given tile fkinds (-1 = leave alone). Headless CSS
+	 * captures need a preview fighter without simulating token input. */
+	{
+		const char *sel = getenv("SSB64_CSS_SELECT");
+		if (sel != NULL)
+		{
+			s32 pl2 = 0, fk2 = -1, any = 0;
+			const char *p2;
+			for (p2 = sel; ; p2++)
+			{
+				if (*p2 == ',' || *p2 == '\0')
+				{
+					if (any && pl2 == player && fk2 >= 0)
+					{
+						sMNPlayersVSSlots[player].fkind = fk2;
+						sMNPlayersVSSlots[player].costume = 0;
+						sMNPlayersVSSlots[player].pkind = nFTPlayerKindMan;
+						sMNPlayersVSSlots[player].is_selected = TRUE;
+						sMNPlayersVSSlots[player].is_fighter_selected = TRUE;
+					}
+					if (*p2 == '\0') break;
+					pl2++; fk2 = -1; any = 0;
+				}
+				else if (*p2 >= '0' && *p2 <= '9')
+				{
+					fk2 = (fk2 < 0 ? 0 : fk2) * 10 + (*p2 - '0');
+					any = 1;
+				}
+				else any = 0;
+			}
+		}
+	}
+#endif
 
 	if (sMNPlayersVSSlots[player].is_selected)
 	{
