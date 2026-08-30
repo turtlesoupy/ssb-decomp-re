@@ -796,6 +796,11 @@ typedef struct OSB5State
     f32 cbind_m[32][3][3];
     f32 tbind_inv[32][3][3];/* target joints' spawn-bind rotation inverses */
     f32 tbind0_inv[3][3];   /* target root (TopN) spawn-bind inverse */
+    f32 t0m_attach[3][3];   /* TopN rotation at attach: the plain-DL
+                             * display path never rebuilds the root's
+                             * rotation, so the DL renders under this
+                             * frozen frame — localization must match */
+    s8 t0m_attach_have;
     f32 cint_bind[3];       /* chest parent's world offset from TopN at
                              * spawn bind, in TopN-bind frame. The interior
                              * chain (TransN/XRotN/YRotN) carries TRANSLATE
@@ -2188,6 +2193,23 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     s32 k, i;
 
     if (getenv("SSB64_NO_SKIN") != NULL) return;
+    if (getenv("SSB64_FACE_DEBUG") != NULL)
+    {
+        static s32 sFcDbg = 0;
+        FTStruct *fpd = ftGetStruct(fighter_gobj);
+        if (fpd != NULL && fpd->joints[0] != NULL && sFcDbg < 3000 && ((sFcDbg++ % 30) == 0))
+        {
+            extern float atan2f(float, float);
+            f32 co[3], cm[3][3];
+            FTParts *pt0 = (FTParts *)fpd->joints[0]->user_data.p;
+            osb5_dobj_frame(fpd->joints[0], co, cm);
+            port_log("FACEDBG lr=%d rotY=%.2f collYaw=%.2f mode=%d\n",
+                     (int)fpd->lr,
+                     fpd->joints[0]->rotate.vec.f.y,
+                     atan2f(cm[2][0], cm[0][0]),
+                     pt0 != NULL ? (int)pt0->transform_update_mode : -1);
+        }
+    }
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
     o = osb5_slot((s32)fp->player);
@@ -2388,6 +2410,13 @@ void port_osb5_skin_update(GObj *fighter_gobj)
             }
             memcpy(jo[kk], vjo[kk], sizeof(vjo[kk]));
         }
+        if (getenv("SSB64_TN_DEBUG") != NULL)
+        {
+            static s32 sArmDbg = 0;
+            if (sArmDbg < 2000 && ((sArmDbg++ % 60) == 0))
+                port_log("ARMDBG t0o.y=%.1f t0a.y=%.1f chest.y=%.1f sh.y=%.1f fa.y=%.1f hd.y=%.1f\n",
+                         t0o[1], t0a[1], vjo[0][1], vjo[5][1], vjo[6][1], vjo[7][1]);
+        }
 
         /* remember the virtual seats so the LATE reseat (end of the
          * fighter tick) can re-apply them after any model-part/LOD code
@@ -2465,6 +2494,11 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         /* safety net only — with the memo invalidation above the root
          * frame recomputes from live TRS and should always validate. */
         return;
+    }
+    if (!o->t0m_attach_have)
+    {
+        memcpy(o->t0m_attach, t0m, sizeof(o->t0m_attach));
+        o->t0m_attach_have = 1;
     }
     osb5_inv3(t0m, t0inv);
     /* Attach from the second fill on (see OSB5State.fills); afterwards
@@ -3125,7 +3159,14 @@ static void osb5_load(FTStruct *fp, FILE *f)
         {
             /* the mesh must draw via the plain-DL path */
             FTParts *rparts = (FTParts *)fp->joints[0]->user_data.p;
-            if (rparts != NULL && (rparts->flags & 0xF) != 0)
+            /* keep the fighter matrix func (kind 75) ACTIVE on the root:
+             * it rebuilds TopN's matrix every frame. Clearing the nibble
+             * put the DL on the generic path's lazily-rebuilt matrix
+             * cache, which missed facing turns — the mesh stayed at
+             * spawn facing while the fighter turned (SSB64_CLEAR_NIB
+             * restores the old behavior for comparison). */
+            if (rparts != NULL && (rparts->flags & 0xF) != 0 &&
+                getenv("SSB64_CLEAR_NIB") != NULL)
             {
                 o->saved_root_nib = (u8)(rparts->flags & 0xF);
                 o->saved_root_nib_valid = 1;
