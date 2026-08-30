@@ -1131,6 +1131,10 @@ void scManagerRunLoop(sb32 arg)
 				 * and cannot collide. Without this a ditto match booted two
 				 * identically-coloured fighters — the CSS never does that. */
 				slot->costume = (fks[i] >= 0) ? mnPlayersVSGetFreeCostume(slot->fkind, i) : 0;
+				/* OpenSmash: SSB64_COSTUME1 forces P1's costume (accessory
+				 * variants — purin's bow lives on a non-default costume) */
+				if (i == 0 && getenv("SSB64_COSTUME1") != NULL)
+					slot->costume = atoi(getenv("SSB64_COSTUME1"));
 				slot->shade   = 0;
 				slot->team    = i;
 
