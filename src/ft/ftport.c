@@ -800,6 +800,15 @@ typedef struct OSB5State
      * (mario bone offsets driven by the target joints' rotation deltas
      * from their own spawn bind) and skin against those. */
     u8 canonical;
+    /* TBND: the target's battle-spawn bind baked by the converter. When
+     * present, the inject-time capture uses these instead of sampling
+     * live joints — the CSS/results screens re-make fighters mid-pose
+     * and live capture there poisoned every rotation delta. */
+    u8 have_tbnd;
+    f32 tb_slot_m[32][3][3];
+    f32 tb_top_o[3], tb_top_m[3][3];
+    f32 tb_cp_o[3], tb_chest_o[3];
+    f32 tb_acc_m[8][3][3];
     s8 can_parent[32];      /* slot index of canonical parent, -1 = root */
     f32 can_root[3];        /* canonical anchor (ground under the chest) */
     f32 cbind_o[32][3];     /* canonical (mario) bind frames */
@@ -2791,6 +2800,7 @@ static void osb5_load(FTStruct *fp, FILE *f)
     o->nverts = (s32)nverts;
     o->nblank = 0;
     o->naccs = 0;
+    o->have_tbnd = 0;
     for (k = 0; k < 8; k++) { o->acc_pitch[k] = 0.0f; o->acc_orient[k] = 0.0f; o->acc_scale[k] = 0.0f; }
     o->fit_scale = 1.0f;
     o->scl_applied = 0.0f;
@@ -2937,6 +2947,37 @@ static void osb5_load(FTStruct *fp, FILE *f)
                          (int)njoints, o->can_scale);
             }
             have_tag = (fread(tag, 1, 4, f) == 4);
+        if (have_tag && tag[0] == 'T' && tag[1] == 'B' && tag[2] == 'N' && tag[3] == 'D')
+        {
+            /* baked target bind (battle-spawn frames from the pipeline's
+             * skeleton dumps): slot origin+basis per joint, TopN, chest
+             * parent + chest origins, accessory bases */
+            s32 ok2 = 1;
+            f32 slot_o[3];
+            for (k = 0; k < njoints && ok2; k++)
+            {
+                ok2 = fread(slot_o, 4, 3, f) == 3 &&
+                      fread(o->tb_slot_m[k], 4, 9, f) == 9;
+            }
+            ok2 = ok2 && fread(o->tb_top_o, 4, 3, f) == 3 &&
+                  fread(o->tb_top_m, 4, 9, f) == 9 &&
+                  fread(o->tb_cp_o, 4, 3, f) == 3 &&
+                  fread(o->tb_chest_o, 4, 3, f) == 3;
+            if (ok2)
+            {
+                u32 na2 = 0;
+                if (fread(&na2, 4, 1, f) == 1 && na2 <= 8)
+                {
+                    u32 a2;
+                    for (a2 = 0; a2 < na2 && ok2; a2++)
+                        ok2 = fread(o->tb_acc_m[a2], 4, 9, f) == 9;
+                }
+                else ok2 = 0;
+            }
+            o->have_tbnd = (u8)(ok2 ? 1 : 0);
+            port_log("OSB5: baked target bind %s\n", ok2 ? "loaded" : "TRUNCATED");
+            have_tag = (fread(tag, 1, 4, f) == 4);
+        }
         }
         if (have_tag && tag[0] == 'S' && tag[1] == 'C' && tag[2] == 'A' && tag[3] == 'L')
         {
@@ -2992,7 +3033,35 @@ static void osb5_load(FTStruct *fp, FILE *f)
         }
     }
 
-    if (o->canonical)
+    if (o->canonical && o->have_tbnd)
+    {
+        /* baked target bind: independent of the pose the fighter holds
+         * at inject — the CSS/results screens re-make fighters mid
+         * victory-pose and live capture there deformed every render */
+        f32 d[3];
+        s32 r2;
+        for (k = 0; k < njoints; k++)
+            osb5_inv3(o->tb_slot_m[k], o->tbind_inv[k]);
+        osb5_inv3(o->tb_top_m, o->tbind0_inv);
+        for (k = 0; k < o->naccs && k < 8; k++)
+            memcpy(o->acc_bind_m[k], o->tb_acc_m[k], sizeof(o->acc_bind_m[k]));
+        o->acc_bind_have = 1;
+        d[0] = o->tb_cp_o[0] - o->tb_top_o[0];
+        d[1] = o->tb_cp_o[1] - o->tb_top_o[1];
+        d[2] = o->tb_cp_o[2] - o->tb_top_o[2];
+        for (r2 = 0; r2 < 3; r2++)
+            o->cint_bind[r2] = o->tbind0_inv[r2][0]*d[0]
+                             + o->tbind0_inv[r2][1]*d[1]
+                             + o->tbind0_inv[r2][2]*d[2];
+        {
+            f32 ch = jo[0][1] - o->can_root[1];
+            f32 th = o->tb_chest_o[1] - o->tb_top_o[1];
+            if (ch > 1.0f && th > 1.0f)
+                o->can_scale = ch / th;
+        }
+        port_log("OSB5: canonical bind from TBND\n");
+    }
+    else if (o->canonical)
     {
         f32 tjo[3], tjm[3][3];
         for (k = 0; k < njoints; k++)
@@ -3042,75 +3111,79 @@ static void osb5_load(FTStruct *fp, FILE *f)
                                          + o->tbind0_inv[r2][2]*d[2];
                 }
             }
-            /* spawn-translate snapshot for every UNMAPPED registry joint:
-             * accessory mounts (link's sword/shield/sheath joints) keep
-             * static local offsets sized for the tall vanilla body. Each
-             * tick they are SET to snapshot*scale — a per-tick multiply
-             * compounded on joints the animation never rewrites and
-             * collapsed the gear onto its parents. */
-            for (jid2 = 0; jid2 < 64; jid2++)
+        }
+    }
+    if (o->canonical)
+    {
+        s32 jid2, kk2;
+        /* spawn-translate snapshot for every UNMAPPED registry joint:
+         * accessory mounts (link's sword/shield/sheath joints) keep
+         * static local offsets sized for the tall vanilla body. Each
+         * tick they are SET to snapshot*scale — a per-tick multiply
+         * compounded on joints the animation never rewrites and
+         * collapsed the gear onto its parents. */
+        for (jid2 = 0; jid2 < 64; jid2++)
+        {
+            o->can_snap_have[jid2] = 0;
+            o->can_interior[jid2] = 0;
+        }
+        /* interior = ancestors of mapped joints (walk each mapped
+         * joint's DObj parent chain to the root, flagging unmapped
+         * nodes on the way) */
+        for (kk2 = 0; kk2 < o->njoints && kk2 < 32; kk2++)
+        {
+            s32 tid2 = (s32)o->joint_ids[kk2];
+            s32 ptid = -1, pk;
+            DObj *walk, *stopj = NULL;
+            o->can_chainoff[kk2][0] = o->can_chainoff[kk2][1] = o->can_chainoff[kk2][2] = 0.0f;
+            if (tid2 <= 0 || tid2 >= FTPARTS_JOINT_NUM_MAX || fp->joints[tid2] == NULL)
+                continue;
+            pk = (s32)o->can_parent[kk2];
+            if (pk >= 0)
             {
-                o->can_snap_have[jid2] = 0;
-                o->can_interior[jid2] = 0;
+                ptid = (s32)o->joint_ids[pk];
+                if (ptid > 0 && ptid < FTPARTS_JOINT_NUM_MAX)
+                    stopj = fp->joints[ptid];
             }
-            /* interior = ancestors of mapped joints (walk each mapped
-             * joint's DObj parent chain to the root, flagging unmapped
-             * nodes on the way) */
-            for (kk2 = 0; kk2 < o->njoints && kk2 < 32; kk2++)
+            else stopj = fp->joints[0];
+            for (walk = fp->joints[tid2]->parent;
+                 walk != NULL && walk != DOBJ_PARENT_NULL && walk != stopj;
+                 walk = walk->parent)
             {
-                s32 tid2 = (s32)o->joint_ids[kk2];
-                s32 ptid = -1, pk;
-                DObj *walk, *stopj = NULL;
-                o->can_chainoff[kk2][0] = o->can_chainoff[kk2][1] = o->can_chainoff[kk2][2] = 0.0f;
-                if (tid2 <= 0 || tid2 >= FTPARTS_JOINT_NUM_MAX || fp->joints[tid2] == NULL)
-                    continue;
-                pk = (s32)o->can_parent[kk2];
-                if (pk >= 0)
-                {
-                    ptid = (s32)o->joint_ids[pk];
-                    if (ptid > 0 && ptid < FTPARTS_JOINT_NUM_MAX)
-                        stopj = fp->joints[ptid];
-                }
-                else stopj = fp->joints[0];
-                for (walk = fp->joints[tid2]->parent;
-                     walk != NULL && walk != DOBJ_PARENT_NULL && walk != stopj;
-                     walk = walk->parent)
-                {
-                    /* world-space approximation: nub rotations at bind are
-                     * near-identity, so raw translate sums suffice */
-                    o->can_chainoff[kk2][0] += walk->translate.vec.f.x;
-                    o->can_chainoff[kk2][1] += walk->translate.vec.f.y;
-                    o->can_chainoff[kk2][2] += walk->translate.vec.f.z;
-                }
+                /* world-space approximation: nub rotations at bind are
+                 * near-identity, so raw translate sums suffice */
+                o->can_chainoff[kk2][0] += walk->translate.vec.f.x;
+                o->can_chainoff[kk2][1] += walk->translate.vec.f.y;
+                o->can_chainoff[kk2][2] += walk->translate.vec.f.z;
             }
-            if (getenv("SSB64_NO_INTERIOR") == NULL)
+        }
+        if (getenv("SSB64_NO_INTERIOR") == NULL)
+        for (kk2 = 0; kk2 < o->njoints; kk2++)
+        {
+            s32 tid2 = (s32)o->joint_ids[kk2];
+            DObj *walk;
+            if (tid2 <= 0 || tid2 >= FTPARTS_JOINT_NUM_MAX) continue;
+            if (fp->joints[tid2] == NULL) continue;
+            for (walk = fp->joints[tid2]->parent;
+                 walk != NULL && walk != DOBJ_PARENT_NULL;
+                 walk = walk->parent)
+            {
+                s32 wj;
+                for (wj = 1; wj < FTPARTS_JOINT_NUM_MAX && wj < 64; wj++)
+                    if (fp->joints[wj] == walk) { o->can_interior[wj] = 1; break; }
+            }
+        }
+        for (jid2 = 1; jid2 < FTPARTS_JOINT_NUM_MAX && jid2 < 64; jid2++)
+        {
+            s32 m = 0;
+            if (fp->joints[jid2] == NULL) continue;
             for (kk2 = 0; kk2 < o->njoints; kk2++)
-            {
-                s32 tid2 = (s32)o->joint_ids[kk2];
-                DObj *walk;
-                if (tid2 <= 0 || tid2 >= FTPARTS_JOINT_NUM_MAX) continue;
-                if (fp->joints[tid2] == NULL) continue;
-                for (walk = fp->joints[tid2]->parent;
-                     walk != NULL && walk != DOBJ_PARENT_NULL;
-                     walk = walk->parent)
-                {
-                    s32 wj;
-                    for (wj = 1; wj < FTPARTS_JOINT_NUM_MAX && wj < 64; wj++)
-                        if (fp->joints[wj] == walk) { o->can_interior[wj] = 1; break; }
-                }
-            }
-            for (jid2 = 1; jid2 < FTPARTS_JOINT_NUM_MAX && jid2 < 64; jid2++)
-            {
-                s32 m = 0;
-                if (fp->joints[jid2] == NULL) continue;
-                for (kk2 = 0; kk2 < o->njoints; kk2++)
-                    if ((s32)o->joint_ids[kk2] == jid2) { m = 1; break; }
-                if (m) continue;
-                o->can_snap[jid2][0] = fp->joints[jid2]->translate.vec.f.x;
-                o->can_snap[jid2][1] = fp->joints[jid2]->translate.vec.f.y;
-                o->can_snap[jid2][2] = fp->joints[jid2]->translate.vec.f.z;
-                o->can_snap_have[jid2] = 1;
-            }
+                if ((s32)o->joint_ids[kk2] == jid2) { m = 1; break; }
+            if (m) continue;
+            o->can_snap[jid2][0] = fp->joints[jid2]->translate.vec.f.x;
+            o->can_snap[jid2][1] = fp->joints[jid2]->translate.vec.f.y;
+            o->can_snap[jid2][2] = fp->joints[jid2]->translate.vec.f.z;
+            o->can_snap_have[jid2] = 1;
         }
     }
 
