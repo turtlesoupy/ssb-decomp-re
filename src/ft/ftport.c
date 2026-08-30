@@ -814,6 +814,11 @@ typedef struct OSB5State
     f32 cbind_o[32][3];     /* canonical (mario) bind frames */
     f32 cbind_m[32][3][3];
     f32 tbind_inv[32][3][3];/* target joints' spawn-bind rotation inverses */
+    /* CPM1: battle-bind basis of the target chest's parent. Mario's chest
+     * and hips are sibling branches under this interior body joint; menu
+     * figatrees animate its facing/lean even though TopN stays fixed. */
+    f32 tb_cp_m[3][3];
+    u8 have_tb_cp_m;
     f32 tbind0_inv[3][3];   /* target root (TopN) spawn-bind inverse */
     f32 t0m_attach[3][3];   /* TopN rotation at attach: the plain-DL
                              * display path never rebuilds the root's
@@ -2513,9 +2518,22 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
     {
         static f32 rd[32][3][3];
         static f32 vjo[32][3];
-        f32 rd0[3][3], tmp[3][3], t0a[3];
+        f32 rd0[3][3], rdroot[3][3], tmp[3][3], t0a[3];
         s32 kk, r;
         osb5_mul3(rd0, t0m, o->tbind0_inv);
+        memcpy(rdroot, rd0, sizeof(rdroot));
+        if (osb5_on_menu_scene() && o->have_tb_cp_m)
+        {
+            DObj *chest = fp->joints[(s32)o->joint_ids[0]];
+            if (chest != NULL && chest->parent != NULL &&
+                chest->parent != DOBJ_PARENT_NULL)
+            {
+                f32 cpo[3], cpm[3][3], cpinv[3][3];
+                osb5_dobj_frame(chest->parent, cpo, cpm);
+                osb5_inv3(o->tb_cp_m, cpinv);
+                osb5_mul3(rdroot, cpm, cpinv);
+            }
+        }
         /* the interior chain (TopN -> TransN/XRotN/YRotN -> chest) carries
          * TRANSLATE channels some figatrees animate: the appear beams the
          * body in from z=-323, crouches drop it — the vanilla mesh follows
@@ -2556,7 +2574,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 d[1] = o->cbind_o[kk][1] - o->can_root[1];
                 d[2] = o->cbind_o[kk][2] - o->can_root[2];
                 for (r = 0; r < 3; r++)
-                    vjo[kk][r] = t0a[r] + rd0[r][0]*d[0] + rd0[r][1]*d[1] + rd0[r][2]*d[2];
+                    vjo[kk][r] = t0a[r] + rdroot[r][0]*d[0] + rdroot[r][1]*d[1] + rdroot[r][2]*d[2];
             }
             else
             {
@@ -3144,6 +3162,13 @@ static void osb5_load(FTStruct *fp, FILE *f)
             }
             o->have_tbnd = (u8)(ok2 ? 1 : 0);
             port_log("OSB5: baked target bind %s\n", ok2 ? "loaded" : "TRUNCATED");
+            have_tag = (fread(tag, 1, 4, f) == 4);
+        }
+        if (have_tag && tag[0] == 'C' && tag[1] == 'P' && tag[2] == 'M' && tag[3] == '1')
+        {
+            o->have_tb_cp_m = (u8)(fread(o->tb_cp_m, 4, 9, f) == 9);
+            port_log("OSB5: chest-parent bind %s\n",
+                     o->have_tb_cp_m ? "loaded" : "TRUNCATED");
             have_tag = (fread(tag, 1, 4, f) == 4);
         }
         }
