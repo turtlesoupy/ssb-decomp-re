@@ -750,6 +750,16 @@ typedef struct OSB5State
      * through any pose. */
     s32 naccs;
     struct { u32 joint; u32 vert; f32 embed; } accs[8];
+    /* negative embed flags ORIENT-FOLLOW: the accessory's rotation is
+     * slaved to the virtual chest (rd_chest * bind frame) instead of
+     * replaying the vanilla anim rotation — DK's tie pointed into the
+     * upright chibi body because its vanilla "hang down" was authored
+     * against DK's horizontal chest. Bind frames captured at inject. */
+    f32 acc_bind_m[8][3][3];
+    s8 acc_bind_have;
+    f32 acc_pitch[8];       /* ACC3: local pitch offset per pin */
+    f32 acc_orient[8];      /* ACC3: 1.0 = orient-follow the chest */
+    f32 acc_scale[8];       /* ACC3: DL scale for the pinned joint (0 = 1) */
     OSB5Vert *src;          /* source verts, spawn-world space */
     f32 (*bind_local)[4][3];/* per vert, per influence: joint-local coords */
     f32 (*bind_nrm)[4][3];  /* per vert, per influence: joint-local normal */
@@ -2587,6 +2597,47 @@ void port_osb5_skin_update(GObj *fighter_gobj)
         aj->translate.vec.f.x = lo[0];
         aj->translate.vec.f.y = lo[1];
         aj->translate.vec.f.z = lo[2];
+        if (o->acc_orient[k] > 0.5f && o->canonical && o->acc_bind_have &&
+            sOsb5LateSeat[fp->player].valid)
+        {
+            /* orient-follow: world rotation = chest delta * bind frame;
+             * write parent-local euler in the engine's XYZ convention and
+             * refresh the collision snapshot so the display sees it */
+            extern float asinf(float);
+            extern float atan2f(float, float);
+            f32 Wt[3][3], L[3][3];
+            f32 pre_x = aj->rotate.vec.f.x, pre_y = aj->rotate.vec.f.y, pre_z = aj->rotate.vec.f.z;
+            FTParts *apt = (FTParts *)aj->user_data.p;
+            osb5_mul3(Wt, sOsb5LateSeat[fp->player].rd[0], o->acc_bind_m[k]);
+            osb5_mul3(L, pinv, Wt);
+            aj->rotate.vec.f.x = atan2f(L[2][1], L[2][2]);
+            aj->rotate.vec.f.y = asinf(-(L[2][0] > 1.0f ? 1.0f : (L[2][0] < -1.0f ? -1.0f : L[2][0])));
+            aj->rotate.vec.f.z = atan2f(L[1][0], L[0][0]);
+            aj->rotate.vec.f.x += o->acc_pitch[k];
+            if (o->acc_scale[k] > 0.0f)
+            {
+                aj->scale.vec.f.x = o->acc_scale[k];
+                aj->scale.vec.f.y = o->acc_scale[k];
+                aj->scale.vec.f.z = o->acc_scale[k];
+            }
+            if (getenv("SSB64_ACC_DEBUG") != NULL)
+            {
+                static s32 sAccDbg = 0;
+                FTParts *dbgpt = (FTParts *)aj->user_data.p;
+                if (sAccDbg < 12000 && ((sAccDbg++ % 60) == 0))
+                    port_log("ACCDBG j=%d pre=(%.2f %.2f %.2f) post=(%.2f %.2f %.2f) rd00=%.2f rd02=%.2f mode=%d\n",
+                             jid, pre_x, pre_y, pre_z,
+                             aj->rotate.vec.f.x, aj->rotate.vec.f.y, aj->rotate.vec.f.z,
+                             sOsb5LateSeat[fp->player].rd[0][0][0],
+                             sOsb5LateSeat[fp->player].rd[0][0][2],
+                             dbgpt != NULL ? (int)dbgpt->transform_update_mode : -1);
+            }
+            if (apt != NULL && apt->transform_update_mode != 0)
+            {
+                extern void gmCollisionTransformMatrixAll(DObj *dobj, FTParts *parts, Mtx44f mtx);
+                gmCollisionTransformMatrixAll(aj, apt, apt->unk_dobjtrans_0x10);
+            }
+        }
     }
 
     if (getenv("SSB64_SKIN_FRAMES_ONLY") != NULL) return;
@@ -2740,6 +2791,7 @@ static void osb5_load(FTStruct *fp, FILE *f)
     o->nverts = (s32)nverts;
     o->nblank = 0;
     o->naccs = 0;
+    for (k = 0; k < 8; k++) { o->acc_pitch[k] = 0.0f; o->acc_orient[k] = 0.0f; o->acc_scale[k] = 0.0f; }
     o->fit_scale = 1.0f;
     o->scl_applied = 0.0f;
     fread(o->joint_ids, 4, njoints, f);
@@ -2827,6 +2879,25 @@ static void osb5_load(FTStruct *fp, FILE *f)
                 }
                 o->naccs = (s32)k;
                 port_log("OSB5: %d accessory vertex pin(s)\n", o->naccs);
+            }
+            have_tag = (fread(tag, 1, 4, f) == 4);
+        }
+        if (have_tag && tag[0] == 'A' && tag[1] == 'C' && tag[2] == 'C' && tag[3] == '3')
+        {
+            /* per-pin: pitch offset + orient flag */
+            u32 np = 0;
+            if (fread(&np, 4, 1, f) == 1 && np <= 8)
+            {
+                u32 pk;
+                for (pk = 0; pk < np; pk++)
+                {
+                    f32 pp2[3];
+                    if (fread(pp2, 4, 3, f) != 3) break;
+                    o->acc_pitch[pk] = pp2[0];
+                    o->acc_orient[pk] = pp2[1];
+                    o->acc_scale[pk] = pp2[2];
+                }
+                port_log("OSB5: %u accessory pitch/orient entries\n", np);
             }
             have_tag = (fread(tag, 1, 4, f) == 4);
         }
@@ -2941,6 +3012,19 @@ static void osb5_load(FTStruct *fp, FILE *f)
             s32 jid2, kk2;
             osb5_joint_frame(fp, 0, tjo, tjm);
             osb5_inv3(tjm, o->tbind0_inv);
+            o->acc_bind_have = 0;
+            {
+                s32 ak;
+                for (ak = 0; ak < o->naccs && ak < 8; ak++)
+                {
+                    s32 ajid = (s32)o->accs[ak].joint;
+                    DObj *adj = (ajid > 0 && ajid < FTPARTS_JOINT_NUM_MAX) ? fp->joints[ajid] : NULL;
+                    f32 ao_[3];
+                    if (adj != NULL)
+                        osb5_dobj_frame(adj, ao_, o->acc_bind_m[ak]);
+                }
+                o->acc_bind_have = 1;
+            }
             o->cint_bind[0] = o->cint_bind[1] = o->cint_bind[2] = 0.0f;
             {
                 DObj *cj = fp->joints[(s32)o->joint_ids[0]];
