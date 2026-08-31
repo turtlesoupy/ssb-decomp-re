@@ -1100,6 +1100,13 @@ void scManagerRunLoop(sb32 arg)
 			/* ---- character-select inputs ---- */
 			sMNPlayersVSGameRule     = SCBATTLE_GAMERULE_STOCK;
 			sMNPlayersVSStockValue   = 4;                          /* 0-based: 5 stocks */
+			{
+				/* SSB64_STOCKS=<1..5>: results-screen debugging wants a
+				 * one-stock match a scripted SD can end in seconds */
+				const char *stk = getenv("SSB64_STOCKS");
+				if (stk != NULL && stk[0] >= '1' && stk[0] <= '5')
+					sMNPlayersVSStockValue = (s32)(stk[0] - '1');
+			}
 			sMNPlayersVSTimeValue    = SCBATTLE_TIMELIMIT_INFINITE;
 			sMNPlayersVSIsTeamBattle = FALSE;
 
