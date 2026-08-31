@@ -2764,6 +2764,96 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             }
             memcpy(jo[kk], vjo[kk], sizeof(vjo[kk]));
         }
+        /* Ground-contact pass: chibi bone lengths walked along live
+         * directions don't close the leg chains onto a common floor —
+         * the target's stance angles assume ITS proportions, so one
+         * virtual foot lands high and the other low (blake-ness). When
+         * the live pose has both feet planted (level), scale each leg
+         * chain uniformly so its foot sits at the canonical bind's own
+         * ankle height. Lifted-foot poses are left alone. */
+        if (osb5_on_menu_scene() && osb5_target_is_upright_biped((s32)fp->fkind))
+        {
+            s32 leg_root[2], leg_foot[2], nlegs = 0, li;
+            for (kk = 1; kk < o->njoints; kk++)
+            {
+                s32 cc, foot = -1;
+                f32 besty = 1e9f;
+                if ((s32)o->can_parent[kk] >= 0) continue;
+                for (cc = 0; cc < o->njoints; cc++)
+                {
+                    s32 a = cc, hit = (cc == kk), c2, nch = 0;
+                    while (!hit && (s32)o->can_parent[a] >= 0)
+                    {
+                        a = (s32)o->can_parent[a];
+                        if (a == kk) hit = 1;
+                    }
+                    if (!hit) continue;
+                    for (c2 = 0; c2 < o->njoints; c2++)
+                        if ((s32)o->can_parent[c2] == cc) nch++;
+                    if (nch == 0 && o->cbind_o[cc][1] < besty)
+                    {
+                        besty = o->cbind_o[cc][1];
+                        foot = cc;
+                    }
+                }
+                if (foot >= 0 && nlegs < 2)
+                {
+                    leg_root[nlegs] = kk;
+                    leg_foot[nlegs] = foot;
+                    nlegs++;
+                }
+            }
+            if (nlegs == 2)
+            {
+                f32 span0 = live_jo[leg_root[0]][1] - live_jo[leg_foot[0]][1];
+                f32 span1 = live_jo[leg_root[1]][1] - live_jo[leg_foot[1]][1];
+                f32 span = (span0 > span1) ? span0 : span1;
+                f32 dlv = live_jo[leg_foot[0]][1] - live_jo[leg_foot[1]][1];
+                if (dlv < 0.0f) dlv = -dlv;
+                if (span > 1.0f && dlv < 0.20f*span)
+                {
+                    static f32 oldv[32][3];
+                    f32 gcommon;
+                    {
+                        /* one floor for both feet: the canonical bind's own
+                         * ankle heights differ slightly, and per-foot
+                         * targets would keep the feet visibly staggered */
+                        f32 g0 = o->cbind_o[leg_foot[0]][1] - o->can_root[1];
+                        f32 g1 = o->cbind_o[leg_foot[1]][1] - o->can_root[1];
+                        gcommon = (g0 < g1) ? g0 : g1;
+                    }
+                    memcpy(oldv, vjo, sizeof(oldv));
+                    for (li = 0; li < 2; li++)
+                    {
+                        s32 hip = leg_root[li], foot = leg_foot[li];
+                        f32 ground = t0a[1] + gcommon;
+                        f32 dropc = vjo[hip][1] - vjo[foot][1];
+                        f32 s;
+                        if (dropc < 1.0f) continue;
+                        s = (vjo[hip][1] - ground) / dropc;
+                        if (s < 0.7f) s = 0.7f;
+                        if (s > 1.4f) s = 1.4f;
+                        if (getenv("SSB64_FOOT_DBG") != NULL)
+                        {
+                            static s32 sFootDbg = 0;
+                            if (sFootDbg++ < 40)
+                                port_log("FOOTDBG hip=%d foot=%d hipY=%.1f footY=%.1f ground=%.1f s=%.3f\n",
+                                         hip, foot, vjo[hip][1], vjo[foot][1], ground, s);
+                        }
+                        for (kk = 0; kk < o->njoints; kk++)
+                        {
+                            s32 pp = (s32)o->can_parent[kk], a = kk;
+                            if (pp < 0) continue;
+                            while ((s32)o->can_parent[a] >= 0) a = (s32)o->can_parent[a];
+                            if (a != hip) continue;
+                            for (r = 0; r < 3; r++)
+                                vjo[kk][r] = vjo[pp][r] + s*(oldv[kk][r] - oldv[pp][r]);
+                            memcpy(jo[kk], vjo[kk], sizeof(vjo[kk]));
+                        }
+                    }
+                }
+            }
+        }
         if (getenv("SSB64_TN_DEBUG") != NULL)
         {
             static s32 sArmDbg = 0;
