@@ -853,6 +853,11 @@ typedef struct OSB5State
                              * translation is absorbed by the mapped child's
                              * exact virtual-local -> emit ZERO translation */
     GObj *owner;
+    s32 owner_scene;        /* scene the owner was attached on: a scene
+                             * change frees the whole GObj arena, so a
+                             * cross-scene owner pointer is DEAD and must
+                             * never be dereferenced (results-screen crash
+                             * in osb5_release_owner) */
     /* GObjs are pool-allocated: after the owner despawns (match end, CSS
      * chip move) the next fighter can reuse the same address, and a bare
      * pointer match would blank a VANILLA fighter's joints (the broken
@@ -3600,7 +3605,17 @@ static void osb5_load(FTStruct *fp, FILE *f)
     }
     if (o->owner != NULL && o->owner != fp->fighter_gobj)
     {
-        osb5_release_owner(o);
+        extern s32 port_current_scene(void);
+        if (o->owner_scene == port_current_scene())
+        {
+            osb5_release_owner(o);
+        }
+        else
+        {
+            /* the owner died with its scene's arena — the pointer is
+             * dangling and even the liveness test would fault */
+            o->owner = NULL;
+        }
     }
     memset(o->saved_dv, 0, sizeof(o->saved_dv));
     memset(o->saved_dv_valid, 0, sizeof(o->saved_dv_valid));
@@ -4175,6 +4190,10 @@ static void osb5_load(FTStruct *fp, FILE *f)
     }
     o->owner = fp->fighter_gobj;
     o->owner_fkind = (s32)fp->fkind;
+    {
+        extern s32 port_current_scene(void);
+        o->owner_scene = port_current_scene();
+    }
     o->owner_char = sInjectCharIdx;
     o->dbg_ticks = 0;
     o->fills = 0;
