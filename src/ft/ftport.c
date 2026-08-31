@@ -2598,6 +2598,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         static f32 rd[32][3][3];
         static f32 vjo[32][3];
         static f32 live_jo[32][3];
+        static f32 live_jup[32][3];
         f32 rd0[3][3], rdroot[3][3], tmp[3][3], t0a[3];
         f32 cp_po[3];
         static f32 rootfix[32][3][3];
@@ -2647,6 +2648,17 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         }
         for (kk = 0; kk < o->njoints; kk++)
         {
+            if (getenv("SSB64_MAP_DBG") != NULL)
+            {
+                static s32 sMapDbg = 0;
+                if (sMapDbg++ < 64)
+                    port_log("MAPDBG kk=%d tid=%d par=%d cb=(%.0f,%.0f,%.0f) liveup=(%.2f,%.2f,%.2f)\n",
+                             kk, (s32)o->joint_ids[kk], (s32)o->can_parent[kk],
+                             o->cbind_o[kk][0], o->cbind_o[kk][1], o->cbind_o[kk][2],
+                             jm[kk][0][1], jm[kk][1][1], jm[kk][2][1]);
+            }
+            for (r = 0; r < 3; r++)
+                live_jup[kk][r] = jm[kk][r][1];
             osb5_mul3(rd[kk], jm[kk], o->tbind_inv[kk]);
             osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
             memcpy(jm[kk], tmp, sizeof(tmp));
@@ -2730,6 +2742,50 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
                 memcpy(jm[kk], tmp, sizeof(tmp));
             }
+            }
+            /* The head is a TERMINAL chest-branch slot — no child segment
+             * to aim along, so its frame kept the raw TBND delta, and the
+             * target's neck yaw composed through it rolls the big chibi
+             * head sideways (moritz). Aim the head frame's up-vector at
+             * the LIVE head's up-vector instead: the lateral lean matches
+             * vanilla's (upright) and the forward nod is foreshortened on
+             * the card view. */
+            if (osb5_target_is_upright_biped((s32)fp->fkind))
+            {
+                s32 hd = -1, cc;
+                f32 besty = -1e9f;
+                for (kk = 1; kk < o->njoints; kk++)
+                {
+                    s32 a = kk, nch = 0;
+                    while ((s32)o->can_parent[a] >= 0) a = (s32)o->can_parent[a];
+                    if (a != 0) continue;
+                    for (cc = 0; cc < o->njoints; cc++)
+                        if ((s32)o->can_parent[cc] == kk) nch++;
+                    if (nch == 0 && o->cbind_o[kk][1] > besty)
+                    {
+                        besty = o->cbind_o[kk][1];
+                        hd = kk;
+                    }
+                }
+                if (hd >= 0)
+                {
+                    /* the head mesh's rendered up-axis is rd applied to
+                     * world up (verts transform by rd relative to the
+                     * upright canonical bind) — NOT jm's y column, which
+                     * bakes in the canonical head frame convention. Undo
+                     * rd's tilt of world up so the head renders upright
+                     * as in its bind, keeping the target's head yaw. */
+                    f32 from[3], to[3], arot[3][3], fixed[3][3];
+                    from[0] = rd[hd][0][1];
+                    from[1] = rd[hd][1][1];
+                    from[2] = rd[hd][2][1];
+                    to[0] = 0.0f; to[1] = 1.0f; to[2] = 0.0f;
+                    osb5_align3(from, to, arot);
+                    osb5_mul3(fixed, arot, rd[hd]);
+                    memcpy(rd[hd], fixed, sizeof(fixed));
+                    osb5_mul3(tmp, rd[hd], o->cbind_m[hd]);
+                    memcpy(jm[hd], tmp, sizeof(tmp));
+                }
             }
         }
         for (kk = 0; kk < o->njoints; kk++)
@@ -2853,6 +2909,15 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                     }
                 }
             }
+        }
+        if (getenv("SSB64_MAP_DBG") != NULL)
+        {
+            static s32 sMapDbg2 = 0;
+            if (sMapDbg2 < 64)
+                for (kk = 0; kk < o->njoints; kk++, sMapDbg2++)
+                    port_log("MAPDBG2 kk=%d vup=(%.2f,%.2f,%.2f) vjo=(%.0f,%.0f,%.0f)\n",
+                             kk, jm[kk][0][1], jm[kk][1][1], jm[kk][2][1],
+                             vjo[kk][0], vjo[kk][1], vjo[kk][2]);
         }
         if (getenv("SSB64_TN_DEBUG") != NULL)
         {
