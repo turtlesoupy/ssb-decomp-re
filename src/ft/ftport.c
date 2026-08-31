@@ -1632,6 +1632,49 @@ static void osb5_inv3(f32 m[3][3], f32 out[3][3])
     out[2][0] = C/det;            out[2][1] = -(a*h - b*g)/det;  out[2][2] = (a*e - b*d)/det;
 }
 
+/* Smallest rigid rotation that aims one world-space direction at another.
+ * Menu figatrees animate only a subset of the fighter hierarchy, so the
+ * canonical arm frames occasionally need their direction recovered from
+ * the live target joint positions. */
+static void osb5_align3(f32 from[3], f32 to[3], f32 out[3][3])
+{
+    f32 a[3], b[3], v[3], la, lb, c, s2, k;
+    s32 r, q;
+    la = sqrtf(from[0]*from[0] + from[1]*from[1] + from[2]*from[2]);
+    lb = sqrtf(to[0]*to[0] + to[1]*to[1] + to[2]*to[2]);
+    for (r = 0; r < 3; r++) for (q = 0; q < 3; q++) out[r][q] = (r == q) ? 1.0f : 0.0f;
+    if (la < 1e-6f || lb < 1e-6f) return;
+    for (r = 0; r < 3; r++) { a[r] = from[r] / la; b[r] = to[r] / lb; }
+    c = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    v[0] = a[1]*b[2] - a[2]*b[1];
+    v[1] = a[2]*b[0] - a[0]*b[2];
+    v[2] = a[0]*b[1] - a[1]*b[0];
+    s2 = v[0]*v[0] + v[1]*v[1] + v[2]*v[2];
+    if (s2 < 1e-8f)
+    {
+        if (c > 0.0f) return;
+        if (a[0] < 0.8f && a[0] > -0.8f)
+        { v[0] = 0.0f; v[1] = -a[2]; v[2] = a[1]; }
+        else
+        { v[0] = -a[1]; v[1] = a[0]; v[2] = 0.0f; }
+        la = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        for (r = 0; r < 3; r++) v[r] /= la;
+        for (r = 0; r < 3; r++) for (q = 0; q < 3; q++)
+            out[r][q] = 2.0f*v[r]*v[q] - ((r == q) ? 1.0f : 0.0f);
+        return;
+    }
+    k = (1.0f - c) / s2;
+    out[0][0] = 1.0f - k*(v[1]*v[1] + v[2]*v[2]);
+    out[0][1] = -v[2] + k*v[0]*v[1];
+    out[0][2] =  v[1] + k*v[0]*v[2];
+    out[1][0] =  v[2] + k*v[1]*v[0];
+    out[1][1] = 1.0f - k*(v[0]*v[0] + v[2]*v[2]);
+    out[1][2] = -v[0] + k*v[1]*v[2];
+    out[2][0] = -v[1] + k*v[2]*v[0];
+    out[2][1] =  v[0] + k*v[2]*v[1];
+    out[2][2] = 1.0f - k*(v[0]*v[0] + v[1]*v[1]);
+}
+
 /* SSB64_POSE_OVERRIDE=<skel file>: freeze the skinned mesh in the pose
  * given by SKELDUMP2 lines (world frames; x/y/z rows are the axis
  * images, row-vector convention) instead of the live animation —
@@ -1751,6 +1794,17 @@ static PoseOvrSec *pose_override_sec(void)
 }
 
 static struct { f32 vjo[32][3]; f32 rd[32][3][3]; u8 valid; } sOsb5LateSeat[OSB5_PLAYER_SLOTS];
+
+static s32 osb5_canonical_slot_is_arm(OSB5State *o, s32 slot)
+{
+    s32 branch = slot, k;
+    if (slot <= 0 || slot >= o->njoints) return 0;
+    while ((s32)o->can_parent[branch] > 0) branch = (s32)o->can_parent[branch];
+    if ((s32)o->can_parent[branch] != 0) return 0;
+    for (k = 0; k < o->njoints; k++)
+        if ((s32)o->can_parent[k] == branch) return 1;
+    return 0;
+}
 
 /* kind-75 hook: for a MAPPED joint of a canonical fighter, emit the local
  * matrix that composes to EXACTLY the virtual frame under its canonical
@@ -2518,8 +2572,10 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
     {
         static f32 rd[32][3][3];
         static f32 vjo[32][3];
+        static f32 live_jo[32][3];
         f32 rd0[3][3], rdroot[3][3], tmp[3][3], t0a[3];
         s32 kk, r;
+        memcpy(live_jo, jo, sizeof(live_jo));
         osb5_mul3(rd0, t0m, o->tbind0_inv);
         memcpy(rdroot, rd0, sizeof(rdroot));
         if (osb5_on_menu_scene() && o->have_tb_cp_m)
@@ -2563,6 +2619,39 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             osb5_mul3(rd[kk], jm[kk], o->tbind_inv[kk]);
             osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
             memcpy(jm[kk], tmp, sizeof(tmp));
+        }
+        if (osb5_on_menu_scene())
+        {
+            /* CSS figatrees bind only part of the hierarchy. Aim each
+             * one-child arm segment along the target's actual live joint
+             * positions while retaining the canonical segment lengths. */
+            for (kk = 0; kk < o->njoints; kk++)
+            {
+                s32 cc, child = -1, nchild = 0, root = kk;
+                f32 d[3], from[3], to[3], arot[3][3], fixed[3][3];
+                while (o->can_parent[root] >= 0) root = o->can_parent[root];
+                if (root != 0) continue;
+                for (cc = 0; cc < o->njoints; cc++)
+                    if ((s32)o->can_parent[cc] == kk) { child = cc; nchild++; }
+                if (nchild != 1 || !osb5_canonical_slot_is_arm(o, kk)) continue;
+                d[0] = o->cbind_o[child][0] - o->cbind_o[kk][0];
+                d[1] = o->cbind_o[child][1] - o->cbind_o[kk][1];
+                d[2] = o->cbind_o[child][2] - o->cbind_o[kk][2];
+                for (r = 0; r < 3; r++)
+                    from[r] = rd[kk][r][0]*d[0] + rd[kk][r][1]*d[1] + rd[kk][r][2]*d[2];
+                to[0] = live_jo[child][0] - live_jo[kk][0];
+                to[1] = live_jo[child][1] - live_jo[kk][1];
+                to[2] = live_jo[child][2] - live_jo[kk][2];
+                osb5_align3(from, to, arot);
+                osb5_mul3(fixed, arot, rd[kk]);
+                memcpy(rd[kk], fixed, sizeof(fixed));
+                /* rd also places the child joint below. Keep this joint's
+                 * skinning frame in the same corrected orientation; using
+                 * the old jm while moving only the endpoint bends the
+                 * blended surface into a thin rubber-hose arc. */
+                osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
+                memcpy(jm[kk], tmp, sizeof(tmp));
+            }
         }
         for (kk = 0; kk < o->njoints; kk++)
         {
@@ -2832,12 +2921,23 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         f32 acc[3] = {0.0f, 0.0f, 0.0f};
         f32 nacc[3] = {0.0f, 0.0f, 0.0f};
         f32 wl[3], nw[3], nl[3], nlen, wsum = 0.0f;
-        s32 t;
+        s32 t, arm_weight = 0;
+        if (o->canonical && osb5_on_menu_scene())
+        {
+            for (t = 0; t < 4; t++)
+                if (osb5_canonical_slot_is_arm(o, (s32)v->j[t]))
+                    arm_weight += (s32)v->w[t];
+        }
         for (t = 0; t < 4; t++)
         {
             f32 w = (f32)v->w[t] / 255.0f;
             f32 *bl, *bn;
             s32 kk = v->j[t];
+            /* Concentrate the broad source arm weights around their
+             * dominant segment in the sharply bent CSS poses. Normalizing
+             * below retains a small elbow blend without the rubber-hose
+             * silhouette produced by the raw feathered weights. */
+            if (arm_weight >= 128) w = w*w;
             if (w <= 0.0f) continue;
             bl = o->bind_local[i][t];
             bn = o->bind_nrm[i][t];
