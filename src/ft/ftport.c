@@ -784,6 +784,14 @@ typedef struct OSB5State
      * and re-multiply. */
     f32 fit_scale;
     f32 scl_applied;
+    /* chibi/vanilla leg-length ratio, computed lazily from the mapped leg
+     * chains (cbind vs live segment distances; distances are rigid so any
+     * pose works). 0 = not yet computed. Scales the interior-translate
+     * VERTICAL deviation: anims drop the body in vanilla units and the
+     * shorter chibi legs can't absorb it, sinking the feet through the
+     * floor (falcon's idle dip was the worst). */
+    f32 leg_ratio;
+    f32 van_leg;            /* vanilla leg chain length (world units) */
     /* Successful skin fills since attach. The DL is attached at the SECOND
      * fill, not the first: the attach-time fill runs inside
      * ftManagerMakeFighter while the fighter still sits at its default
@@ -2697,6 +2705,72 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                     t0a[r] = po[r] - (t0m[r][0]*o->cint_bind[0]
                                     + t0m[r][1]*o->cint_bind[1]
                                     + t0m[r][2]*o->cint_bind[2]);
+                /* Scale the VERTICAL deviation by the chibi/vanilla leg
+                 * ratio: anims drop the body in vanilla units (falcon's
+                 * idle dips deep) and the vanilla legs bend to absorb it;
+                 * the same joint angles on shorter chibi legs absorb only
+                 * ratio*drop, so the feet sank through the floor by the
+                 * difference. Horizontal deviations (the appear beam-in
+                 * z-slide) stay 1:1. */
+                if (osb5_target_is_upright_biped((s32)fp->fkind) &&
+                    getenv("SSB64_NO_DEVFIT") == NULL)
+                {
+                    if (o->leg_ratio <= 0.0f)
+                    {
+                        f32 csum = 0.0f, vsum = 0.0f;
+                        s32 k3;
+                        for (k3 = 1; k3 < o->njoints; k3++)
+                        {
+                            s32 cc2, foot = -1, a2;
+                            f32 besty = 1e9f;
+                            if ((s32)o->can_parent[k3] >= 0) continue;
+                            for (cc2 = 0; cc2 < o->njoints; cc2++)
+                            {
+                                s32 hit = (cc2 == k3), nch = 0, c3;
+                                a2 = cc2;
+                                while (!hit && (s32)o->can_parent[a2] >= 0)
+                                {
+                                    a2 = (s32)o->can_parent[a2];
+                                    if (a2 == k3) hit = 1;
+                                }
+                                if (!hit) continue;
+                                for (c3 = 0; c3 < o->njoints; c3++)
+                                    if ((s32)o->can_parent[c3] == cc2) nch++;
+                                if (nch == 0 && o->cbind_o[cc2][1] < besty)
+                                {
+                                    besty = o->cbind_o[cc2][1];
+                                    foot = cc2;
+                                }
+                            }
+                            if (foot < 0) continue;
+                            a2 = foot;
+                            while ((s32)o->can_parent[a2] >= 0)
+                            {
+                                s32 pp2 = (s32)o->can_parent[a2];
+                                f32 dx = o->cbind_o[a2][0] - o->cbind_o[pp2][0];
+                                f32 dy = o->cbind_o[a2][1] - o->cbind_o[pp2][1];
+                                f32 dz = o->cbind_o[a2][2] - o->cbind_o[pp2][2];
+                                f32 vx = live_jo[a2][0] - live_jo[pp2][0];
+                                f32 vy = live_jo[a2][1] - live_jo[pp2][1];
+                                f32 vz = live_jo[a2][2] - live_jo[pp2][2];
+                                csum += sqrtf(dx*dx + dy*dy + dz*dz);
+                                vsum += sqrtf(vx*vx + vy*vy + vz*vz);
+                                a2 = pp2;
+                            }
+                        }
+                        if (vsum > 1.0f && csum > 1.0f)
+                        {
+                            o->van_leg = vsum * 0.5f;
+                            o->leg_ratio = csum / vsum;
+                            if (o->leg_ratio < 0.3f) o->leg_ratio = 0.3f;
+                            if (o->leg_ratio > 1.5f) o->leg_ratio = 1.5f;
+                            port_log("OSB5: leg ratio %.3f (chibi %.1f / vanilla %.1f)\n",
+                                     o->leg_ratio, csum, vsum);
+                        }
+                    }
+                    if (o->leg_ratio > 0.0f)
+                        t0a[1] = t0o[1] + (t0a[1] - t0o[1]) * o->leg_ratio;
+                }
             }
         }
         for (kk = 0; kk < o->njoints; kk++)
@@ -3004,8 +3078,15 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
          * virtual foot lands high and the other low (blake-ness). When
          * the live pose has both feet planted (level), scale each leg
          * chain uniformly so its foot sits at the canonical bind's own
-         * ankle height. Lifted-foot poses are left alone. */
-        if (osb5_on_menu_scene() && osb5_target_is_upright_biped((s32)fp->fkind))
+         * ankle height. Lifted-foot poses are left alone.
+         * Runs in battle too (falcon's idle trails one chibi foot into
+         * the floor): the extension guard (legs reaching well below the
+         * hips, vs the measured vanilla leg length) keeps it off during
+         * aerial tucks where level feet don't mean planted, and the
+         * levelness weight ramps the correction in smoothly so walking
+         * can't pop as feet pass each other. */
+        if (osb5_target_is_upright_biped((s32)fp->fkind) &&
+            getenv("SSB64_NO_DEVFIT") == NULL)
         {
             s32 leg_root[2], leg_foot[2], nlegs = 0, li;
             for (kk = 1; kk < o->njoints; kk++)
@@ -3043,8 +3124,11 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 f32 span1 = live_jo[leg_root[1]][1] - live_jo[leg_foot[1]][1];
                 f32 span = (span0 > span1) ? span0 : span1;
                 f32 dlv = live_jo[leg_foot[0]][1] - live_jo[leg_foot[1]][1];
+                f32 wlev;
                 if (dlv < 0.0f) dlv = -dlv;
-                if (span > 1.0f && dlv < 0.20f*span)
+                wlev = (span > 1.0f) ? 1.0f - dlv/(0.20f*span) : 0.0f;
+                if (wlev > 0.0f &&
+                    (o->van_leg <= 0.0f || span > 0.35f*o->van_leg))
                 {
                     static f32 oldv[32][3];
                     f32 gcommon;
@@ -3060,13 +3144,19 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                     for (li = 0; li < 2; li++)
                     {
                         s32 hip = leg_root[li], foot = leg_foot[li];
-                        f32 ground = t0a[1] + gcommon;
+                        /* floor = TopN, NOT t0a: the anchor bobs with the
+                         * anim's interior translate (falcon's idle dips it
+                         * ~145 units) and pinning feet to a moving floor
+                         * made them ride the bob (~80 units) — the
+                         * "floating" read. TopN is the actual ground. */
+                        f32 ground = t0o[1] + gcommon;
                         f32 dropc = vjo[hip][1] - vjo[foot][1];
                         f32 s;
                         if (dropc < 1.0f) continue;
                         s = (vjo[hip][1] - ground) / dropc;
                         if (s < 0.7f) s = 0.7f;
                         if (s > 1.4f) s = 1.4f;
+                        s = 1.0f + (s - 1.0f) * wlev;
                         if (getenv("SSB64_FOOT_DBG") != NULL)
                         {
                             static s32 sFootDbg = 0;
@@ -3086,6 +3176,20 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                         }
                     }
                 }
+            }
+        }
+        if (getenv("SSB64_BOB_DBG") != NULL)
+        {
+            static s32 sBobDbg = 0;
+            if ((sBobDbg++ % 5) == 0 && sBobDbg < 3000)
+            {
+                s32 hd2 = 0;
+                f32 by = -1e9f;
+                for (kk = 0; kk < o->njoints; kk++)
+                    if (o->cbind_o[kk][1] > by) { by = o->cbind_o[kk][1]; hd2 = kk; }
+                port_log("BOBDBG t0o=%.1f t0a=%.1f liveHd=%.1f vHd=%.1f vFoot=%.1f\n",
+                         t0o[1], t0a[1], live_jo[hd2][1], vjo[hd2][1],
+                         (vjo[10][1] < vjo[13][1]) ? vjo[10][1] : vjo[13][1]);
             }
         }
         if (getenv("SSB64_MAP_DBG") != NULL)
@@ -3511,6 +3615,8 @@ static void osb5_load(FTStruct *fp, FILE *f)
     sOsb5LateSeat[fp->player].valid = 0;
     for (k = 0; k < 8; k++) { o->acc_pitch[k] = 0.0f; o->acc_orient[k] = 0.0f; o->acc_scale[k] = 0.0f; }
     o->fit_scale = 1.0f;
+    o->leg_ratio = 0.0f;
+    o->van_leg = 0.0f;
     o->scl_applied = 0.0f;
     fread(o->joint_ids, 4, njoints, f);
 
