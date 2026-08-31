@@ -374,6 +374,17 @@ void mpCommonUpdateFighterSlopeContour(GObj *fighter_gobj)
     {
         if ((fp->coll_data.floor_line_id != -1) && (fp->coll_data.floor_line_id != -2) && (fp->hitlag_tics <= 0))
         {
+#ifdef PORT
+            /* Injected canonical bodies skip the per-foot contour bends:
+             * they conform the HIDDEN vanilla feet to the floor under the
+             * VANILLA stance, and the rendered chibi foot sits at a
+             * different world position — it inherits the bend as toes-up
+             * on flat ground near steps (joey-link on Hyrule). The FULL
+             * whole-body slope tilt below still applies. */
+            extern s32 port_osb5_fighter_is_canonical(void *fighter_gobj);
+            if (!port_osb5_fighter_is_canonical(fighter_gobj))
+            {
+#endif
             if (fp->slope_contour & FTSLOPECONTOUR_FLAG_RFOOT)
             {
                 joint = fp->joints[attr->joint_rfoot_id];
@@ -398,6 +409,9 @@ void mpCommonUpdateFighterSlopeContour(GObj *fighter_gobj)
                     func_ovl2_800EBD08(fp->joints[attr->joint_lfoot_id], attr->joint_lfoot_rotate, &sp30, sp2C);
                 }
             }
+#ifdef PORT
+            }
+#endif
             if (fp->slope_contour & FTSLOPECONTOUR_FLAG_FULL)
             {
                 DObjGetStruct(fighter_gobj)->rotate.vec.f.x = (syUtilsArcTan2(fp->coll_data.floor_angle.x, fp->coll_data.floor_angle.y) * fp->lr);

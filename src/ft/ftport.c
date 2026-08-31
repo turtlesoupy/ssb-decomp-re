@@ -1492,6 +1492,24 @@ static s32 osb5_joint_is_blanked(FTStruct *fp, s32 jid)
 
 /* TRUE if this joint's body part is replaced by the attached skinned mesh
  * (modelpart swaps must not resurrect the vanilla part over it). */
+/* Does this fighter GObj wear an injected canonical (morph) body?
+ * Slope-contour foot bends consult this: they conform the HIDDEN vanilla
+ * feet to the floor under the VANILLA stance, and the chibi inherits the
+ * bend at a different world position — toes-up on flat ground near
+ * steps/slopes. */
+s32 port_osb5_fighter_is_canonical(void *fighter_gobj)
+{
+    FTStruct *fp = ftGetStruct((GObj *)fighter_gobj);
+    OSB5State *o;
+    if (fp == NULL)
+    {
+        return 0;
+    }
+    o = osb5_slot((s32)fp->player);
+    return (o != NULL && o->vtx != NULL && o->owner == fighter_gobj &&
+            (s32)fp->fkind == o->owner_fkind && o->canonical);
+}
+
 s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
 {
     s32 k;
