@@ -6,7 +6,7 @@ N64 decompilation of Super Smash Bros. The goal is to produce C source code that
 
 ### This fork
 
-This is the SSB64 PC port's decomp submodule (`turtlesoupy/ssb-decomp-re`, branch `wasm`), not a plain upstream checkout. It carries upstream's tree plus the port delta — `#ifdef PORT` blocks throughout `src/` and `include/`.
+This is the SSB64 PC port's decomp submodule (`turtlesoupy/ssb-decomp-re`, branch `main`), not a plain upstream checkout. It carries upstream's tree plus the port delta — `#ifdef PORT` blocks throughout `src/` and `include/`.
 
 - **Upstream:** `VetriTheRetri/ssb-decomp-re` (remote `upstream`). JRickey's fork is remote `jrickey`; it still holds the `port-patches` and `armeabi-v7a-ilp32` branches. Do not point `upstream` at JRickey — it has been frozen since April and `git fetch` will report 0 new commits while hiding the real ones.
 - **Fork point:** `efe9b01b` (upstream's 100% commit), merged in 2026-08-26. The previous fork point was `977cf4780` (2026-05-03); branch `wasm-pre-rebase` preserves the tree from before that merge.
