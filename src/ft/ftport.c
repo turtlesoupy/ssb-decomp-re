@@ -2880,6 +2880,48 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                         rz[2][0] = 0.0f; rz[2][1] = 0.0f; rz[2][2] = 1.0f;
                         osb5_mul3(fixed, rz, rd[hd]);
                         memcpy(rd[hd], fixed, sizeof(fixed));
+                        /* DYNAMIC pitch: the delta's absolute pitch is
+                         * untrustworthy per rig (falcon's bind reads -33°
+                         * while his card head is upright), but its CHANGE
+                         * during an anim is real — luigi's entry bow dips
+                         * the head ~a radian for ~30 frames. Track a
+                         * slow, excursion-gated baseline per player and
+                         * re-apply only the deviation, so the wait pose
+                         * keeps the approved upright look and fidget/
+                         * entry bows carry over. */
+                        {
+                            extern int port_get_frame_count(void);
+                            static struct { f32 base; s32 last; u8 valid; } sHp[OSB5_PLAYER_SLOTS];
+                            s32 nowt = (s32)port_get_frame_count();
+                            f32 p = atan2f(to[2], to[1]), pd, cx2, sx2;
+                            f32 rx[3][3];
+                            if (fp->player >= 0 && fp->player < OSB5_PLAYER_SLOTS)
+                            {
+                                if (!sHp[fp->player].valid || nowt - sHp[fp->player].last > 30 ||
+                                    nowt < sHp[fp->player].last)
+                                {
+                                    sHp[fp->player].base = p;
+                                    sHp[fp->player].valid = 1;
+                                }
+                                else
+                                {
+                                    f32 d2 = p - sHp[fp->player].base;
+                                    if (d2 < 0.30f && d2 > -0.30f)
+                                        sHp[fp->player].base += 0.08f*d2;
+                                }
+                                sHp[fp->player].last = nowt;
+                                pd = p - sHp[fp->player].base;
+                            }
+                            else pd = 0.0f;
+                            if (pd > 1.2f) pd = 1.2f;
+                            if (pd < -1.2f) pd = -1.2f;
+                            cx2 = cosf(pd); sx2 = sinf(pd);
+                            rx[0][0] = 1.0f; rx[0][1] = 0.0f; rx[0][2] = 0.0f;
+                            rx[1][0] = 0.0f; rx[1][1] = cx2;  rx[1][2] = -sx2;
+                            rx[2][0] = 0.0f; rx[2][1] = sx2;  rx[2][2] = cx2;
+                            osb5_mul3(fixed, rx, rd[hd]);
+                            memcpy(rd[hd], fixed, sizeof(fixed));
+                        }
                         osb5_mul3(tmp, rd[hd], o->cbind_m[hd]);
                         memcpy(jm[hd], tmp, sizeof(tmp));
                     }
