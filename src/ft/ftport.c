@@ -2734,8 +2734,13 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                  * the same joint angles on shorter chibi legs absorb only
                  * ratio*drop, so the feet sank through the floor by the
                  * difference. Horizontal deviations (the appear beam-in
-                 * z-slide) stay 1:1. */
-                if (osb5_target_is_upright_biped((s32)fp->fkind) &&
+                 * z-slide) stay 1:1.
+                 * BATTLE ONLY: on menu scenes this scaling changed the
+                 * approved card poses (body height rides the anim's
+                 * interior deviation there), and the cards already have
+                 * their own ground-contact planting. */
+                if (!osb5_on_menu_scene() &&
+                    osb5_target_is_upright_biped((s32)fp->fkind) &&
                     getenv("SSB64_NO_DEVFIT") == NULL)
                 {
                     if (o->leg_ratio <= 0.0f)
@@ -3148,10 +3153,20 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 f32 span = (span0 > span1) ? span0 : span1;
                 f32 dlv = live_jo[leg_foot[0]][1] - live_jo[leg_foot[1]][1];
                 f32 wlev;
+                s32 on_menu = osb5_on_menu_scene();
                 if (dlv < 0.0f) dlv = -dlv;
-                wlev = (span > 1.0f) ? 1.0f - dlv/(0.20f*span) : 0.0f;
+                /* MENU scenes keep the original hard cutoff with FULL
+                 * planting: card poses (ness) hold a slight live foot
+                 * stagger, and the battle ramp's partial correction left
+                 * one chibi foot visibly lifted on the card. The smooth
+                 * ramp exists for battle only, where walking feet pass
+                 * each other every stride. */
+                if (on_menu)
+                    wlev = (span > 1.0f && dlv < 0.20f*span) ? 1.0f : 0.0f;
+                else
+                    wlev = (span > 1.0f) ? 1.0f - dlv/(0.20f*span) : 0.0f;
                 if (wlev > 0.0f &&
-                    (o->van_leg <= 0.0f || span > 0.35f*o->van_leg))
+                    (on_menu || o->van_leg <= 0.0f || span > 0.35f*o->van_leg))
                 {
                     static f32 oldv[32][3];
                     f32 gcommon;
@@ -3167,12 +3182,14 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                     for (li = 0; li < 2; li++)
                     {
                         s32 hip = leg_root[li], foot = leg_foot[li];
-                        /* floor = TopN, NOT t0a: the anchor bobs with the
-                         * anim's interior translate (falcon's idle dips it
-                         * ~145 units) and pinning feet to a moving floor
-                         * made them ride the bob (~80 units) — the
-                         * "floating" read. TopN is the actual ground. */
-                        f32 ground = t0o[1] + gcommon;
+                        /* BATTLE floor = TopN, NOT t0a: the anchor bobs
+                         * with the anim's interior translate (falcon's
+                         * idle dips it ~145 units) and pinning feet to a
+                         * moving floor made them ride the bob (~80 units).
+                         * MENU scenes keep the original t0a floor — the
+                         * approved card poses were planted against it,
+                         * and the t0o anchor shifted them. */
+                        f32 ground = (on_menu ? t0a[1] : t0o[1]) + gcommon;
                         f32 dropc = vjo[hip][1] - vjo[foot][1];
                         f32 s;
                         if (dropc < 1.0f) continue;
