@@ -2492,16 +2492,54 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
     /* Variant fit scale: multiply into the root joint scale, rebasing
      * whenever an external writer (CSS card scale, results screen) has
      * replaced our last value. Root joint 0 (TopN) sits at ground level,
-     * so the character scales about its feet. */
-    if (o->fit_scale < 0.995f && fp->joints[0] != NULL)
+     * so the character scales about its feet.
+     * On menu scenes an extra per-target factor tames the ball-mode
+     * big heads: the CSS card zoom is tuned for the small vanilla
+     * kirby/purin silhouettes and the giant canonical head overflows
+     * the tile. rd carries root scale, so the whole virtual skeleton
+     * and mesh follow. SSB64_MENU_FIT="8=0.5,10=0.5" overrides. */
     {
-        f32 cur = fp->joints[0]->scale.vec.f.x;
-        if (cur != o->scl_applied && cur > 0.0f)
+        f32 menu_fit = 1.0f;
+        if (o->canonical && osb5_on_menu_scene())
         {
-            o->scl_applied = cur * o->fit_scale;
-            fp->joints[0]->scale.vec.f.x = o->scl_applied;
-            fp->joints[0]->scale.vec.f.y = o->scl_applied;
-            fp->joints[0]->scale.vec.f.z = o->scl_applied;
+            static f32 sMenuFit[OSB5_SLOTS];
+            static s32 sMenuFitInit = 0;
+            if (!sMenuFitInit)
+            {
+                extern long strtol(const char *, char **, int);
+                extern double strtod(const char *, char **);
+                const char *e;
+                s32 k2;
+                for (k2 = 0; k2 < OSB5_SLOTS; k2++) sMenuFit[k2] = 1.0f;
+                sMenuFit[nFTKindKirby] = 0.58f;
+                sMenuFit[nFTKindPurin] = 0.66f;
+                e = getenv("SSB64_MENU_FIT");
+                while (e != NULL && *e != '\0')
+                {
+                    s32 fk2 = (s32)strtol(e, (char**)&e, 10);
+                    if (*e == '=')
+                    {
+                        f32 v = (f32)strtod(e + 1, (char**)&e);
+                        if (fk2 >= 0 && fk2 < OSB5_SLOTS && v > 0.05f && v <= 2.0f)
+                            sMenuFit[fk2] = v;
+                    }
+                    while (*e == ',' || *e == ' ') e++;
+                }
+                sMenuFitInit = 1;
+            }
+            if ((s32)fp->fkind >= 0 && (s32)fp->fkind < OSB5_SLOTS)
+                menu_fit = sMenuFit[fp->fkind];
+        }
+        if ((o->fit_scale < 0.995f || menu_fit != 1.0f) && fp->joints[0] != NULL)
+        {
+            f32 cur = fp->joints[0]->scale.vec.f.x;
+            if (cur != o->scl_applied && cur > 0.0f)
+            {
+                o->scl_applied = cur * o->fit_scale * menu_fit;
+                fp->joints[0]->scale.vec.f.x = o->scl_applied;
+                fp->joints[0]->scale.vec.f.y = o->scl_applied;
+                fp->joints[0]->scale.vec.f.z = o->scl_applied;
+            }
         }
     }
 
