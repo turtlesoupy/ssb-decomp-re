@@ -1675,6 +1675,19 @@ static void osb5_align3(f32 from[3], f32 to[3], f32 out[3][3])
     out[2][2] = 1.0f - k*(v[0]*v[0] + v[1]*v[1]);
 }
 
+/* Euler RPY (the dobjdesc/aobj convention, R = Rz*Ry*Rx) to matrix. */
+static void osb5_rpy_to_m3(f32 rx, f32 ry, f32 rz, f32 out[3][3])
+{
+    extern float sinf(float);
+    extern float cosf(float);
+    f32 cx = cosf(rx), sx = sinf(rx);
+    f32 cy = cosf(ry), sy = sinf(ry);
+    f32 cz = cosf(rz), sz = sinf(rz);
+    out[0][0] = cz*cy; out[0][1] = cz*sy*sx - sz*cx; out[0][2] = cz*sy*cx + sz*sx;
+    out[1][0] = sz*cy; out[1][1] = sz*sy*sx + cz*cx; out[1][2] = sz*sy*cx - cz*sx;
+    out[2][0] = -sy;   out[2][1] = cy*sx;            out[2][2] = cy*cx;
+}
+
 /* SSB64_POSE_OVERRIDE=<skel file>: freeze the skinned mesh in the pose
  * given by SKELDUMP2 lines (world frames; x/y/z rows are the axis
  * images, row-vector convention) instead of the live animation —
@@ -2599,12 +2612,14 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         static f32 vjo[32][3];
         static f32 live_jo[32][3];
         static f32 live_jup[32][3];
+        static f32 live_jmm[32][3][3];
         f32 rd0[3][3], rdroot[3][3], tmp[3][3], t0a[3];
         f32 cp_po[3];
         static f32 rootfix[32][3][3];
         static u8 rootfix_on[32];
         s32 kk, r, have_cp;
         memcpy(live_jo, jo, sizeof(live_jo));
+        memcpy(live_jmm, jm, sizeof(live_jmm));
         osb5_mul3(rd0, t0m, o->tbind0_inv);
         memcpy(rdroot, rd0, sizeof(rdroot));
         if (osb5_on_menu_scene() && o->have_tb_cp_m)
@@ -2772,19 +2787,102 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                     /* the head mesh's rendered up-axis is rd applied to
                      * world up (verts transform by rd relative to the
                      * upright canonical bind) — NOT jm's y column, which
-                     * bakes in the canonical head frame convention. Undo
-                     * rd's tilt of world up so the head renders upright
-                     * as in its bind, keeping the target's head yaw. */
+                     * bakes in the canonical head frame convention. Aim
+                     * that axis at the VANILLA head's visual up: the
+                     * classic-path delta R_now * R_filebind^-1 applied to
+                     * world up, with the file-bind chain composed under
+                     * the current root facing. The vanilla mesh renders
+                     * with exactly this delta, so ness's card head-cock
+                     * carries over while TBND's junk roll does not. */
                     f32 from[3], to[3], arot[3][3], fixed[3][3];
-                    from[0] = rd[hd][0][1];
-                    from[1] = rd[hd][1][1];
-                    from[2] = rd[hd][2][1];
                     to[0] = 0.0f; to[1] = 1.0f; to[2] = 0.0f;
-                    osb5_align3(from, to, arot);
-                    osb5_mul3(fixed, arot, rd[hd]);
-                    memcpy(rd[hd], fixed, sizeof(fixed));
-                    osb5_mul3(tmp, rd[hd], o->cbind_m[hd]);
-                    memcpy(jm[hd], tmp, sizeof(tmp));
+                    {
+                        FTCommonPartContainer *cont =
+                            (FTCommonPartContainer*)PORT_RESOLVE(fp->attr->commonparts_container);
+                        DObjDesc *dd = (cont != NULL) ?
+                            FTPARTS_GET_DOBJDESC(&cont->commonparts[fp->detail_curr - nFTPartsDetailStart]) : NULL;
+                        DObj *cur = fp->joints[(s32)o->joint_ids[hd]];
+                        if (dd != NULL && cur != NULL)
+                        {
+                            f32 relb[3][3], rb[3][3], m1[3][3], m2[3][3];
+                            s32 i2, guard = 0;
+                            for (r = 0; r < 3; r++) for (i2 = 0; i2 < 3; i2++)
+                                relb[r][i2] = (r == i2) ? 1.0f : 0.0f;
+                            while (cur != NULL && cur != DOBJ_PARENT_NULL && guard++ < 40)
+                            {
+                                s32 ji = -1;
+                                for (i2 = 0; i2 < FTPARTS_JOINT_NUM_MAX; i2++)
+                                    if (fp->joints[i2] == cur) { ji = i2; break; }
+                                if (ji == nFTPartsJointTopN) break;
+                                if (ji >= nFTPartsJointCommonStart)
+                                {
+                                    DObjDesc *e = &dd[ji - nFTPartsJointCommonStart];
+                                    osb5_rpy_to_m3(e->rotate.x, e->rotate.y, e->rotate.z, rb);
+                                    osb5_mul3(m1, rb, relb);
+                                    memcpy(relb, m1, sizeof(relb));
+                                }
+                                cur = cur->parent;
+                            }
+                            /* delta_world = t0m * (t0m^T*R_now) * relb^T * t0m^T;
+                             * visual up = delta_world * (0,1,0) */
+                            for (r = 0; r < 3; r++) for (i2 = 0; i2 < 3; i2++)
+                                m1[r][i2] = t0m[0][r]*live_jmm[hd][0][i2]
+                                          + t0m[1][r]*live_jmm[hd][1][i2]
+                                          + t0m[2][r]*live_jmm[hd][2][i2];
+                            for (r = 0; r < 3; r++) for (i2 = 0; i2 < 3; i2++)
+                                m2[r][i2] = m1[r][0]*relb[i2][0]
+                                          + m1[r][1]*relb[i2][1]
+                                          + m1[r][2]*relb[i2][2];
+                            osb5_mul3(m1, t0m, m2);
+                            /* t0m^T on the right only re-expresses the axis;
+                             * applied to (0,1,0) it is m1 * t0m^T's y column
+                             * = m1 * (row 1 of t0m) */
+                            for (r = 0; r < 3; r++)
+                                to[r] = m1[r][0]*t0m[1][0] + m1[r][1]*t0m[1][1] + m1[r][2]*t0m[1][2];
+                            if (getenv("SSB64_HEAD_DBG") != NULL)
+                            {
+                                static s32 sHdDbg = 0;
+                                if (sHdDbg++ < 30)
+                                    port_log("HEADDBG hd=%d tid=%d to=(%.2f,%.2f,%.2f) relbup=(%.2f,%.2f,%.2f) liveup=(%.2f,%.2f,%.2f) rdup=(%.2f,%.2f,%.2f)\n",
+                                             hd, (s32)o->joint_ids[hd],
+                                             to[0], to[1], to[2],
+                                             relb[0][1], relb[1][1], relb[2][1],
+                                             live_jmm[hd][0][1], live_jmm[hd][1][1], live_jmm[hd][2][1],
+                                             rd[hd][0][1], rd[hd][1][1], rd[hd][2][1]);
+                            }
+                        }
+                    }
+                    /* two steps: clean the head to vertical (kills the
+                     * TBND junk roll/pitch wholesale), then lean it in
+                     * the SCREEN PLANE by the vanilla visual delta's
+                     * lean angle — ness's head-cock toward the "1P"
+                     * carries over, the delta's off-plane pitch (which
+                     * reads as floor-staring on a chibi head) does not. */
+                    {
+                        extern float atan2f(float, float);
+                        extern float sinf(float);
+                        extern float cosf(float);
+                        f32 up[3], lean, c, s, rz[3][3];
+                        up[0] = 0.0f; up[1] = 1.0f; up[2] = 0.0f;
+                        from[0] = rd[hd][0][1];
+                        from[1] = rd[hd][1][1];
+                        from[2] = rd[hd][2][1];
+                        osb5_align3(from, up, arot);
+                        osb5_mul3(fixed, arot, rd[hd]);
+                        memcpy(rd[hd], fixed, sizeof(fixed));
+                        lean = atan2f(to[0], to[1]);
+                        if (lean > 0.45f) lean = 0.45f;
+                        if (lean < -0.45f) lean = -0.45f;
+                        c = cosf(lean); s = sinf(lean);
+                        /* Rz(-lean): sets screen-plane lean to `lean` */
+                        rz[0][0] = c;    rz[0][1] = s;    rz[0][2] = 0.0f;
+                        rz[1][0] = -s;   rz[1][1] = c;    rz[1][2] = 0.0f;
+                        rz[2][0] = 0.0f; rz[2][1] = 0.0f; rz[2][2] = 1.0f;
+                        osb5_mul3(fixed, rz, rd[hd]);
+                        memcpy(rd[hd], fixed, sizeof(fixed));
+                        osb5_mul3(tmp, rd[hd], o->cbind_m[hd]);
+                        memcpy(jm[hd], tmp, sizeof(tmp));
+                    }
                 }
             }
         }
