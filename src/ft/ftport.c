@@ -1795,6 +1795,31 @@ static PoseOvrSec *pose_override_sec(void)
 
 static struct { f32 vjo[32][3]; f32 rd[32][3][3]; u8 valid; } sOsb5LateSeat[OSB5_PLAYER_SLOTS];
 
+/* Menu live-direction aiming (root slots + leg segments) is only valid
+ * when the TARGET rig stands like the canonical human: an upright biped
+ * whose live joint directions are what the chibi body should follow.
+ * The weird bodies (DK's hunch, Yoshi's horizontal spine) and the
+ * ball-mode morphs (Kirby, Purin — and Pikachu's crouch) keep their
+ * bespoke accepted look; aiming at those live directions folds the
+ * human into their posture. Measured: upright rigs need <10° of root
+ * correction (a card-pose lean), DK/Yoshi need ~50-60°. */
+static s32 osb5_target_is_upright_biped(s32 fkind)
+{
+    switch (fkind)
+    {
+    case nFTKindMario:
+    case nFTKindFox:
+    case nFTKindSamus:
+    case nFTKindLuigi:
+    case nFTKindLink:
+    case nFTKindCaptain:
+    case nFTKindNess:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static s32 osb5_canonical_slot_is_arm(OSB5State *o, s32 slot)
 {
     s32 branch = slot, k;
@@ -2574,7 +2599,10 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         static f32 vjo[32][3];
         static f32 live_jo[32][3];
         f32 rd0[3][3], rdroot[3][3], tmp[3][3], t0a[3];
-        s32 kk, r;
+        f32 cp_po[3];
+        static f32 rootfix[32][3][3];
+        static u8 rootfix_on[32];
+        s32 kk, r, have_cp;
         memcpy(live_jo, jo, sizeof(live_jo));
         osb5_mul3(rd0, t0m, o->tbind0_inv);
         memcpy(rdroot, rd0, sizeof(rdroot));
@@ -2601,10 +2629,13 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         {
             DObj *cj = fp->joints[(s32)o->joint_ids[0]];
             t0a[0] = t0o[0]; t0a[1] = t0o[1]; t0a[2] = t0o[2];
+            have_cp = 0;
             if (cj != NULL && cj->parent != NULL && cj->parent != DOBJ_PARENT_NULL)
             {
                 f32 po[3], pm[3][3];
                 osb5_dobj_frame(cj->parent, po, pm);
+                cp_po[0] = po[0]; cp_po[1] = po[1]; cp_po[2] = po[2];
+                have_cp = 1;
                 /* anchor = chest_parent_world - R0now*cint_bind; NOT
                  * written into t0o — the vert localization below must keep
                  * the real TopN frame or the DL render cancels the shift */
@@ -2620,20 +2651,67 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
             memcpy(jm[kk], tmp, sizeof(tmp));
         }
+        memset(rootfix_on, 0, sizeof(rootfix_on));
         if (osb5_on_menu_scene())
         {
+            /* Root slots (chest, hips) hang off the interior chain by
+             * rdroot-rotated chibi offsets; a leaning card pose tilts them
+             * all together and the body leaves vertical. Aim each root
+             * slot's offset along the live skeleton's actual direction
+             * (chest parent -> that target joint) instead. */
+            if (have_cp && osb5_target_is_upright_biped((s32)fp->fkind))
+            {
+                for (kk = 0; kk < o->njoints; kk++)
+                {
+                    f32 d[3], from[3], to[3], arot[3][3], fixed[3][3];
+                    if ((s32)o->can_parent[kk] >= 0) continue;
+                    d[0] = o->cbind_o[kk][0] - o->can_root[0];
+                    d[1] = o->cbind_o[kk][1] - o->can_root[1];
+                    d[2] = o->cbind_o[kk][2] - o->can_root[2];
+                    for (r = 0; r < 3; r++)
+                        from[r] = rdroot[r][0]*d[0] + rdroot[r][1]*d[1] + rdroot[r][2]*d[2];
+                    /* both measured from the SAME anchor: t0a is where the
+                     * canonical root is planted in world space, so the live
+                     * direction to this slot's target joint is taken from
+                     * there too (cp_po is at chest height — using it flipped
+                     * the torso) */
+                    to[0] = live_jo[kk][0] - t0a[0];
+                    to[1] = live_jo[kk][1] - t0a[1];
+                    to[2] = live_jo[kk][2] - t0a[2];
+                    if (getenv("SSB64_ROOT_DBG") != NULL)
+                    {
+                        static s32 sRootDbg = 0;
+                        if (sRootDbg++ < 60)
+                            port_log("ROOTDBG kk=%d tid=%d from=(%.1f,%.1f,%.1f) to=(%.1f,%.1f,%.1f)\n",
+                                     kk, (s32)o->joint_ids[kk],
+                                     from[0], from[1], from[2], to[0], to[1], to[2]);
+                    }
+                    osb5_align3(from, to, arot);
+                    memcpy(rootfix[kk], arot, sizeof(arot));
+                    rootfix_on[kk] = 1;
+                    /* keep the slot's child placement and skinning frame in
+                     * the corrected orientation too */
+                    osb5_mul3(fixed, arot, rd[kk]);
+                    memcpy(rd[kk], fixed, sizeof(fixed));
+                    osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
+                    memcpy(jm[kk], tmp, sizeof(tmp));
+                }
+            }
             /* CSS figatrees bind only part of the hierarchy. Aim each
              * one-child arm segment along the target's actual live joint
              * positions while retaining the canonical segment lengths. */
+            {
+            s32 leg_aim = osb5_target_is_upright_biped((s32)fp->fkind);
             for (kk = 0; kk < o->njoints; kk++)
             {
                 s32 cc, child = -1, nchild = 0, root = kk;
                 f32 d[3], from[3], to[3], arot[3][3], fixed[3][3];
                 while (o->can_parent[root] >= 0) root = o->can_parent[root];
-                if (root != 0) continue;
+                if (root != 0 && !leg_aim) continue;
                 for (cc = 0; cc < o->njoints; cc++)
                     if ((s32)o->can_parent[cc] == kk) { child = cc; nchild++; }
-                if (nchild != 1 || !osb5_canonical_slot_is_arm(o, kk)) continue;
+                if (nchild != 1) continue;
+                if (!osb5_canonical_slot_is_arm(o, kk) && !(leg_aim && root != 0)) continue;
                 d[0] = o->cbind_o[child][0] - o->cbind_o[kk][0];
                 d[1] = o->cbind_o[child][1] - o->cbind_o[kk][1];
                 d[2] = o->cbind_o[child][2] - o->cbind_o[kk][2];
@@ -2652,6 +2730,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 osb5_mul3(tmp, rd[kk], o->cbind_m[kk]);
                 memcpy(jm[kk], tmp, sizeof(tmp));
             }
+            }
         }
         for (kk = 0; kk < o->njoints; kk++)
         {
@@ -2659,11 +2738,21 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             f32 d[3];
             if (pp < 0)
             {
+                f32 base[3];
                 d[0] = o->cbind_o[kk][0] - o->can_root[0];
                 d[1] = o->cbind_o[kk][1] - o->can_root[1];
                 d[2] = o->cbind_o[kk][2] - o->can_root[2];
                 for (r = 0; r < 3; r++)
-                    vjo[kk][r] = t0a[r] + rdroot[r][0]*d[0] + rdroot[r][1]*d[1] + rdroot[r][2]*d[2];
+                    base[r] = rdroot[r][0]*d[0] + rdroot[r][1]*d[1] + rdroot[r][2]*d[2];
+                if (rootfix_on[kk])
+                {
+                    f32 b2[3];
+                    for (r = 0; r < 3; r++)
+                        b2[r] = rootfix[kk][r][0]*base[0] + rootfix[kk][r][1]*base[1] + rootfix[kk][r][2]*base[2];
+                    base[0] = b2[0]; base[1] = b2[1]; base[2] = b2[2];
+                }
+                for (r = 0; r < 3; r++)
+                    vjo[kk][r] = t0a[r] + base[r];
             }
             else
             {
