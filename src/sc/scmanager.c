@@ -1051,12 +1051,13 @@ void scManagerRunLoop(sb32 arg)
 	}
 
 	/* OpenSmash pipeline: SSB64_BOOT_BATTLE="p1fkind,p2fkind,gkind[,p2kind[,p3fkind,p4fkind]]"
-	 * boots straight into a VS match (P1 human, P2 CPU lv1 by default,
+	 * boots straight into a VS match (P1 human, P2 CPU lv3 by default,
 	 * 5 stock, no timer) — the mesh-iteration shortcut: no intro, no
 	 * menus. Optional 4th field makes P2 human (0=HMN, 1=CPU) so a
 	 * scripted SSB64_REPLAY_PLAY input file can drive both fighters.
 	 * Optional fields 5/6 add CPU players 3/4 (fkind, -1 = absent) for
-	 * multi-injection demo matches.
+	 * multi-injection demo matches. SSB64_CPU_LEVEL=<1..9> sets the level
+	 * of every CPU in the preset.
 	 *
 	 * The preset is expressed as character-select and VS-options *inputs*,
 	 * then committed through the same two functions the menus use:
@@ -1092,8 +1093,16 @@ void scManagerRunLoop(sb32 arg)
 			int p1 = 0, p2 = 8, gk = 4; /* defaults: Mario vs Kirby, Dream Land */
 			int p2kind = 1;             /* default: CPU */
 			int p3 = -1, p4 = -1;       /* optional CPU players 3/4 */
+			int cpu_level = 3;           /* vanilla transfer-state default */
 			int fks[4];
 			int i;
+			const char *cpu_level_env = getenv("SSB64_CPU_LEVEL");
+			if (cpu_level_env != NULL)
+			{
+				int requested_cpu_level = atoi(cpu_level_env);
+				if (requested_cpu_level >= 1 && requested_cpu_level <= 9)
+					cpu_level = requested_cpu_level;
+			}
 			sscanf(bb, "%d,%d,%d,%d,%d,%d", &p1, &p2, &gk, &p2kind, &p3, &p4);
 			fks[0] = p1; fks[1] = p2; fks[2] = p3; fks[3] = p4;
 
@@ -1145,12 +1154,12 @@ void scManagerRunLoop(sb32 arg)
 				slot->shade   = 0;
 				slot->team    = i;
 
-				/* Inherited rather than restated, exactly as the CSS seeds it
-				 * (mnplayersvs.c: sMNPlayersVSSlots[p].cpu_level =
-				 * ...players[p].level). Default battle state says 3; the old
-				 * hardcoded 1 made CPUs barely fight. port_enhancement_cpu_level_9()
-				 * still overrides this at VSBattle entry when enabled. */
-				slot->cpu_level = gSCManagerTransferBattleState.players[i].level;
+				/* Preserve the vanilla transfer-state value for human/empty slots;
+				 * apply the launch override only to computer players. The level-9
+				 * enhancement can still override this at VSBattle entry. */
+				slot->cpu_level = (slot->pkind == nFTPlayerKindCom)
+				                ? cpu_level
+				                : gSCManagerTransferBattleState.players[i].level;
 				slot->handicap  = FTCOMMON_HANDICAP_DEFAULT;
 			}
 
@@ -1236,8 +1245,8 @@ void scManagerRunLoop(sb32 arg)
 				 * fkind -1 for a slot the player should pick live. */
 				gSCManagerTransferBattleState.is_reset_players = FALSE;
 			}
-			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d damage_ratio=%d\n",
-			         p1, p2, gk, p2kind, p3, p4,
+			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d cpu_level=%d damage_ratio=%d\n",
+			         p1, p2, gk, p2kind, p3, p4, cpu_level,
 			         (int)gSCManagerTransferBattleState.damage_ratio);
 		}
 	}
