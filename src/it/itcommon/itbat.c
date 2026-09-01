@@ -1,6 +1,10 @@
 #include <it/item.h>
 #include <reloc_data.h>
 
+#ifdef PORT
+extern void itPortApplyBatModelOverride(GObj *item_gobj);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //       INITIALIZED DATA        //
@@ -238,6 +242,10 @@ GObj* itBatMakeItem(GObj *parent_gobj, Vec3f *pos, Vec3f *vel, u32 flags)
         ip->is_unused_item_bool = TRUE;
 
         ip->arrow_gobj = ifCommonItemArrowMakeInterface(ip);
+
+#ifdef PORT
+        itPortApplyBatModelOverride(item_gobj);
+#endif
     }
     return item_gobj;
 }
