@@ -5910,6 +5910,125 @@ void port_ui_vs_hook(Sprite *name_sprite, s32 fkind)
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* Per-fighter private UI sprites.
+ *
+ * The in-match HUD (damage-backdrop emblem, stock icons, stock palette)
+ * reads fp->attr->sprites, and fp->attr is the fkind's SHARED main data
+ * file (ftManagerMakeFighter). The injection below writes the character's
+ * pixels into those sprites IN PLACE, so two different injected characters
+ * that share a base fkind (both retargeted onto Fox, say) fought over one
+ * emblem/stock sprite: whoever spawned last won and both players showed
+ * the same emblem. Give each player slot its own clone of the attribute
+ * block, the FTSprites table, the two sprites (with private bitmaps and
+ * texels) and the costume-0 stock LUT, and point fp->attr at the clone
+ * before the write. Clones are cached per player and re-used across
+ * respawns (fp->attr is reset to the shared file on every spawn, so the
+ * swap has to happen every time) — they are rebuilt only when the slot
+ * changes fkind. Vanilla fighters keep the shared data. */
+typedef struct
+{
+    FTAttributes *src;      /* shared attr this clone was made from */
+    FTAttributes *attr;
+} UIPrivAttr;
+static UIPrivAttr sUIPrivAttrs[GMCOMMON_PLAYERS_MAX];
+
+#define UI_PRIV_LUT_MAX 8
+
+static Sprite *port_ui_clone_sprite(Sprite *src)
+{
+    Sprite *dst;
+    Bitmap *bms;
+
+    if (src == NULL) return NULL;
+    portFixupSprite(src);
+    bms = (Bitmap *)PORT_RESOLVE(src->bitmap);
+    if (bms == NULL) return NULL;
+    portFixupBitmapArray(bms, src->nbitmaps);
+    portFixupSpriteBitmapData(src, bms);
+    dst = (Sprite *)malloc(sizeof(Sprite));
+    if (dst == NULL) return NULL;
+    *dst = *src;
+    /* clones the bitmap array + texels off the (shared) source bitmap
+     * token still held by *dst and marks the whole clone synthetic */
+    port_ui_privatize_sprite(dst);
+    return dst;
+}
+
+static void port_ui_private_attr(FTStruct *fp)
+{
+    UIPrivAttr *pv;
+    FTAttributes *src = fp->attr;
+    FTAttributes *attr;
+    FTSprites *sspr;
+    FTSprites *dspr;
+    Sprite *st;
+    Sprite *em;
+    u32 *sluts;
+    u32 *dluts;
+    s32 i;
+
+    if (src == NULL || (s32)fp->player < 0 || (s32)fp->player >= GMCOMMON_PLAYERS_MAX)
+    {
+        return;
+    }
+    pv = &sUIPrivAttrs[fp->player];
+    if (pv->attr != NULL && pv->src == src)
+    {
+        fp->attr = pv->attr;
+        return;
+    }
+    sspr = (FTSprites *)PORT_RESOLVE(src->sprites);
+    if (sspr == NULL)
+    {
+        return;
+    }
+    attr = (FTAttributes *)malloc(sizeof(FTAttributes));
+    dspr = (FTSprites *)malloc(sizeof(FTSprites));
+    if (attr == NULL || dspr == NULL)
+    {
+        free(attr);
+        free(dspr);
+        return;
+    }
+    *attr = *src;
+    *dspr = *sspr;
+    st = port_ui_clone_sprite((Sprite *)PORT_RESOLVE(sspr->stock_sprite));
+    em = port_ui_clone_sprite((Sprite *)PORT_RESOLVE(sspr->emblem));
+    if (st != NULL) dspr->stock_sprite = portRelocRegisterPointer(st);
+    if (em != NULL) dspr->emblem = portRelocRegisterPointer(em);
+    /* costume LUT token array: only costume 0's palette is ever rewritten
+     * by the injection, so clone that buffer and share the rest */
+    sluts = (u32 *)PORT_RESOLVE(sspr->stock_luts);
+    if (sluts != NULL)
+    {
+        u8 *lut0 = (u8 *)PORT_RESOLVE(sluts[0]);
+        dluts = (u32 *)malloc(sizeof(u32) * UI_PRIV_LUT_MAX);
+        if (dluts != NULL)
+        {
+            for (i = 0; i < UI_PRIV_LUT_MAX; i++) dluts[i] = sluts[i];
+            if (lut0 != NULL)
+            {
+                u8 *l = (u8 *)malloc(32);
+                if (l != NULL)
+                {
+                    memcpy(l, lut0, 32);
+                    dluts[0] = portRelocRegisterPointer(l);
+                }
+            }
+            dspr->stock_luts = portRelocRegisterPointer(dluts);
+        }
+    }
+    attr->sprites = portRelocRegisterPointer(dspr);
+    /* previous clone for this slot (different fkind) is leaked on purpose:
+     * HUD SObjs made from it may still be alive this scene */
+    pv->src = src;
+    pv->attr = attr;
+    fp->attr = attr;
+    port_log("OSBUI: private HUD sprites for player %d (fkind %d)\n",
+             (int)fp->player, (int)fp->fkind);
+}
+
 void port_inject_bundle(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
@@ -5989,6 +6108,10 @@ void port_inject_bundle(GObj *fighter_gobj)
     {
         const char *dump = getenv("SSB64_DUMP_SPRITES");
         const char *ui = port_ui_path_for_player((s32)fp->player, (s32)fp->fkind);
+        if (ui != NULL)
+        {
+            port_ui_private_attr(fp);
+        }
         if ((dump != NULL || ui != NULL) && fp->attr != NULL && fp->attr->sprites != NULL)
         {
             FTSprites *_spr = (FTSprites *)PORT_RESOLVE(fp->attr->sprites);
