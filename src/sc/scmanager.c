@@ -1583,6 +1583,21 @@ void scManagerRunLoop(sb32 arg)
 				 * competitive-ruleset override have all had their say. */
 				portValidateBattleState("VSBattle");
 
+				/* OpenSmash: "A VS B" card (scvsintro.c) — a blocking sub-scene
+				 * like the 1P intro; the battle itself is untouched. */
+				{
+					extern sb32 port_vs_intro_enabled(void);
+					extern void scVSIntroStartScene(void);
+					extern sb32 portSCManagerConsumeReset(void);
+					if (port_vs_intro_enabled())
+					{
+						scVSIntroStartScene();
+						if (portSCManagerConsumeReset())
+						{
+							break;
+						}
+					}
+				}
 				scVSBattleStartScene();
 
 				// clean up timer

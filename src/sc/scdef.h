@@ -197,6 +197,9 @@ typedef enum SCKind
 	nSCKindSoundTest,        	  	// Sound Test
 	nSCKindExplain,         	  	// How to Play
 	nSCKindAutoDemo               	// Auto-Demo
+#ifdef PORT
+	, nSCKindVSIntro               	// OpenSmash VS matchup card (scvsintro.c); appended so no vanilla id shifts
+#endif
 
 } SCKind;
 

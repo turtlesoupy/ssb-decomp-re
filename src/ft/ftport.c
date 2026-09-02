@@ -1073,6 +1073,7 @@ typedef struct
     char bundle[256];
     char ui[256];
     char voice[256];
+    char display[48];    /* full name for the VS card ("Barack Obama") */
 } PortChar;
 static PortChar sChars[PORT_CHAR_MAX];
 static s32 sNChars = 0;
@@ -1113,12 +1114,12 @@ static void port_roster_parse(void)
     }
     while (sNChars < PORT_CHAR_MAX && fgets(line, sizeof line, f) != NULL)
     {
-        /* slug|fkind|bundle|ui|voice|short[|base_fkind] */
-        const char *fld[7];
-        size_t len[7];
+        /* slug|fkind|bundle|ui|voice|short[|base_fkind[|display]] */
+        const char *fld[8];
+        size_t len[8];
         s32 nf = 0;
         const char *q = line, *start = line;
-        while (nf < 7)
+        while (nf < 8)
         {
             if (*q == '|' || *q == '\n' || *q == '\r' || *q == '\0')
             {
@@ -1150,6 +1151,7 @@ static void port_roster_parse(void)
                 c->base = atoi(fld[6]);
                 if ((u32)c->base >= OSB5_SLOTS) c->base = -1;
             }
+            if (nf > 7) port_roster_field(c->display, sizeof c->display, fld[7], len[7]);
             sNChars++;
         }
     }
@@ -1517,6 +1519,44 @@ const char *port_roster_player_shortname(s32 player)
         if (n > 0) return buf;
     }
     return NULL;
+}
+
+/* Full display name of the player's bound character ("" for vanilla /
+ * unbound); falls back to the short name. Drives the VS card. */
+const char *port_roster_player_display(s32 player)
+{
+    port_roster_parse();
+    if ((u32)player < 4 && sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
+    {
+        PortChar *c = &sChars[sPlayerChar[player]];
+        if (c->display[0] != '\0') return c->display;
+        if (c->shortname[0] != '\0') return c->shortname;
+        return c->slug;
+    }
+    /* legacy single-target inject (?inject=&fkind=&player=&inject_name=) */
+    {
+        const char *name = getenv("SSB64_INJECT_NAME");
+        const char *pl = getenv("SSB64_INJECT_PLAYER");
+        if (name != NULL && name[0] != '\0' &&
+            (u32)player < 4 && sPlayerChar[player] < 0 &&
+            atoi((pl != NULL) ? pl : "0") == player)
+        {
+            return name;
+        }
+    }
+    return "";
+}
+
+/* Roster slug of the player's bound character ("" for vanilla/unbound).
+ * Feeds the web shell's matchup card (portrait + announcer lookup). */
+const char *port_roster_player_slug(s32 player)
+{
+    port_roster_parse();
+    if ((u32)player < 4 && sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
+    {
+        return sChars[sPlayerChar[player]].slug;
+    }
+    return "";
 }
 
 /* JS bridge: the shell's search dialog requests a page switch without a
@@ -5473,9 +5513,16 @@ static u16 port_voice_announce_name_fgm(s32 fkind)
  * the harness path takes it for synth fkinds too). Any other vanilla
  * announcer name cuts a still-running overlay, matching how the game stops
  * the previous name clip when a new one starts. */
+static s32 sVoiceFilterBypass = 0;
+
 s32 port_voice_announce_filter(u16 id)
 {
     s32 i;
+
+    if (sVoiceFilterBypass)
+    {
+        return 0;
+    }
 
     /* no Available() gate: the roster provides per-tile clips without the
      * legacy SSB64_INJECT_VOICE env being set */
@@ -5495,6 +5542,51 @@ s32 port_voice_announce_filter(u16 id)
         }
     }
     return 0;
+}
+
+/* VS-intro card: announce the fighter PLAYER is playing — the bound roster
+ * character's clip when it has one, else the vanilla name (bypassing the
+ * per-tile filter so a vanilla pick is never voiced as the tile's roster
+ * character). Returns the tics to wait before the next announcer line. */
+s32 port_voice_announce_player(s32 player, s32 fkind)
+{
+    static const s32 waits[12] = { 50, 50, 70, 50, 50, 50, 50, 70, 50, 50, 50, 50 };
+    PortChar *c = port_char_for_player(player, fkind, NULL);
+    extern void *func_800269C0_275C0(u16);
+
+    const char *clip = (c != NULL && c->voice[0] != '\0') ? c->voice : NULL;
+    if (clip == NULL)
+    {
+        /* legacy single-target inject (?inject=&fkind=&player=&inject_voice=):
+         * no roster binding, the clip lives in the env */
+        const char *legacy = getenv("SSB64_INJECT_VOICE");
+        const char *fk = getenv("SSB64_INJECT_FKIND");
+        const char *pl = getenv("SSB64_INJECT_PLAYER");
+        if (legacy != NULL && legacy[0] != '\0' && fk != NULL && atoi(fk) == fkind &&
+            atoi((pl != NULL) ? pl : "0") == player)
+        {
+            clip = legacy;
+        }
+    }
+    if (clip != NULL)
+    {
+        s32 dur;
+        portVoiceInjectPlayPath(clip);
+        dur = portVoiceInjectDurationTics();
+        /* clips carry trailing silence: start the next line a touch early */
+        return (dur > 26) ? dur - 8 : 18;
+    }
+    portVoiceInjectStop();
+    {
+        extern s32 gPortFighterVoiceMute;
+        s32 mute = gPortFighterVoiceMute;
+        gPortFighterVoiceMute = 0;
+        sVoiceFilterBypass = 1;
+        func_800269C0_275C0(port_voice_announce_name_fgm(fkind));
+        sVoiceFilterBypass = 0;
+        gPortFighterVoiceMute = mute;
+    }
+    return (((u32)fkind < 12) ? waits[fkind] : 50) - 10;
 }
 
 /* VS-results plays the crowd cheer a fixed 60 tics after the winner's name.
