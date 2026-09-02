@@ -6,6 +6,8 @@
 
 #ifdef PORT
 #include <enhancements/enhancements.h>
+
+extern void itPortUpdateBatModelFacing(GObj *item_gobj);
 #endif
 
 extern SYMallocRegion gSYTaskmanGraphicsHeap;
@@ -196,6 +198,7 @@ void itDisplayOPAProcDisplay(GObj *item_gobj)
 
 #ifdef PORT
     ip->display_mode = port_enhancement_hitbox_display_override(ip->display_mode);
+    itPortUpdateBatModelFacing(item_gobj);
 #endif
 
     if (itDisplayCheckItemVisible(ip) != FALSE)
@@ -224,6 +227,7 @@ void itDisplayXLUProcDisplay(GObj *item_gobj)
 
 #ifdef PORT
     ip->display_mode = port_enhancement_hitbox_display_override(ip->display_mode);
+    itPortUpdateBatModelFacing(item_gobj);
 #endif
 
     if (itDisplayCheckItemVisible(ip) != FALSE)

@@ -3,6 +3,10 @@
 
 extern alSoundEffect* func_800269C0_275C0(u16);
 
+#ifdef PORT
+extern void itPortApplyBatModelOverride(GObj *item_gobj);
+#endif
+
 // // // // // // // // // // // //
 //                               //
 //           FUNCTIONS           //
@@ -144,6 +148,16 @@ void ftCommonItemSwingSetStatus(GObj *fighter_gobj, s32 swing_type)
 
     ftMainSetStatus(fighter_gobj, status_id, 0.0F, anim_speed, FTSTATUS_PRESERVE_NONE);
     ftMainPlayAnimEventsAll(fighter_gobj);
+
+#ifdef PORT
+    /* Swing setup can restore the stock held-item display state. Reapply the
+     * cosmetic bat mesh after those events so generated props stay visible
+     * throughout the attack instead of revealing the vanilla bat. */
+    if (ip->kind == nITKindBat)
+    {
+        itPortApplyBatModelOverride(fp->item_gobj);
+    }
+#endif
 
     fp->proc_hit = ftCommonHarisenSwingProcHit;
 

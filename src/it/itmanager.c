@@ -12,6 +12,8 @@
 extern void *func_800269C0_275C0(u16 id);
 extern void portFixupStructU16(void *base, unsigned int byte_offset, unsigned int num_words);
 extern void port_log(const char *fmt, ...);
+extern char *getenv(const char *name);
+extern int atoi(const char *str);
 #endif
 
 // // // // // // // // // // // //
@@ -130,6 +132,120 @@ ITStruct *gITManagerStructsAllocFree;
 
 // 0x8018D098
 ITAppearActor gITManagerAppearActor;
+
+#ifdef PORT
+static sb32 sITPortPreviewSpawned;
+
+/* Deterministic generated-item lab. Natural item timing is intentionally
+ * slow and random, which is useful in a match but painful while tuning a
+ * mesh's axis, pivot, and scale. SSB64_ITEM_PREVIEW=ground spawns one
+ * forced item beside P1 as soon as the match becomes active; =hold creates
+ * the same item already attached to P1's light-item joint. */
+enum ITPortPreviewMode
+{
+    nITPortPreviewModeNone,
+    nITPortPreviewModeGround,
+    nITPortPreviewModeHold
+};
+
+static s32 sITPortPreviewMode = -1;
+
+static s32 itPortGetPreviewMode(void)
+{
+    if (sITPortPreviewMode < 0)
+    {
+        const char *env = getenv("SSB64_ITEM_PREVIEW");
+
+        sITPortPreviewMode = nITPortPreviewModeNone;
+        if (env != NULL)
+        {
+            if ((env[0] == 'h') || (env[0] == 'H') || (env[0] == '2'))
+            {
+                sITPortPreviewMode = nITPortPreviewModeHold;
+            }
+            else if ((env[0] == 'g') || (env[0] == 'G') || (env[0] == '1'))
+            {
+                sITPortPreviewMode = nITPortPreviewModeGround;
+            }
+        }
+    }
+    return sITPortPreviewMode;
+}
+
+static s32 itPortGetPreviewKind(void)
+{
+    const char *env = getenv("SSB64_FORCE_ITEM_KIND");
+    s32 kind = (env != NULL) ? atoi(env) : nITKindBat;
+
+    if ((kind < nITKindCommonStart) || (kind > nITKindCommonEnd))
+    {
+        kind = nITKindBat;
+    }
+    return kind;
+}
+
+static GObj *itPortGetPreviewFighter(void)
+{
+    GObj *fighter_gobj = gGCCommonLinks[nGCCommonLinkIDFighter];
+
+    while (fighter_gobj != NULL)
+    {
+        if (ftGetStruct(fighter_gobj)->player == 0)
+        {
+            return fighter_gobj;
+        }
+        fighter_gobj = fighter_gobj->link_next;
+    }
+    return NULL;
+}
+
+static void itManagerPortPreviewProcUpdate(GObj *actor_gobj)
+{
+    GObj *fighter_gobj;
+    GObj *item_gobj;
+    FTStruct *fp;
+    Vec3f pos;
+    Vec3f vel;
+    s32 mode;
+    s32 kind;
+
+    (void) actor_gobj;
+
+    if (sITPortPreviewSpawned || (gSCManagerBattleState->game_status == nSCBattleGameStatusWait))
+    {
+        return;
+    }
+    fighter_gobj = itPortGetPreviewFighter();
+    if (fighter_gobj == NULL)
+    {
+        return;
+    }
+    fp = ftGetStruct(fighter_gobj);
+    mode = itPortGetPreviewMode();
+    kind = itPortGetPreviewKind();
+    pos = DObjGetStruct(fighter_gobj)->translate.vec.f;
+    vel.x = vel.y = vel.z = 0.0F;
+
+    if (mode == nITPortPreviewModeGround)
+    {
+        pos.x += (fp->lr >= 0) ? 300.0F : -300.0F;
+        pos.y += 250.0F;
+    }
+    item_gobj = itManagerMakeItemSetupCommon(NULL, kind, &pos, &vel, ITEM_FLAG_PARENT_DEFAULT);
+    if (item_gobj == NULL)
+    {
+        port_log("ITEMLAB: could not spawn preview kind=%d\n", (int)kind);
+        return;
+    }
+    if ((mode == nITPortPreviewModeHold) && (fp->item_gobj == NULL))
+    {
+        itMainSetFighterHold(item_gobj, fighter_gobj);
+    }
+    sITPortPreviewSpawned = TRUE;
+    port_log("ITEMLAB: spawned kind=%d mode=%s for player 1\n", (int)kind,
+             (mode == nITPortPreviewModeHold) ? "hold" : "ground");
+}
+#endif
 
 // // // // // // // // // // // //
 //                               //
@@ -571,6 +687,21 @@ GObj* itManagerMakeAppearActor(void)
     u32 item_valid_toggles;
     MPItemWeights *p_valid_weights;
     u32 item_any_toggles;
+
+#ifdef PORT
+    /* The item lab must also work with the deterministic two-human battle
+     * preset, where random items are deliberately disabled. */
+    if (itPortGetPreviewMode() != nITPortPreviewModeNone)
+    {
+        sITPortPreviewSpawned = FALSE;
+        gobj = gcMakeGObjSPAfter(nGCCommonKindItem, NULL, nGCCommonLinkIDItemActor, GOBJ_PRIORITY_DEFAULT);
+        if (gobj != NULL)
+        {
+            gcAddGObjProcess(gobj, itManagerPortPreviewProcUpdate, nGCProcessKindFunc, 3);
+        }
+        return gobj;
+    }
+#endif
 
     if (gSCManagerBattleState->item_appearance_rate != nSCBattleItemSwitchNone)
     {
