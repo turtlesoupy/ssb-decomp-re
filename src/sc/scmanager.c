@@ -1094,8 +1094,22 @@ void scManagerRunLoop(sb32 arg)
 			int p2kind = 1;             /* default: CPU */
 			int p3 = -1, p4 = -1;       /* optional CPU players 3/4 */
 			int cpu_level = 3;           /* vanilla transfer-state default */
+			int humans = 1;              /* ports 1..humans are human slots */
 			int fks[4];
 			int i;
+			/* SSB64_BOOT_HUMANS=<1..4>: local multiplayer. Ports below the
+			 * count are human slots (fkind -1 = pick live on the CSS); the
+			 * select screen closes any human slot whose port has no
+			 * controller plugged in (mnPlayersVSInitPlayer), so over-asking
+			 * is harmless. Implies play, not eval: none of the p2kind==0
+			 * screenshot-baseline deviations below apply. */
+			const char *humans_env = getenv("SSB64_BOOT_HUMANS");
+			if (humans_env != NULL)
+			{
+				int requested_humans = atoi(humans_env);
+				if (requested_humans >= 1 && requested_humans <= GMCOMMON_PLAYERS_MAX)
+					humans = requested_humans;
+			}
 			const char *cpu_level_env = getenv("SSB64_CPU_LEVEL");
 			if (cpu_level_env != NULL)
 			{
@@ -1105,6 +1119,7 @@ void scManagerRunLoop(sb32 arg)
 			}
 			sscanf(bb, "%d,%d,%d,%d,%d,%d", &p1, &p2, &gk, &p2kind, &p3, &p4);
 			fks[0] = p1; fks[1] = p2; fks[2] = p3; fks[3] = p4;
+			if (p2kind == 0 && humans < 2) humans = 2;
 
 			/* ---- character-select inputs ---- */
 			sMNPlayersVSGameRule     = SCBATTLE_GAMERULE_STOCK;
@@ -1136,8 +1151,8 @@ void scManagerRunLoop(sb32 arg)
 				/* Only the fields mnPlayersVSSetSceneData() reads. The slot
 				 * struct also holds live GObj pointers owned by the CSS, so
 				 * this must stay a targeted fill, never a blanket clear. */
-				slot->pkind = (i == 0) ? nFTPlayerKindMan
-				            : (i == 1) ? ((p2kind == 0) ? nFTPlayerKindMan : nFTPlayerKindCom)
+				slot->pkind = (i < humans) ? nFTPlayerKindMan
+				            : (i == 1) ? nFTPlayerKindCom
 				            : (fks[i] >= 0) ? nFTPlayerKindCom : nFTPlayerKindNot;
 				slot->fkind = (fks[i] >= 0) ? fks[i] : nFTKindNull;
 
@@ -1192,7 +1207,7 @@ void scManagerRunLoop(sb32 arg)
 			 * a fresh boot through the menus gives you. This preset is a play
 			 * path first; it should differ from booting normally only where it
 			 * has to (who fights, where, and the stock ruleset below). */
-			if (p2kind == 0)
+			if (p2kind == 0 && humans_env == NULL)
 			{
 				/* Eval mode is the one exception. Both slots human means the
 				 * match is driven by a scripted SSB64_REPLAY_PLAY input file
@@ -1211,7 +1226,7 @@ void scManagerRunLoop(sb32 arg)
 				/* Not written by the VS path at all (vanilla leaves the
 				 * default in place); -1 is the "slot has no stocks"
 				 * sentinel the HUD keys off in ifcommon.c. */
-				pd->stock_count = (i <= 1 || fks[i] >= 0) ? 4 : -1;
+				pd->stock_count = (i <= 1 || i < humans || fks[i] >= 0) ? 4 : -1;
 
 				/* DELIBERATE demo deviation: vanilla gives every CPU the
 				 * shared grey CP color, which makes a four-way injection
@@ -1224,7 +1239,7 @@ void scManagerRunLoop(sb32 arg)
 			 * baselines stay stable across runs. Note this shows "CP" rather
 			 * than hiding the tag — index GMCOMMON_PLAYERS_MAX is
 			 * nIFPlayerTagKindCP, not a blank sprite. */
-			if (p2kind == 0)
+			if (p2kind == 0 && humans_env == NULL)
 			{
 				gSCManagerTransferBattleState.players[0].tag =
 				gSCManagerTransferBattleState.players[1].tag = (u8)GMCOMMON_PLAYERS_MAX;
@@ -1245,8 +1260,8 @@ void scManagerRunLoop(sb32 arg)
 				 * fkind -1 for a slot the player should pick live. */
 				gSCManagerTransferBattleState.is_reset_players = FALSE;
 			}
-			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d cpu_level=%d damage_ratio=%d\n",
-			         p1, p2, gk, p2kind, p3, p4, cpu_level,
+			port_log("SSB64: BOOT_BATTLE override -> p1=%d p2=%d stage=%d p2kind=%d p3=%d p4=%d humans=%d cpu_level=%d damage_ratio=%d\n",
+			         p1, p2, gk, p2kind, p3, p4, humans, cpu_level,
 			         (int)gSCManagerTransferBattleState.damage_ratio);
 		}
 	}

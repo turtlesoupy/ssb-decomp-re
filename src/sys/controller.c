@@ -194,6 +194,12 @@ void syControllerReadDeviceData(void)
     osContGetReadData(sSYControllerData);
 #ifdef PORT
     syControllerApplyPadScript();
+    /* Browser port map (port/web_input.cpp): keyboard/gamepad/nothing per
+     * port, decided by the shell. No-op on native and when not engaged. */
+    {
+        extern void port_input_apply_pads(void *pads);
+        port_input_apply_pads(sSYControllerData);
+    }
 #endif
 
     for (i = 0; i != MAXCONTROLLERS; i++)
