@@ -343,6 +343,14 @@ void mvOpeningSectorMakeCockpit(void)
     cockpit_sobj->sprite.attr &= ~SP_FASTCOPY;
     cockpit_sobj->sprite.attr |= SP_TRANSPARENT;
 
+#ifdef PORT
+    {
+        /* roster character's portrait over the baked Fox head */
+        extern void port_ui_opening_cockpit_hook(Sprite *);
+        port_ui_opening_cockpit_hook(&cockpit_sobj->sprite);
+    }
+#endif
+
     cockpit_sobj->sprite.scalex = 0.25F;
     cockpit_sobj->sprite.scaley = 0.25F;
 }

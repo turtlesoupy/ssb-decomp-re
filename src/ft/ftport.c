@@ -1055,7 +1055,7 @@ static const char *port_inject_bundle_path(s32 fkind, s32 *from_single)
 /* -------------------------------------------------------------------- */
 /* Character registry: the scalable roster. The shell stages a line file  */
 /* (SSB64_ROSTER_FILE, default /roster.txt when present):                 */
-/*   slug|assigned_fkind|bundle|ui|voice|short[|base_fkind]               */
+/*   slug|assigned_fkind|bundle|ui|voice|short[|base_fkind[|display[|portrait]]] */
 /* Entry i lives on CSS page 1 + i/12, on the tile of its assigned fkind  */
 /* (the shell lays pages out and fetches the matching skeleton variant).  */
 /* base_fkind decouples the PLAYED fighter from the tile: the character   */
@@ -1074,6 +1074,7 @@ typedef struct
     char ui[256];
     char voice[256];
     char display[48];    /* full name for the VS card ("Barack Obama") */
+    char portrait[256];  /* PNG for the opening movie's baked character art */
 } PortChar;
 static PortChar sChars[PORT_CHAR_MAX];
 static s32 sNChars = 0;
@@ -1114,12 +1115,12 @@ static void port_roster_parse(void)
     }
     while (sNChars < PORT_CHAR_MAX && fgets(line, sizeof line, f) != NULL)
     {
-        /* slug|fkind|bundle|ui|voice|short[|base_fkind[|display]] */
-        const char *fld[8];
-        size_t len[8];
+        /* slug|fkind|bundle|ui|voice|short[|base_fkind[|display[|portrait]]] */
+        const char *fld[9];
+        size_t len[9];
         s32 nf = 0;
         const char *q = line, *start = line;
-        while (nf < 8)
+        while (nf < 9)
         {
             if (*q == '|' || *q == '\n' || *q == '\r' || *q == '\0')
             {
@@ -1152,6 +1153,7 @@ static void port_roster_parse(void)
                 if ((u32)c->base >= OSB5_SLOTS) c->base = -1;
             }
             if (nf > 7) port_roster_field(c->display, sizeof c->display, fld[7], len[7]);
+            if (nf > 8) port_roster_field(c->portrait, sizeof c->portrait, fld[8], len[8]);
             sNChars++;
         }
     }
@@ -5045,6 +5047,122 @@ void port_ui_opening_portrait_hook(Sprite *spr, s32 fkind)
         }
     }
     port_log("OSBUI: injected opening portrait fk%d\n", (int)fkind);
+}
+
+/* Sector Z cockpit: the opening's Great Fox interior is a 320x240 RGBA16
+ * sprite with Fox's head baked into the art.  When the Fox card belongs to
+ * a roster character with a staged portrait PNG (roster column 9), paint
+ * that portrait over Fox's head, cover-cropped to the head's box and
+ * feathered into the dark cabin so it reads as part of the painting. */
+#define COCKPIT_W      320
+#define COCKPIT_X0     118
+#define COCKPIT_Y0      58
+#define COCKPIT_X1     268
+#define COCKPIT_Y1     240
+#define COCKPIT_FEATHER 14
+
+void port_ui_opening_cockpit_hook(Sprite *spr)
+{
+    extern unsigned char *port_png_load_rgba8(const char *, int *, int *);
+    extern void port_png_free(unsigned char *);
+    PortChar *c = port_char_for_opening(nFTKindFox);
+    Bitmap *bms;
+    unsigned char *png;
+    int pw = 0, ph = 0;
+    s32 strip, y, x;
+    s32 box_w = COCKPIT_X1 - COCKPIT_X0, box_h = COCKPIT_Y1 - COCKPIT_Y0;
+    s32 crop_w, crop_h, crop_x, crop_y;
+
+    if (spr == NULL || c == NULL || c->portrait[0] == '\0')
+    {
+        return;
+    }
+    png = port_png_load_rgba8(c->portrait, &pw, &ph);
+    if (png == NULL || pw <= 0 || ph <= 0)
+    {
+        return;
+    }
+    /* cover-crop: keep the box's aspect, centred horizontally, biased to
+     * the top so the face (upper half of every portrait) stays in frame */
+    if ((s64)pw * box_h > (s64)ph * box_w)
+    {
+        crop_h = ph;
+        crop_w = (s32)((s64)ph * box_w / box_h);
+    }
+    else
+    {
+        crop_w = pw;
+        crop_h = (s32)((s64)pw * box_h / box_w);
+    }
+    crop_x = (pw - crop_w) / 2;
+    crop_y = (ph - crop_h) / 6;
+
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL || spr->bmsiz != G_IM_SIZ_16b)
+    {
+        port_png_free(png);
+        return;
+    }
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    portFixupSpriteBitmapData(spr, bms);
+    for (strip = 0; strip < spr->nbitmaps; strip++)
+    {
+        u8 *dst = (u8 *)PORT_RESOLVE(bms[strip].buf);
+        if (dst == NULL) continue;
+        for (y = 0; y < bms[strip].actualHeight; y++)
+        {
+            s32 sy = strip * spr->bmheight + y;    /* screen row (rows overlap by one) */
+            s32 by = sy - COCKPIT_Y0;
+            if (by < 0 || by >= box_h) continue;
+            for (x = COCKPIT_X0; x < COCKPIT_X1 && x < bms[strip].width_img; x++)
+            {
+                s32 bx = x - COCKPIT_X0;
+                s32 pixel = (y * bms[strip].width_img + x) * 2;
+                s32 edge = bx;
+                s32 coverage;
+                const u8 *p;
+                u16 original, rgba;
+                s32 old_r, old_g, old_b, out_r, out_g, out_b;
+                /* box-filter the crop into the box */
+                s32 sx0 = crop_x + (s32)((s64)bx * crop_w / box_w);
+                s32 sx1 = crop_x + (s32)((s64)(bx + 1) * crop_w / box_w);
+                s32 sy0 = crop_y + (s32)((s64)by * crop_h / box_h);
+                s32 sy1 = crop_y + (s32)((s64)(by + 1) * crop_h / box_h);
+                s32 acc_r = 0, acc_g = 0, acc_b = 0, n = 0, yy, xx;
+                if (sx1 <= sx0) sx1 = sx0 + 1;
+                if (sy1 <= sy0) sy1 = sy0 + 1;
+                for (yy = sy0; yy < sy1 && yy < ph; yy++)
+                {
+                    for (xx = sx0; xx < sx1 && xx < pw; xx++)
+                    {
+                        p = png + ((size_t)yy * pw + xx) * 4;
+                        acc_r += p[0]; acc_g += p[1]; acc_b += p[2]; n++;
+                    }
+                }
+                if (n == 0) continue;
+                acc_r /= n; acc_g /= n; acc_b /= n;
+
+                /* feather left/top/right edges; the bottom is the screen edge */
+                if (box_w - 1 - bx < edge) edge = box_w - 1 - bx;
+                if (by < edge) edge = by;
+                coverage = (edge >= COCKPIT_FEATHER) ? 255 : (edge * 255) / COCKPIT_FEATHER;
+
+                original = (u16)((dst[pixel] << 8) | dst[pixel + 1]);
+                old_r = (original >> 11) & 0x1F; old_r = (old_r << 3) | (old_r >> 2);
+                old_g = (original >> 6) & 0x1F;  old_g = (old_g << 3) | (old_g >> 2);
+                old_b = (original >> 1) & 0x1F;  old_b = (old_b << 3) | (old_b >> 2);
+                out_r = (acc_r * coverage + old_r * (255 - coverage) + 127) / 255;
+                out_g = (acc_g * coverage + old_g * (255 - coverage) + 127) / 255;
+                out_b = (acc_b * coverage + old_b * (255 - coverage) + 127) / 255;
+                rgba = (u16)(((out_r >> 3) << 11) | ((out_g >> 3) << 6) |
+                             ((out_b >> 3) << 1) | 1);
+                dst[pixel] = (u8)(rgba >> 8);
+                dst[pixel + 1] = (u8)rgba;
+            }
+        }
+    }
+    port_png_free(png);
+    port_log("OSBUI: cockpit face -> %s (%dx%d)\n", c->portrait, pw, ph);
 }
 
 extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
