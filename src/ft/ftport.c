@@ -1066,7 +1066,7 @@ static const char *port_inject_bundle_path(s32 fkind, s32 *from_single)
 typedef struct
 {
     char slug[64];
-    char shortname[8];
+    char shortname[11];
     s32  fkind;          /* home tile */
     s32  base;           /* fighter actually played; -1 = tile fighter */
     char bundle[256];
@@ -1499,14 +1499,14 @@ s32 port_roster_spawn_fkind(s32 player, s32 fkind)
  * covers (A-Z). NULL for vanilla/unbound players. */
 const char *port_roster_player_shortname(s32 player)
 {
-    static char buf[9];
+    static char buf[11];
     port_roster_parse();
     if ((u32)player < 4 && sPlayerChar[player] >= 0 && sPlayerChar[player] < sNChars)
     {
         PortChar *c = &sChars[sPlayerChar[player]];
         const char *src = (c->shortname[0] != '\0') ? c->shortname : c->slug;
         s32 i, n = 0;
-        for (i = 0; src[i] != '\0' && n < 8; i++)
+        for (i = 0; src[i] != '\0' && n < 10; i++)
         {
             char ch = src[i];
             if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
@@ -4765,7 +4765,7 @@ s32 port_ui_opening_name_hook(GObj *gobj, void *announce_file, s32 fkind)
         llIFCommonAnnounceCommonLetterZSprite
     };
     const char *src = port_roster_opening_shortname(fkind);
-    SObj *made[8];
+    SObj *made[10];
     s32 n = 0, i, total = 0;
 
     if (gobj == NULL || announce_file == NULL || src == NULL)
