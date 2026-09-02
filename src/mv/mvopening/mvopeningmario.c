@@ -161,6 +161,13 @@ void mvOpeningMarioMakeName(void)
 	sMVOpeningMarioNameGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 27, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+	{
+		extern s32 port_ui_opening_name_hook(GObj*, void*, s32);
+		if (port_ui_opening_name_hook(gobj, sMVOpeningMarioFiles[0], nFTKindMario)) return;
+	}
+#endif
+
 	for (i = 0; offsets[i] != 0x0; i++)
 	{
 		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningMarioFiles[0], offsets[i]));
@@ -361,8 +368,16 @@ void mvOpeningMarioMakePosedFighter(void)
 	GObj *fighter_gobj;
 	FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		desc.fkind = port_roster_opening_spawn_fkind(1, nFTKindMario);
+	}
+	desc.player = 1; /* keep the posed portrait's injected mesh in a separate slot */
+#else
 	desc.fkind = nFTKindMario;
-	desc.costume = ftParamGetCostumeCommonID(nFTKindMario, 0);
+#endif
+	desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
 	desc.figatree_heap = sMVOpeningMarioFigatreeHeap;
 
 	desc.pos.x = 0.0F;
@@ -505,7 +520,14 @@ void mvOpeningMarioFuncStart(void)
 	gSCManagerBattleState->gkind = nGRKindCastle;
 	gSCManagerBattleState->pl_count = 1;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		gSCManagerBattleState->players[0].fkind = port_roster_opening_spawn_fkind(0, nFTKindMario);
+	}
+#else
 	gSCManagerBattleState->players[0].fkind = nFTKindMario;
+#endif
 	gSCManagerBattleState->players[0].pkind = nFTPlayerKindKey;
 
 	mvOpeningMarioSetupFiles();

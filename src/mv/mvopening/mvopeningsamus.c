@@ -156,6 +156,13 @@ void mvOpeningSamusMakeName(void)
 	sMVOpeningSamusNameGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 27, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+	{
+		extern s32 port_ui_opening_name_hook(GObj*, void*, s32);
+		if (port_ui_opening_name_hook(gobj, sMVOpeningSamusFiles[0], nFTKindSamus)) return;
+	}
+#endif
+
 	for (i = 0; offsets[i] != 0x0; i++)
 	{
 		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningSamusFiles[0], offsets[i]));
@@ -372,8 +379,16 @@ void mvOpeningSamusMakePosedFighter(void)
 	GObj *fighter_gobj;
 	FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		desc.fkind = port_roster_opening_spawn_fkind(1, nFTKindSamus);
+	}
+	desc.player = 1; /* keep the posed portrait's injected mesh in a separate slot */
+#else
 	desc.fkind = nFTKindSamus;
-	desc.costume = ftParamGetCostumeCommonID(nFTKindSamus, 0);
+#endif
+	desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
 	desc.figatree_heap = sMVOpeningSamusFigatreeHeap;
 	desc.pos.x = 0.0F;
 	desc.pos.y = 600.0F;
@@ -528,7 +543,14 @@ void mvOpeningSamusFuncStart(void)
 	gSCManagerBattleState->gkind = nGRKindZebes;
 	gSCManagerBattleState->pl_count = 1;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		gSCManagerBattleState->players[0].fkind = port_roster_opening_spawn_fkind(0, nFTKindSamus);
+	}
+#else
 	gSCManagerBattleState->players[0].fkind = nFTKindSamus;
+#endif
 	gSCManagerBattleState->players[0].pkind = nFTPlayerKindKey;
 
 	mvOpeningSamusSetupFiles();

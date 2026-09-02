@@ -167,8 +167,16 @@ void mvOpeningCliffMakeFighter(void)
     GObj* fighter_gobj;
     FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+    {
+        extern s32 port_roster_opening_spawn_fkind(s32, s32);
+        desc.fkind = port_roster_opening_spawn_fkind(0, nFTKindLink);
+    }
+    desc.player = 0;
+#else
     desc.fkind = nFTKindLink;
-    desc.costume = ftParamGetCostumeCommonID(nFTKindLink, 0);
+#endif
+    desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
     desc.pos.x = 0.0F;
     desc.pos.y = 0.0F;
     desc.pos.z = 0.0F;
@@ -488,7 +496,14 @@ void mvOpeningCliffFuncStart(void)
     mvOpeningCliffInitTotalTimeTics();
     efManagerInitEffects();
     ftManagerAllocFighter(FTDATA_FLAG_SUBMOTION, 1);
+#ifdef PORT
+    {
+        extern s32 port_roster_opening_resolve_fkind(s32);
+        ftManagerSetupFilesAllKind(port_roster_opening_resolve_fkind(nFTKindLink));
+    }
+#else
     ftManagerSetupFilesAllKind(nFTKindLink);
+#endif
 
     sMVOpeningCliffFigatreeHeap = syTaskmanMalloc(gFTManagerFigatreeHeapSize, 0x10);
 

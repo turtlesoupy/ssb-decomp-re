@@ -23,6 +23,7 @@
 #include <sys/objman.h>          /* gGCCommonLinks */
 #include <sys/objdef.h>          /* nGCCommonLinkIDFighter */
 #include <sc/scsubsys/scsubsys.h>
+#include <reloc_data.h>
 
 #include "fighter_registry.h"
 
@@ -884,13 +885,14 @@ typedef struct OSB5State
     u8 saved_root_nib_valid;
 } OSB5State;
 
-/* One mesh slot per PLAYER (0..3): a match fields at most four fighters,
- * and keying by player (not fkind) lets several injected characters share
- * the same base fighter — inevitable once the roster outgrows the twelve
- * vanilla skeletons. OSB5_SLOTS stays 12 for the fkind-indexed tables
- * (tiles, inject sets). */
+/* One mesh slot per PLAYER (0..3) in normal play, plus four movie-only
+ * slots. The opening run/clash scenes keep all eight fighters alive while
+ * assigning every FTDesc player 0; the extra slots let those presentation
+ * objects coexist without ever passing synthetic player ids into the N64
+ * gameplay arrays. OSB5_SLOTS stays 12 for fkind-indexed tables. */
 #define OSB5_SLOTS 12
-#define OSB5_PLAYER_SLOTS 4
+#define OSB5_GAME_PLAYER_SLOTS 4
+#define OSB5_PLAYER_SLOTS 8
 static OSB5State sOsb5Slots[OSB5_PLAYER_SLOTS];
 static Gfx sOsb5NullDL[2];
 /* Null for parts whose flags&0xF==1: those parts' union field is a
@@ -904,9 +906,46 @@ static OSB5State *osb5_slot(s32 player)
     return ((u32)player < OSB5_PLAYER_SLOTS) ? &sOsb5Slots[player] : NULL;
 }
 
+/* Once attached, movie fighters are found by owner rather than fp->player:
+ * all eight deliberately retain the engine-safe player id 0. Normal battle
+ * fighters still fall through to their 0..3 player slot. */
+static OSB5State *osb5_slot_for_fighter(FTStruct *fp)
+{
+    s32 i;
+    s32 scene;
+    if (fp == NULL)
+    {
+        return NULL;
+    }
+    {
+        extern s32 port_current_scene(void);
+        scene = port_current_scene();
+    }
+    for (i = 0; i < OSB5_PLAYER_SLOTS; i++)
+    {
+        OSB5State *o = &sOsb5Slots[i];
+        if (o->owner == fp->fighter_gobj && o->owner_scene == scene &&
+            o->owner_fkind == (s32)fp->fkind)
+        {
+            return o;
+        }
+    }
+    return ((u32)fp->player < OSB5_GAME_PLAYER_SLOTS) ? &sOsb5Slots[fp->player] : NULL;
+}
+
+static s32 osb5_slot_index(OSB5State *o)
+{
+    return (o != NULL) ? (s32)(o - sOsb5Slots) : -1;
+}
+
 /* Registry index resolved by the in-flight port_inject_bundle() call, read
  * by osb5_load() when it claims the slot (-1 = vanilla / legacy inject). */
 static s32 sInjectCharIdx = -1;
+static s32 sInjectMeshSlot = -1;
+static s32 sOpeningSpawnPending = 0;
+static s32 sOpeningSpawnCharIdx = -1;
+static s32 sOpeningSpawnMeshSlot = -1;
+static s32 sOpeningSpawnFkind = -1;
 
 /* -------------------------------------------------------------------- */
 /* Injection roster: which bundle/ui/voice serves each fkind.            */
@@ -1041,6 +1080,9 @@ static s32 sTileChar[OSB5_SLOTS] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
 /* -2 = unbound (current tile binding decides), -1 = explicitly vanilla,
  * >=0 = registry character index */
 static s32 sPlayerChar[4] = { -2, -2, -2, -2 };
+/* Immutable copy of SSB64_PLAYER_CHARS for opening-movie lookups.  The
+ * movie rebinds its two synthetic fighters on every card. */
+static s32 sDirectPlayerChar[4] = { -1, -1, -1, -1 };
 static s32 sRosterPage = 0;
 
 static void port_roster_field(char *dst, size_t cap, const char *src, size_t n)
@@ -1140,6 +1182,7 @@ static void port_roster_parse(void)
                 if (same)
                 {
                     sPlayerChar[pl] = i;
+                    sDirectPlayerChar[pl] = i;
                     port_log("ROSTER: player %d preset to %s\n", (int)pl, sChars[i].slug);
                     break;
                 }
@@ -1207,6 +1250,102 @@ static PortChar *port_char_at_tile(s32 fkind)
         return &sChars[sTileChar[fkind]];
     }
     return NULL;
+}
+
+/* Opening-movie presentation follows the current page's tile character, or
+ * a direct-launch player binding assigned to that exact tile kind. */
+static PortChar *port_char_for_opening(s32 fkind)
+{
+    s32 player;
+    PortChar *c = port_char_at_tile(fkind);
+    if (c != NULL)
+    {
+        return c;
+    }
+    /* Direct-launch rosters deliberately stay on page 0 and bind their
+     * characters through SSB64_PLAYER_CHARS instead of tile bindings. */
+    for (player = 0; player < 4; player++)
+    {
+        s32 idx = sDirectPlayerChar[player];
+        if (idx >= 0 && idx < sNChars && sChars[idx].fkind == fkind)
+        {
+            return &sChars[idx];
+        }
+    }
+    return NULL;
+}
+
+static const char *port_roster_opening_shortname(s32 fkind)
+{
+    PortChar *c = port_char_for_opening(fkind);
+    if (c == NULL) return NULL;
+    return (c->shortname[0] != '\0') ? c->shortname : c->slug;
+}
+
+/* TRUE only for an opening tile backed by a staged mesh bundle. The room
+ * scene uses this to prefer its two launch-config characters while keeping
+ * the original random vanilla behavior when too few bundles were staged. */
+s32 port_roster_opening_has_injected(s32 tile_fkind)
+{
+    PortChar *c = port_char_for_opening(tile_fkind);
+    return c != NULL && c->bundle[0] != '\0';
+}
+
+/* The website marks the clicked grid fighter's opening card so the room
+ * scene can make it the first character Master Hand picks up. Ignore stale
+ * or malformed targets unless that exact card has a staged mesh. */
+s32 port_roster_opening_first_fkind(void)
+{
+    extern long strtol(const char *, char **, int);
+    const char *value = getenv("SSB64_OPENING_FIRST_FKIND");
+    char *end;
+    long fkind;
+
+    if (value == NULL || *value == '\0')
+    {
+        return -1;
+    }
+    fkind = strtol(value, &end, 10);
+    if (*end != '\0' || fkind < 0 || fkind >= OSB5_SLOTS ||
+        !port_roster_opening_has_injected((s32)fkind))
+    {
+        return -1;
+    }
+    return (s32)fkind;
+}
+
+/* Pure lookup for scene file setup; unlike the spawn helper below this does
+ * not arm the one-shot movie mesh binding. */
+s32 port_roster_opening_resolve_fkind(s32 tile_fkind)
+{
+    PortChar *c = port_char_for_opening(tile_fkind);
+    return (c != NULL && c->base >= 0) ? c->base : tile_fkind;
+}
+
+/* Bind one of the opening movie's two fighter objects to the character on
+ * this montage tile and return the skeleton kind that character targets.
+ * This matters on paged rosters where tile position and BASE fighter are
+ * deliberately independent. */
+s32 port_roster_opening_spawn_fkind(s32 player, s32 tile_fkind)
+{
+    PortChar *c = port_char_for_opening(tile_fkind);
+    sOpeningSpawnPending = 1;
+    sOpeningSpawnCharIdx = (c != NULL && c->bundle[0] != '\0') ? (s32)(c - sChars) : -1;
+    sOpeningSpawnMeshSlot = ((u32)player < OSB5_PLAYER_SLOTS) ? player : 0;
+    sOpeningSpawnFkind = (c != NULL && c->base >= 0) ? c->base : tile_fkind;
+    if ((u32)tile_fkind >= OSB5_SLOTS || c == NULL)
+    {
+        if ((u32)player < OSB5_GAME_PLAYER_SLOTS)
+        {
+            sPlayerChar[player] = -1;
+        }
+        return tile_fkind;
+    }
+    if ((u32)player < OSB5_GAME_PLAYER_SLOTS)
+    {
+        sPlayerChar[player] = (s32)(c - sChars);
+    }
+    return (c->base >= 0) ? c->base : tile_fkind;
 }
 
 /* The character a spawning fighter should wear: an explicit per-player
@@ -1510,7 +1649,7 @@ s32 port_osb5_fighter_is_canonical(void *fighter_gobj)
     {
         return 0;
     }
-    o = osb5_slot((s32)fp->player);
+    o = osb5_slot_for_fighter(fp);
     return (o != NULL && o->vtx != NULL && o->owner == fighter_gobj &&
             (s32)fp->fkind == o->owner_fkind && o->canonical);
 }
@@ -1529,7 +1668,7 @@ s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
     {
         return 0;
     }
-    o = osb5_slot((s32)fp->player);
+    o = osb5_slot_for_fighter(fp);
     if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj ||
         (s32)fp->fkind != o->owner_fkind)
     {
@@ -1568,7 +1707,7 @@ void port_osb5_reblank_joint(void *fighter_gobj, s32 joint_id)
     {
         return;
     }
-    osb5_blank_joint(osb5_slot((s32)fp->player), fp, joint_id);
+    osb5_blank_joint(osb5_slot_for_fighter(fp), fp, joint_id);
 }
 
 /* SSB64_POSE_CAPTURE: mesh-eval capture mode. The display walk asks about
@@ -1891,7 +2030,7 @@ s32 port_osb5_seat_local(FTStruct *fp, DObj *dobj, f32 m[4][4], s32 store)
     static u8 sSeatValid[OSB5_PLAYER_SLOTS][64];
     s32 pl, jid, r, c;
     if (fp == NULL) return 0;
-    pl = (s32)fp->player;
+    pl = osb5_slot_index(osb5_slot_for_fighter(fp));
     if ((u32)pl >= OSB5_PLAYER_SLOTS) return 0;
     for (jid = 1; jid < FTPARTS_JOINT_NUM_MAX && jid < 64; jid++)
         if (fp->joints[jid] == dobj) break;
@@ -1916,9 +2055,9 @@ s32 port_osb5_is_gear(FTStruct *fp, DObj *dobj)
     OSB5State *o;
     s32 pl, kk;
     if (fp == NULL || dobj == NULL) return 0;
-    pl = (s32)fp->player;
+    pl = osb5_slot_index(osb5_slot_for_fighter(fp));
     if ((u32)pl >= OSB5_PLAYER_SLOTS) return 0;
-    o = osb5_slot(pl);
+    o = &sOsb5Slots[pl];
     if (o == NULL || !o->canonical || o->vtx == NULL) return 0;
     if (dobj->dv == NULL || dobj->dv == (void *)sOsb5NullDL) return 0;
     for (kk = 0; kk < o->njoints; kk++)
@@ -1937,9 +2076,9 @@ s32 port_osb5_virtual_local(FTStruct *fp, DObj *dobj, f32 out_l[4][4])
     f32 Wj[3][3], Wp[3][3], WpInv[3][3], d[3];
     s32 r, c;
     if (fp == NULL) return 0;
-    pl = (s32)fp->player;
+    pl = osb5_slot_index(osb5_slot_for_fighter(fp));
     if ((u32)pl >= OSB5_PLAYER_SLOTS) return 0;
-    o = osb5_slot(pl);
+    o = &sOsb5Slots[pl];
     if (o == NULL || !o->canonical || o->vtx == NULL || !sOsb5LateSeat[pl].valid)
         return 0;
     for (kk = 0; kk < o->njoints; kk++)
@@ -2005,7 +2144,8 @@ s32 port_osb5_virtual_local(FTStruct *fp, DObj *dobj, f32 out_l[4][4])
 
 static void osb5_reseat_kept(OSB5State *o, FTStruct *fp, f32 vjo[32][3])
 {
-    f32 (*rd)[3][3] = sOsb5LateSeat[fp->player].rd;
+    s32 mesh_slot = osb5_slot_index(o);
+    f32 (*rd)[3][3] = sOsb5LateSeat[mesh_slot].rd;
     s32 kk, jj, r;
     static s32 sLogged = 0;
     if (!sLogged) { port_log("OSB5: RESEAT ACTIVE\n"); sLogged = 1; }
@@ -2187,7 +2327,7 @@ void port_osb5_heal_blanks(GObj *fighter_gobj)
     OSB5State *o;
     s32 k;
     if (fp == NULL) return;
-    o = osb5_slot((s32)fp->player);
+    o = osb5_slot_for_fighter(fp);
     if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj) return;
     for (k = 0; k < osb5_blank_count(o); k++)
     {
@@ -2203,10 +2343,12 @@ void port_osb5_reseat_late(GObj *fighter_gobj)
 {
     FTStruct *fp = ftGetStruct(fighter_gobj);
     OSB5State *o;
+    s32 mesh_slot;
     if (fp == NULL) return;
-    o = osb5_slot((s32)fp->player);
+    o = osb5_slot_for_fighter(fp);
     if (o == NULL || !o->canonical || o->owner != fighter_gobj) return;
-    if (!sOsb5LateSeat[fp->player].valid) return;
+    mesh_slot = osb5_slot_index(o);
+    if ((u32)mesh_slot >= OSB5_PLAYER_SLOTS || !sOsb5LateSeat[mesh_slot].valid) return;
 
     /* accessory state-swap blink: when an unmapped joint's display list
      * pointer CHANGES (in-hand gear <-> sheathed copies), its matrix
@@ -2219,7 +2361,7 @@ void port_osb5_reseat_late(GObj *fighter_gobj)
         static void *sSavedDv[OSB5_PLAYER_SLOTS][64];
         static u8 sPending[OSB5_PLAYER_SLOTS][64];
         s32 jid2, kk2, m2;
-        s32 pl = (s32)fp->player;
+        s32 pl = mesh_slot;
         for (jid2 = 1; jid2 < FTPARTS_JOINT_NUM_MAX && jid2 < 64; jid2++)
         {
             DObj *dj = fp->joints[jid2];
@@ -2261,7 +2403,7 @@ void port_osb5_reseat_late(GObj *fighter_gobj)
         }
     }
     if (getenv("SSB64_NO_RESEAT") != NULL) return;
-    osb5_reseat_kept(o, fp, sOsb5LateSeat[fp->player].vjo);
+    osb5_reseat_kept(o, fp, sOsb5LateSeat[mesh_slot].vjo);
     /* invalidate the part-matrix memo AFTER the writes: the draw pass
      * consumes memoized matrices, and without this the re-seat is only
      * visible on ticks where some later engine branch happened to
@@ -2278,9 +2420,9 @@ void port_osb5_reseat_late(GObj *fighter_gobj)
         DObj *aj = (tid > 0 && tid < FTPARTS_JOINT_NUM_MAX) ? fp->joints[tid] : NULL;
         if (aj != NULL)
         {
-            sOsb5SeatWrote[fp->player][0] = aj->translate.vec.f.x;
-            sOsb5SeatWrote[fp->player][1] = aj->translate.vec.f.y;
-            sOsb5SeatWrote[fp->player][2] = aj->translate.vec.f.z;
+            sOsb5SeatWrote[mesh_slot][0] = aj->translate.vec.f.x;
+            sOsb5SeatWrote[mesh_slot][1] = aj->translate.vec.f.y;
+            sOsb5SeatWrote[mesh_slot][2] = aj->translate.vec.f.z;
         }
     }
 }
@@ -2324,7 +2466,7 @@ f32 port_osb5_charge_scale(GObj *fighter_gobj)
     FTStruct *fp = ftGetStruct(fighter_gobj);
     OSB5State *o;
     if (fp == NULL) return 1.0f;
-    o = osb5_slot((s32)fp->player);
+    o = osb5_slot_for_fighter(fp);
     if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj ||
         (s32)fp->fkind != o->owner_fkind || !o->canonical)
         return 1.0f;
@@ -2367,7 +2509,7 @@ static void osb5_menu_unfreeze(GObj *fighter_gobj, s32 keep_seated)
         return;
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
-    pl = (s32)fp->player;
+    pl = osb5_slot_index(osb5_slot_for_fighter(fp));
     for (j = 0; j < FTPARTS_JOINT_NUM_MAX; j++)
     {
         DObj *dj = fp->joints[j];
@@ -2476,7 +2618,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
     OSB5State *o;
     f32 jo[32][3], jm[32][3][3];
     f32 t0o[3], t0m[3][3], t0inv[3][3];
-    s32 k, i;
+    s32 k, i, mesh_slot;
 
     if (getenv("SSB64_NO_SKIN") != NULL) return;
     if (getenv("SSB64_FACE_DEBUG") != NULL)
@@ -2498,7 +2640,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
     }
     fp = ftGetStruct(fighter_gobj);
     if (fp == NULL) return;
-    o = osb5_slot((s32)fp->player);
+    o = osb5_slot_for_fighter(fp);
     if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj)
     {
         if (getenv("SSB64_OSB5_DEBUG") != NULL && o != NULL && o->vtx != NULL && o->dbg_ticks < 3)
@@ -2509,6 +2651,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         }
         return;
     }
+    mesh_slot = osb5_slot_index(o);
     if ((s32)fp->fkind != o->owner_fkind)
     {
         if (getenv("SSB64_OSB5_DEBUG") != NULL && o->dbg_ticks < 3)
@@ -3035,22 +3178,22 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                             s32 nowt = (s32)port_get_frame_count();
                             f32 p = atan2f(to[2], to[1]), pd, cx2, sx2;
                             f32 rx[3][3];
-                            if (fp->player >= 0 && fp->player < OSB5_PLAYER_SLOTS)
+                            if ((u32)mesh_slot < OSB5_PLAYER_SLOTS)
                             {
-                                if (!sHp[fp->player].valid || nowt - sHp[fp->player].last > 30 ||
-                                    nowt < sHp[fp->player].last)
+                                if (!sHp[mesh_slot].valid || nowt - sHp[mesh_slot].last > 30 ||
+                                    nowt < sHp[mesh_slot].last)
                                 {
-                                    sHp[fp->player].base = p;
-                                    sHp[fp->player].valid = 1;
+                                    sHp[mesh_slot].base = p;
+                                    sHp[mesh_slot].valid = 1;
                                 }
                                 else
                                 {
-                                    f32 d2 = p - sHp[fp->player].base;
+                                    f32 d2 = p - sHp[mesh_slot].base;
                                     if (d2 < 0.30f && d2 > -0.30f)
-                                        sHp[fp->player].base += 0.08f*d2;
+                                        sHp[mesh_slot].base += 0.08f*d2;
                                 }
-                                sHp[fp->player].last = nowt;
-                                pd = p - sHp[fp->player].base;
+                                sHp[mesh_slot].last = nowt;
+                                pd = p - sHp[mesh_slot].base;
                             }
                             else pd = 0.0f;
                             if (pd > 1.2f) pd = 1.2f;
@@ -3254,9 +3397,9 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
          * has rewritten translates — the mid-tick write alone flickered
          * accessories between the virtual and vanilla positions on
          * alternating frames. */
-        memcpy(sOsb5LateSeat[fp->player].vjo, vjo, sizeof(vjo));
-        memcpy(sOsb5LateSeat[fp->player].rd, rd, sizeof(rd));
-        sOsb5LateSeat[fp->player].valid = 1;
+        memcpy(sOsb5LateSeat[mesh_slot].vjo, vjo, sizeof(vjo));
+        memcpy(sOsb5LateSeat[mesh_slot].rd, rd, sizeof(rd));
+        sOsb5LateSeat[mesh_slot].valid = 1;
         {
         s32 pass;
         for (pass = 0; pass < 1; pass++)
@@ -3306,7 +3449,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
              * renders the reseated position. Battle keeps its existing
              * late-reseat mechanism. */
             if (osb5_on_menu_scene() && tid < 64 &&
-                (u32)fp->player < OSB5_PLAYER_SLOTS)
+                (u32)mesh_slot < OSB5_PLAYER_SLOTS)
             {
                 FTParts *spt = (FTParts *)aj->user_data.p;
                 if (spt != NULL)
@@ -3314,7 +3457,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                     extern void gmCollisionTransformMatrixAll(DObj *dobj, FTParts *parts, Mtx44f mtx);
                     gmCollisionTransformMatrixAll(aj, spt, spt->unk_dobjtrans_0x10);
                     spt->transform_update_mode = 1;
-                    sOsb5MenuSeated[fp->player][tid] = 1;
+                    sOsb5MenuSeated[mesh_slot][tid] = 1;
                 }
             }
         }
@@ -3438,7 +3581,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         aj->translate.vec.f.y = lo[1];
         aj->translate.vec.f.z = lo[2];
         if (o->acc_orient[k] > 0.5f && o->canonical && o->acc_bind_have &&
-            sOsb5LateSeat[fp->player].valid)
+            sOsb5LateSeat[mesh_slot].valid)
         {
             /* orient-follow: world rotation = chest delta * bind frame;
              * write parent-local euler in the engine's XYZ convention and
@@ -3448,7 +3591,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             f32 Wt[3][3], L[3][3];
             f32 pre_x = aj->rotate.vec.f.x, pre_y = aj->rotate.vec.f.y, pre_z = aj->rotate.vec.f.z;
             FTParts *apt = (FTParts *)aj->user_data.p;
-            osb5_mul3(Wt, sOsb5LateSeat[fp->player].rd[0], o->acc_bind_m[k]);
+            osb5_mul3(Wt, sOsb5LateSeat[mesh_slot].rd[0], o->acc_bind_m[k]);
             osb5_mul3(L, pinv, Wt);
             aj->rotate.vec.f.x = atan2f(L[2][1], L[2][2]);
             aj->rotate.vec.f.y = asinf(-(L[2][0] > 1.0f ? 1.0f : (L[2][0] < -1.0f ? -1.0f : L[2][0])));
@@ -3468,8 +3611,8 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                     port_log("ACCDBG j=%d pre=(%.2f %.2f %.2f) post=(%.2f %.2f %.2f) rd00=%.2f rd02=%.2f mode=%d\n",
                              jid, pre_x, pre_y, pre_z,
                              aj->rotate.vec.f.x, aj->rotate.vec.f.y, aj->rotate.vec.f.z,
-                             sOsb5LateSeat[fp->player].rd[0][0][0],
-                             sOsb5LateSeat[fp->player].rd[0][0][2],
+                             sOsb5LateSeat[mesh_slot].rd[0][0][0],
+                             sOsb5LateSeat[mesh_slot].rd[0][0][2],
                              dbgpt != NULL ? (int)dbgpt->transform_update_mode : -1);
             }
             if (apt != NULL && apt->transform_update_mode != 0)
@@ -3607,7 +3750,9 @@ static void osb5_release_owner(OSB5State *o)
 
 static void osb5_load(FTStruct *fp, FILE *f)
 {
-    OSB5State *o = osb5_slot((s32)fp->player);
+    OSB5State *o = ((u32)sInjectMeshSlot < OSB5_PLAYER_SLOTS)
+        ? &sOsb5Slots[sInjectMeshSlot]
+        : osb5_slot_for_fighter(fp);
     u32 hdr[5];
     u32 njoints, nverts, ntris, tw, th;
     u8 *tex;
@@ -3662,7 +3807,7 @@ static void osb5_load(FTStruct *fp, FILE *f)
      * seats — the select-card bent/hunched pose after dragging across
      * canonical tiles. */
     o->canonical = 0;
-    sOsb5LateSeat[fp->player].valid = 0;
+    sOsb5LateSeat[osb5_slot_index(o)].valid = 0;
     for (k = 0; k < 8; k++) { o->acc_pitch[k] = 0.0f; o->acc_orient[k] = 0.0f; o->acc_scale[k] = 0.0f; }
     o->fit_scale = 1.0f;
     o->leg_ratio = 0.0f;
@@ -4585,6 +4730,249 @@ static void port_ui_write_canvas(Sprite *spr, const u8 *canvas, s32 canvas_w,
 #define OSBV_EMBL_W     48
 #define OSBV_EMBL_H     48
 
+/* Replace an opening-movie fighter title with the roster character's short
+ * name, using the movie's own large A-Z glyphs.  Returning FALSE keeps the
+ * caller's original hard-coded MARIO / KIRBY / ... construction intact. */
+s32 port_ui_opening_name_hook(GObj *gobj, void *announce_file, s32 fkind)
+{
+    static const intptr_t letters[26] =
+    {
+        llIFCommonAnnounceCommonLetterASprite,
+        llIFCommonAnnounceCommonLetterBSprite,
+        llIFCommonAnnounceCommonLetterCSprite,
+        llIFCommonAnnounceCommonLetterDSprite,
+        llIFCommonAnnounceCommonLetterESprite,
+        llIFCommonAnnounceCommonLetterFSprite,
+        llIFCommonAnnounceCommonLetterGSprite,
+        llIFCommonAnnounceCommonLetterHSprite,
+        llIFCommonAnnounceCommonLetterISprite,
+        llIFCommonAnnounceCommonLetterJSprite,
+        llIFCommonAnnounceCommonLetterKSprite,
+        llIFCommonAnnounceCommonLetterLSprite,
+        llIFCommonAnnounceCommonLetterMSprite,
+        llIFCommonAnnounceCommonLetterNSprite,
+        llIFCommonAnnounceCommonLetterOSprite,
+        llIFCommonAnnounceCommonLetterPSprite,
+        llIFCommonAnnounceCommonLetterQSprite,
+        llIFCommonAnnounceCommonLetterRSprite,
+        llIFCommonAnnounceCommonLetterSSprite,
+        llIFCommonAnnounceCommonLetterTSprite,
+        llIFCommonAnnounceCommonLetterUSprite,
+        llIFCommonAnnounceCommonLetterVSprite,
+        llIFCommonAnnounceCommonLetterWSprite,
+        llIFCommonAnnounceCommonLetterXSprite,
+        llIFCommonAnnounceCommonLetterYSprite,
+        llIFCommonAnnounceCommonLetterZSprite
+    };
+    const char *src = port_roster_opening_shortname(fkind);
+    SObj *made[8];
+    s32 n = 0, i, total = 0;
+
+    if (gobj == NULL || announce_file == NULL || src == NULL)
+    {
+        return FALSE;
+    }
+    for (i = 0; src[i] != '\0' && n < ARRAY_COUNT(made); i++)
+    {
+        char ch = src[i];
+        SObj *sobj;
+        if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
+        if (ch < 'A' || ch > 'Z') continue;
+        sobj = lbCommonMakeSObjForGObj
+        (
+            gobj,
+            lbRelocGetFileData(Sprite*, announce_file, letters[ch - 'A'])
+        );
+        sobj->sprite.attr &= ~SP_FASTCOPY;
+        sobj->sprite.attr |= SP_TRANSPARENT;
+        sobj->envcolor.r = sobj->envcolor.g = sobj->envcolor.b = 0xFF;
+        sobj->sprite.red = sobj->sprite.green = sobj->sprite.blue = 0xFF;
+        made[n++] = sobj;
+        total += sobj->sprite.width;
+    }
+    if (n == 0)
+    {
+        return FALSE;
+    }
+    total += (n - 1) * 3;
+    {
+        f32 x = 160.0F - total * 0.5F;
+        for (i = 0; i < n; i++)
+        {
+            made[i]->pos.x = x;
+            made[i]->pos.y = 100.0F;
+            x += made[i]->sprite.width + 3.0F;
+        }
+    }
+    port_log("OSBUI: opening title fk%d -> %s\n", (int)fkind, src);
+    return TRUE;
+}
+
+/* Composite the existing OSBV CSS portrait into the opening movie's wide
+ * 300x55 portrait ribbon.  The portrait is fitted without distortion; its
+ * edge colors extend outward and cross-fade into the ribbon's original
+ * flame art.  Old packs therefore gain the movie treatment without a
+ * format migration or a purpose-built panoramic image. */
+void port_ui_opening_portrait_hook(Sprite *spr, s32 fkind)
+{
+    enum
+    {
+        SRC_W = 48,
+        SRC_H = 43,
+        SRC_ROW = SRC_W * 4,
+        SRC_BYTES = 8640,
+        ART_X = 0,
+        ART_Y = 10,
+        ART_W = 45,
+        ART_H = SRC_H - ART_Y,
+        RIBBON_H = 55,
+        /* 45x33 fitted to 55px high, rounded to the nearest pixel. */
+        FIT_W = (ART_W * RIBBON_H + ART_H / 2) / ART_H,
+        FLAME_FADE_W = 48
+    };
+    static u8 raw[SRC_BYTES];
+    static u8 canvas[SRC_W * SRC_H * 4];
+    PortChar *opening_char = port_char_for_opening(fkind);
+    const char *ui = (opening_char != NULL && opening_char->ui[0] != '\0')
+                   ? opening_char->ui : port_ui_path_for_fkind(fkind);
+    Bitmap *bms;
+    FILE *f;
+    char magic[4];
+    s32 strip, y, x;
+    static const s32 strip_h[3] = { 21, 21, 3 };
+    static const s32 strip_y[3] = { 0, 20, 40 };
+
+    if (spr == NULL || ui == NULL)
+    {
+        return;
+    }
+    f = fopen(ui, "rb");
+    if (f == NULL || fread(magic, 1, 4, f) != 4 ||
+        magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' || magic[3] != 'V' ||
+        fread(raw, 1, sizeof raw, f) != sizeof raw)
+    {
+        if (f != NULL) fclose(f);
+        return;
+    }
+    fclose(f);
+
+    /* OSBV stores each RGBA32 strip in the same pre-encoded state as the
+     * original N64 sprite: blanket u32 reversal plus the 32-bit odd-row
+     * 8-byte-half TMEM swap.  Undo both into a stitched 48x43 canvas. */
+    for (x = 0; x + 3 < SRC_BYTES; x += 4)
+    {
+        u8 a = raw[x], b = raw[x + 1];
+        raw[x] = raw[x + 3]; raw[x + 1] = raw[x + 2];
+        raw[x + 2] = b; raw[x + 3] = a;
+    }
+    {
+        s32 off = 0;
+        for (strip = 0; strip < 3; strip++)
+        {
+            for (y = 1; y < strip_h[strip]; y += 2)
+            {
+                u8 *row = raw + off + y * SRC_ROW;
+                for (x = 0; x + 15 < SRC_ROW; x += 16)
+                {
+                    s32 k;
+                    for (k = 0; k < 8; k++)
+                    {
+                        u8 t = row[x + k];
+                        row[x + k] = row[x + 8 + k];
+                        row[x + 8 + k] = t;
+                    }
+                }
+            }
+            for (y = 0; y < strip_h[strip]; y++)
+            {
+                memcpy(canvas + (strip_y[strip] + y) * SRC_ROW,
+                       raw + off + y * SRC_ROW, SRC_ROW);
+            }
+            off += strip_h[strip] * SRC_ROW;
+        }
+    }
+
+    /* lbCommonMakeSObjForGObj already fixed the file Sprite and its bitmap
+     * data before copying it into this SObj.  Fixing the SObj copy again
+     * would swap every paired header field (300x55 -> 55x300, etc.). */
+    bms = (Bitmap *)PORT_RESOLVE(spr->bitmap);
+    if (bms == NULL || spr->bmsiz != G_IM_SIZ_16b)
+    {
+        return;
+    }
+    portFixupBitmapArray(bms, spr->nbitmaps);
+    portFixupSpriteBitmapData(spr, bms);
+    for (strip = 0; strip < spr->nbitmaps; strip++)
+    {
+        u8 *dst = (u8 *)PORT_RESOLVE(bms[strip].buf);
+        s32 logical_y0 = strip * spr->bmheight;
+        if (dst == NULL) continue;
+        for (y = 0; y < bms[strip].actualHeight; y++)
+        {
+            s32 dy = logical_y0 + y;
+            s32 fit_x = (bms[strip].width_img - FIT_W) / 2;
+            /* Crop away the baked CSS caption, then fit the remaining art
+             * to the ribbon's height while preserving its aspect ratio. */
+            s32 sy = ART_Y + (dy * ART_H) / RIBBON_H;
+            if (sy >= SRC_H) sy = SRC_H - 1;
+            for (x = 0; x < bms[strip].width_img; x++)
+            {
+                s32 sx, edge_distance, coverage;
+                s32 pixel = (y * bms[strip].width_img + x) * 2;
+                const u8 *p;
+                u16 original, rgba;
+                s32 old_r, old_g, old_b;
+                s32 out_r, out_g, out_b;
+
+                if (x < fit_x)
+                {
+                    sx = ART_X;
+                }
+                else if (x >= fit_x + FIT_W)
+                {
+                    sx = ART_X + ART_W - 1;
+                }
+                else
+                {
+                    sx = ART_X + ((x - fit_x) * ART_W) / FIT_W;
+                    if (sx >= ART_X + ART_W) sx = ART_X + ART_W - 1;
+                }
+
+                /* Hold the nearest portrait-edge color across the center
+                 * field, obscuring the old built-in character.  Only the
+                 * outer zones cross-fade to the original banner, where its
+                 * texture is almost entirely flame rather than character. */
+                edge_distance = x;
+                if (bms[strip].width_img - 1 - x < edge_distance)
+                {
+                    edge_distance = bms[strip].width_img - 1 - x;
+                }
+                coverage = (edge_distance >= FLAME_FADE_W)
+                         ? 255 : (edge_distance * 255) / FLAME_FADE_W;
+                p = canvas + (sy * SRC_W + sx) * 4;
+                coverage = (coverage * p[3]) / 255;
+
+                original = (u16)((dst[pixel] << 8) | dst[pixel + 1]);
+                old_r = (original >> 11) & 0x1F;
+                old_g = (original >> 6) & 0x1F;
+                old_b = (original >> 1) & 0x1F;
+                old_r = (old_r << 3) | (old_r >> 2);
+                old_g = (old_g << 3) | (old_g >> 2);
+                old_b = (old_b << 3) | (old_b >> 2);
+
+                out_r = (p[0] * coverage + old_r * (255 - coverage) + 127) / 255;
+                out_g = (p[1] * coverage + old_g * (255 - coverage) + 127) / 255;
+                out_b = (p[2] * coverage + old_b * (255 - coverage) + 127) / 255;
+                rgba = (u16)(((out_r >> 3) << 11) | ((out_g >> 3) << 6) |
+                             ((out_b >> 3) << 1) | (original & 1));
+                dst[pixel] = (u8)(rgba >> 8);
+                dst[pixel + 1] = (u8)rgba;
+            }
+        }
+    }
+    port_log("OSBUI: injected opening portrait fk%d\n", (int)fkind);
+}
+
 extern void portFixupSpriteBitmapData(void *sprite, void *bitmaps);
 
 void port_ui_snapshot(Sprite *spr);
@@ -5287,14 +5675,28 @@ void port_inject_bundle(GObj *fighter_gobj)
     char magic[4];
     u32 nparts, p;
     u32 replaced = 0;
+    s32 opening_explicit = 0;
 
     if (fp == NULL)
     {
         return;
     }
+    sInjectMeshSlot = (s32)fp->player;
     {
         s32 cidx = -1;
-        PortChar *c = port_char_for_player((s32)fp->player, (s32)fp->fkind, &cidx);
+        PortChar *c;
+        if (sOpeningSpawnPending && sOpeningSpawnFkind == (s32)fp->fkind)
+        {
+            opening_explicit = 1;
+            cidx = sOpeningSpawnCharIdx;
+            c = (cidx >= 0 && cidx < sNChars) ? &sChars[cidx] : NULL;
+            sInjectMeshSlot = sOpeningSpawnMeshSlot;
+            sOpeningSpawnPending = 0;
+        }
+        else
+        {
+            c = port_char_for_player((s32)fp->player, (s32)fp->fkind, &cidx);
+        }
         sInjectCharIdx = (c != NULL) ? cidx : -1;
         if (c != NULL)
         {
@@ -5305,9 +5707,13 @@ void port_inject_bundle(GObj *fighter_gobj)
             s32 eff = (c->base >= 0) ? c->base : c->fkind;
             path = (eff == (s32)fp->fkind && c->bundle[0] != '\0') ? c->bundle : NULL;
         }
-        else
+        else if (!opening_explicit)
         {
             path = port_inject_bundle_path((s32)fp->fkind, &from_single);
+        }
+        else
+        {
+            path = NULL;
         }
     }
     if (path == NULL)
@@ -5316,7 +5722,7 @@ void port_inject_bundle(GObj *fighter_gobj)
          * GObj — the pool reuses addresses, and a stale owner match (same
          * gobj, same fkind after re-picking vanilla on the injected
          * character's home tile) would keep blanking the vanilla mesh */
-        OSB5State *o = osb5_slot((s32)fp->player);
+        OSB5State *o = osb5_slot_for_fighter(fp);
         if (o != NULL && o->owner == fighter_gobj)
         {
             o->owner = NULL;

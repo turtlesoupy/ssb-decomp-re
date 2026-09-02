@@ -291,16 +291,27 @@ void mvOpeningJungleMakeFighters(void)
     for (i = 0; i < ARRAY_COUNT(gSCManagerBattleState->players); i++)
     {
         FTDesc desc = dFTManagerDefaultFighterDesc;
+        s32 is_donkey;
 
         if (gSCManagerBattleState->players[i].pkind == nFTPlayerKindNot)
         {
             continue;
         }
-        ftManagerSetupFilesAllKind(gSCManagerBattleState->players[i].fkind);
+        is_donkey = (i == 0);
 
+#ifdef PORT
+        {
+            extern s32 port_roster_opening_spawn_fkind(s32, s32);
+            s32 tile_fkind = is_donkey ? nFTKindDonkey : nFTKindSamus;
+
+            desc.fkind = port_roster_opening_spawn_fkind(i, tile_fkind);
+        }
+#else
         desc.fkind = gSCManagerBattleState->players[i].fkind;
+#endif
+        ftManagerSetupFilesAllKind(desc.fkind);
 
-        if (gSCManagerBattleState->players[i].fkind == nFTKindDonkey)
+        if (is_donkey != FALSE)
         {
             desc.pos.x = spawn_position[1].x;
             desc.pos.y = spawn_position[1].y;
@@ -323,17 +334,21 @@ void mvOpeningJungleMakeFighters(void)
         desc.team = gSCManagerBattleState->players[i].team;
         desc.player = i;
         desc.detail = nFTPartsDetailHigh;
+#ifdef PORT
+        desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
+#else
         desc.costume = gSCManagerBattleState->players[i].costume;
+#endif
         desc.handicap = gSCManagerBattleState->players[i].handicap;
         desc.level = gSCManagerBattleState->players[i].level;
         desc.stock_count = gSCManagerBattleState->stocks;
         desc.pkind = gSCManagerBattleState->players[i].pkind;
         desc.controller = &gSYControllerDevices[i];
-        desc.figatree_heap = ftManagerAllocFigatreeHeapKind(gSCManagerBattleState->players[i].fkind);
+        desc.figatree_heap = ftManagerAllocFigatreeHeapKind(desc.fkind);
 
         sMVOpeningJungleFighterGObj = fighter_gobj = ftManagerMakeFighter(&desc);
 
-        if (gSCManagerBattleState->players[i].fkind == nFTKindDonkey)
+        if (is_donkey != FALSE)
         {
             fp = ftGetStruct(fighter_gobj);
 
@@ -347,7 +362,7 @@ void mvOpeningJungleMakeFighters(void)
         }
         ftParamInitPlayerBattleStats(i, fighter_gobj);
 
-        if (gSCManagerBattleState->players[i].fkind == nFTKindDonkey)
+        if (is_donkey != FALSE)
         {
             ftParamSetKey(fighter_gobj, dMVOpeningJungleDonkeyKeyEvents);
         }

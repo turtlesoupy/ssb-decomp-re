@@ -185,6 +185,13 @@ void mvOpeningDonkeyMakeName(void)
 	sMVOpeningDonkeyNameGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 27, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+	{
+		extern s32 port_ui_opening_name_hook(GObj*, void*, s32);
+		if (port_ui_opening_name_hook(gobj, sMVOpeningDonkeyFiles[0], nFTKindDonkey)) return;
+	}
+#endif
+
 	for (i = 0; offsets[i] != 0x0; i++)
 	{
 		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningDonkeyFiles[0], offsets[i]));
@@ -390,8 +397,16 @@ void mvOpeningDonkeyMakePosedFighter(void)
 	GObj *fighter_gobj;
 	FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		desc.fkind = port_roster_opening_spawn_fkind(1, nFTKindDonkey);
+	}
+	desc.player = 1; /* keep the posed portrait's injected mesh in a separate slot */
+#else
 	desc.fkind = nFTKindDonkey;
-	desc.costume = ftParamGetCostumeCommonID(nFTKindDonkey, 0);
+#endif
+	desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
 	desc.figatree_heap = sMVOpeningDonkeyFigatreeHeap;
 	desc.pos.x = 0.0F;
 	desc.pos.y = -600.0F;
@@ -542,7 +557,14 @@ void mvOpeningDonkeyFuncStart(void)
 	gSCManagerBattleState->gkind = nGRKindJungle;
 	gSCManagerBattleState->pl_count = 1;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		gSCManagerBattleState->players[0].fkind = port_roster_opening_spawn_fkind(0, nFTKindDonkey);
+	}
+#else
 	gSCManagerBattleState->players[0].fkind = nFTKindDonkey;
+#endif
 	gSCManagerBattleState->players[0].pkind = nFTPlayerKindKey;
 
 	mvOpeningDonkeySetupFiles();

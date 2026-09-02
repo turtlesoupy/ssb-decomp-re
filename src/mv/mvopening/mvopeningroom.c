@@ -392,8 +392,16 @@ void mvOpeningRoomMakePulledFighter(s32 fkind)
 	GObj *fighter_gobj;
 	FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		desc.fkind = port_roster_opening_spawn_fkind(0, fkind);
+	}
+	desc.player = 0;
+#else
 	desc.fkind = fkind;
-	desc.costume = ftParamGetCostumeCommonID(fkind, 0);
+#endif
+	desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
 	desc.pos.x = 0.0F;
 	desc.pos.y = 0.0F;
 	desc.pos.z = 0.0F;
@@ -533,8 +541,16 @@ void mvOpeningRoomMakeDroppedFighter(s32 fkind)
 	GObj *fighter_gobj;
 	FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		desc.fkind = port_roster_opening_spawn_fkind(1, fkind);
+	}
+	desc.player = 1;
+#else
 	desc.fkind = fkind;
-	desc.costume = ftParamGetCostumeCommonID(fkind, 0);
+#endif
+	desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
 	desc.figatree_heap = sMVOpeningRoomDroppedFigatreeHeap;
 	desc.pos.x = 872.3249512F;
 	desc.pos.y = 4038.864014F;
@@ -1205,6 +1221,27 @@ s32 mvOpeningRoomGetDroppedFighterKind(void)
 
 	s32 fkind;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_has_injected(s32);
+		s32 available[ARRAY_COUNT(fkinds)];
+		s32 count = 0;
+		s32 i;
+		for (i = 0; i < ARRAY_COUNT(fkinds); i++)
+		{
+			if (fkinds[i] != sMVOpeningRoomPulledFighterKind &&
+				port_roster_opening_has_injected(fkinds[i]))
+			{
+				available[count++] = fkinds[i];
+			}
+		}
+		if (count > 0)
+		{
+			return available[syUtilsRandTimeUCharRange(count)];
+		}
+	}
+#endif
+
 	while (fkind = fkinds[syUtilsRandTimeUCharRange(ARRAY_COUNT(fkinds))], fkind == sMVOpeningRoomPulledFighterKind);
 
 	return fkind;
@@ -1225,6 +1262,32 @@ s32 mvOpeningRoomGetPulledFighterKind(void)
 		nFTKindPikachu
 	};
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_first_fkind(void);
+		extern s32 port_roster_opening_has_injected(s32);
+		s32 available[ARRAY_COUNT(fkinds)];
+		s32 count = 0;
+		s32 i;
+		s32 preferred = port_roster_opening_first_fkind();
+
+		if (preferred >= 0)
+		{
+			return preferred;
+		}
+		for (i = 0; i < ARRAY_COUNT(fkinds); i++)
+		{
+			if (port_roster_opening_has_injected(fkinds[i]))
+			{
+				available[count++] = fkinds[i];
+			}
+		}
+		if (count > 0)
+		{
+			return available[syUtilsRandTimeUCharRange(count)];
+		}
+	}
+#endif
 	return fkinds[syUtilsRandTimeUCharRange(ARRAY_COUNT(fkinds))];
 }
 
@@ -1443,11 +1506,25 @@ void mvOpeningRoomFuncStart(void)
 	port_log("SSB64: mvOpeningRoomFuncStart - fighter alloc done pulled=%d dropped=%d boss=%d\n",
 		sMVOpeningRoomPulledFighterKind, sMVOpeningRoomDroppedFighterKind, nFTKindBoss);
 #endif
+	#ifdef PORT
+	{
+		extern s32 port_roster_opening_resolve_fkind(s32);
+		ftManagerSetupFilesAllKind(port_roster_opening_resolve_fkind(sMVOpeningRoomPulledFighterKind));
+	}
+	#else
 	ftManagerSetupFilesAllKind(sMVOpeningRoomPulledFighterKind);
+	#endif
 #ifdef PORT
 	port_log("SSB64: mvOpeningRoomFuncStart - pulled fighter files ready\n");
 #endif
+	#ifdef PORT
+	{
+		extern s32 port_roster_opening_resolve_fkind(s32);
+		ftManagerSetupFilesAllKind(port_roster_opening_resolve_fkind(sMVOpeningRoomDroppedFighterKind));
+	}
+	#else
 	ftManagerSetupFilesAllKind(sMVOpeningRoomDroppedFighterKind);
+	#endif
 #ifdef PORT
 	port_log("SSB64: mvOpeningRoomFuncStart - dropped fighter files ready\n");
 #endif

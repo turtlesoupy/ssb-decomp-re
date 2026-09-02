@@ -148,8 +148,16 @@ void mvOpeningStandoffMakeFighters(void)
     GObj* fighter_gobj;
     FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+    {
+        extern s32 port_roster_opening_spawn_fkind(s32, s32);
+        desc.fkind = port_roster_opening_spawn_fkind(0, nFTKindMario);
+    }
+    desc.player = 0;
+#else
     desc.fkind = nFTKindMario;
-    desc.costume = ftParamGetCostumeCommonID(nFTKindMario, 0);
+#endif
+    desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
     desc.pos.x = 0.0F;
     desc.pos.y = 0.0F;
     desc.pos.z = 0.0F;
@@ -163,8 +171,16 @@ void mvOpeningStandoffMakeFighters(void)
     DObjGetStruct(fighter_gobj)->scale.vec.f.y = 1.0F;
     DObjGetStruct(fighter_gobj)->scale.vec.f.z = 1.0F;
 
+#ifdef PORT
+    {
+        extern s32 port_roster_opening_spawn_fkind(s32, s32);
+        desc.fkind = port_roster_opening_spawn_fkind(1, nFTKindKirby);
+    }
+    desc.player = 1;
+#else
     desc.fkind = nFTKindKirby;
-    desc.costume = ftParamGetCostumeCommonID(nFTKindKirby, 0);
+#endif
+    desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
     desc.pos.x = 0.0F;
     desc.pos.y = 0.0F;
     desc.pos.z = 0.0F;
@@ -575,8 +591,16 @@ void mvOpeningStandoffFuncStart(void)
     mvOpeningStandoffInitTotalTimeTics();
     efManagerInitEffects();
     ftManagerAllocFighter(FTDATA_FLAG_SUBMOTION, 2);
+#ifdef PORT
+    {
+        extern s32 port_roster_opening_resolve_fkind(s32);
+        ftManagerSetupFilesAllKind(port_roster_opening_resolve_fkind(nFTKindMario));
+        ftManagerSetupFilesAllKind(port_roster_opening_resolve_fkind(nFTKindKirby));
+    }
+#else
     ftManagerSetupFilesAllKind(nFTKindMario);
     ftManagerSetupFilesAllKind(nFTKindKirby);
+#endif
 
     sMVOpeningStandoffMarioFigatreeHeap = syTaskmanMalloc(gFTManagerFigatreeHeapSize, 0x10);
     sMVOpeningStandoffKirbyFigatreeHeap = syTaskmanMalloc(gFTManagerFigatreeHeapSize, 0x10);

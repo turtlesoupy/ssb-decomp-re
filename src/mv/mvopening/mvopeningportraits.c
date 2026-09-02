@@ -82,6 +82,10 @@ void mvOpeningPortraitsMakeSet1(void)
 		llMVOpeningPortraitsSet1FoxSprite,
 		llMVOpeningPortraitsSet1PikachuSprite
 	};
+	s32 fkinds[/* */] =
+	{
+		nFTKindSamus, nFTKindMario, nFTKindFox, nFTKindPikachu
+	};
 	Vec2f pos[/* */] =
 	{
 		{ 10.0F,  10.0F },
@@ -96,6 +100,13 @@ void mvOpeningPortraitsMakeSet1(void)
 	for (i = 0; i < ARRAY_COUNT(offsets); i++)
 	{
 		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningPortraitsFiles[0], offsets[i]));
+
+#ifdef PORT
+		{
+			extern void port_ui_opening_portrait_hook(Sprite*, s32);
+			port_ui_opening_portrait_hook(&sobj->sprite, fkinds[i]);
+		}
+#endif
 
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 
@@ -118,6 +129,10 @@ void mvOpeningPortraitsMakeSet2(void)
 		llMVOpeningPortraitsSet2DonkeySprite,
 		llMVOpeningPortraitsSet2YoshiSprite
 	};
+	s32 fkinds[/* */] =
+	{
+		nFTKindLink, nFTKindKirby, nFTKindDonkey, nFTKindYoshi
+	};
 	Vec2f pos[/* */] =
 	{
 		{ 10.0F,  10.0F },
@@ -132,6 +147,13 @@ void mvOpeningPortraitsMakeSet2(void)
 	for (i = 0; i < ARRAY_COUNT(offsets); i++)
 	{
 		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningPortraitsFiles[1], offsets[i]));
+
+#ifdef PORT
+		{
+			extern void port_ui_opening_portrait_hook(Sprite*, s32);
+			port_ui_opening_portrait_hook(&sobj->sprite, fkinds[i]);
+		}
+#endif
 
 		sobj->sprite.attr &= ~SP_FASTCOPY;
 

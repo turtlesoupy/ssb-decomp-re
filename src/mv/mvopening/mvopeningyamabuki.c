@@ -152,8 +152,16 @@ void mvOpeningYamabukiMakeFighter(void)
     GObj* fighter_gobj;
     FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+    {
+        extern s32 port_roster_opening_spawn_fkind(s32, s32);
+        desc.fkind = port_roster_opening_spawn_fkind(0, nFTKindPikachu);
+    }
+#else
     desc.fkind = nFTKindPikachu;
-    desc.costume = ftParamGetCostumeCommonID(nFTKindPikachu, 0);
+#endif
+    desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
+    desc.player = 0;
 
     desc.pos.x = 0.0F;
     desc.pos.y = 0.0F;
@@ -416,7 +424,14 @@ void mvOpeningYamabukiFuncStart(void)
     mvOpeningYamabukiInitTotalTimeTics();
     efManagerInitEffects();
     ftManagerAllocFighter(FTDATA_FLAG_SUBMOTION, 1);
+#ifdef PORT
+    {
+        extern s32 port_roster_opening_resolve_fkind(s32);
+        ftManagerSetupFilesAllKind(port_roster_opening_resolve_fkind(nFTKindPikachu));
+    }
+#else
     ftManagerSetupFilesAllKind(nFTKindPikachu);
+#endif
 
     sMVOpeningYamabukiFigatreeHeap = syTaskmanMalloc(gFTManagerFigatreeHeapSize, 0x10);
 

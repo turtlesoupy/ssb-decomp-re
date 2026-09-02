@@ -128,8 +128,18 @@ void mvOpeningRunMakeFighters(void)
 	{
 		FTDesc desc = dFTManagerDefaultFighterDesc;
 
+	#ifdef PORT
+		{
+			extern s32 port_roster_opening_spawn_fkind(s32, s32);
+			desc.fkind = port_roster_opening_spawn_fkind(i, fkinds[i]);
+		}
+		/* Keep the real engine player id valid; the injector owns the
+		 * separate movie mesh-slot mapping. */
+		desc.player = 0;
+	#else
 		desc.fkind = fkinds[i];
-		desc.costume = ftParamGetCostumeCommonID(fkinds[i], 0);
+	#endif
+		desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
 
 		desc.pos.x = 0.0F;
 		desc.pos.y = 0.0F;

@@ -157,6 +157,13 @@ void mvOpeningFoxMakeName(void)
 	sMVOpeningFoxNameGObj = gobj = gcMakeGObjSPAfter(0, NULL, 17, GOBJ_PRIORITY_DEFAULT);
 	gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 27, GOBJ_PRIORITY_DEFAULT, ~0);
 
+#ifdef PORT
+	{
+		extern s32 port_ui_opening_name_hook(GObj*, void*, s32);
+		if (port_ui_opening_name_hook(gobj, sMVOpeningFoxFiles[0], nFTKindFox)) return;
+	}
+#endif
+
 	for (i = 0; offsets[i] != 0x0; i++)
 	{
 		sobj = lbCommonMakeSObjForGObj(gobj, lbRelocGetFileData(Sprite*, sMVOpeningFoxFiles[0], offsets[i]));
@@ -357,8 +364,16 @@ void mvOpeningFoxMakePosedFighter(void)
 	GObj *fighter_gobj;
 	FTDesc desc = dFTManagerDefaultFighterDesc;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		desc.fkind = port_roster_opening_spawn_fkind(1, nFTKindFox);
+	}
+	desc.player = 1; /* keep the posed portrait's injected mesh in a separate slot */
+#else
 	desc.fkind = nFTKindFox;
-	desc.costume = ftParamGetCostumeCommonID(nFTKindFox, 0);
+#endif
+	desc.costume = ftParamGetCostumeCommonID(desc.fkind, 0);
 	desc.figatree_heap = sMVOpeningFoxFigatreeHeap;
 	desc.pos.x = 0.0F;
 	desc.pos.y = 600.0F;
@@ -497,7 +512,14 @@ void mvOpeningFoxFuncStart(void)
 	gSCManagerBattleState->gkind = nGRKindSector;
 	gSCManagerBattleState->pl_count = 1;
 
+#ifdef PORT
+	{
+		extern s32 port_roster_opening_spawn_fkind(s32, s32);
+		gSCManagerBattleState->players[0].fkind = port_roster_opening_spawn_fkind(0, nFTKindFox);
+	}
+#else
 	gSCManagerBattleState->players[0].fkind = nFTKindFox;
+#endif
 	gSCManagerBattleState->players[0].pkind = nFTPlayerKindKey;
 
 	mvOpeningFoxSetupFiles();
