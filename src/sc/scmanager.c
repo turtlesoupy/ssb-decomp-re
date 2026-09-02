@@ -1,5 +1,8 @@
 #ifdef PORT
 #include <port_log.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #ifdef PORT
 extern char *getenv(const char *name);
 extern int atoi(const char *s);
@@ -1857,6 +1860,11 @@ void scManagerRunLoop(sb32 arg)
 				break;
 
 			case nSCKindExplain:
+#ifdef __EMSCRIPTEN__
+				EM_ASM({
+					if (Module.onTutorialStart) Module.onTutorialStart();
+				});
+#endif
 				syDmaLoadOverlay(&dSCManagerOverlays[2]);
 				syDmaLoadOverlay(&dSCManagerOverlays[3]);
 #if defined(REGION_US)
