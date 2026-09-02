@@ -27,6 +27,7 @@
 
 #include "fighter_registry.h"
 
+#include "staged_file.h"   /* roster files fetched on demand on the web */
 /* Per-character status descs (used as the ft_data row's special_descs). */
 extern FTStatusDesc *dFTMainSpecialStatusDescs[];
 
@@ -4857,7 +4858,7 @@ void port_ui_opening_portrait_hook(Sprite *spr, s32 fkind)
     {
         return;
     }
-    f = fopen(ui, "rb");
+    f = port_fopen_staged(ui, "rb");
     if (f == NULL || fread(magic, 1, 4, f) != 4 ||
         magic[0] != 'O' || magic[1] != 'S' || magic[2] != 'B' || magic[3] != 'V' ||
         fread(raw, 1, sizeof raw, f) != sizeof raw)
@@ -5202,7 +5203,7 @@ static void port_ui_apply_emblem(Sprite *spr, const char *ui, const char *what)
     {
         return;
     }
-    f = fopen(ui, "rb");
+    f = port_fopen_staged(ui, "rb");
     if (f == NULL)
     {
         return;
@@ -5598,7 +5599,7 @@ void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 
     }
     if (ui != NULL)
     {
-        FILE *f = fopen(ui, "rb");
+        FILE *f = port_fopen_staged(ui, "rb");
         char magic[4];
         if (f == NULL)
         {
@@ -5648,7 +5649,7 @@ void port_ui_vs_hook(Sprite *name_sprite, s32 fkind)
     }
     if (ui != NULL)
     {
-        FILE *f = fopen(ui, "rb");
+        FILE *f = port_fopen_staged(ui, "rb");
         if (f != NULL)
         {
             char m[4];
@@ -5781,7 +5782,7 @@ void port_inject_bundle(GObj *fighter_gobj)
              * OSBU file: [magic][portrait][name][stock ci4][16x u16 pal] */
             if (st != NULL && ui != NULL)
             {
-                FILE *uf = fopen(ui, "rb");
+                FILE *uf = port_fopen_staged(ui, "rb");
                 if (uf != NULL)
                 {
                     char m[4];
@@ -5806,7 +5807,7 @@ void port_inject_bundle(GObj *fighter_gobj)
         }
     }
 
-    f = fopen(path, "rb");
+    f = port_fopen_staged(path, "rb");
     if (f == NULL)
     {
         port_log("OSB: cannot open %s\n", path);
