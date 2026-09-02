@@ -3748,7 +3748,7 @@ static void osb5_release_owner(OSB5State *o)
              (int)o->owner_fkind, (int)fp->player);
 }
 
-static void osb5_load(FTStruct *fp, FILE *f)
+static void osb5_load(FTStruct *fp, FILE *f, u8 *shared_tex, u32 shared_tw, u32 shared_th)
 {
     OSB5State *o = ((u32)sInjectMeshSlot < OSB5_PLAYER_SLOTS)
         ? &sOsb5Slots[sInjectMeshSlot]
@@ -3834,8 +3834,19 @@ static void osb5_load(FTStruct *fp, FILE *f)
         }
     }
 
-    tex = (u8 *)malloc(tw * th * 2);
-    fread(tex, 2, tw * th, f);
+    if (tw == 0 && th == 0 && shared_tex != NULL)
+    {
+        /* OSB6 payload: the atlas was read once by port_inject_bundle and
+         * is shared by every target block in the file. */
+        tex = shared_tex;
+        tw = shared_tw;
+        th = shared_th;
+    }
+    else
+    {
+        tex = (u8 *)malloc(tw * th * 2);
+        fread(tex, 2, tw * th, f);
+    }
 
     o->src = (OSB5Vert *)malloc(sizeof(OSB5Vert) * nverts);
     fread(o->src, sizeof(OSB5Vert), nverts, f);
@@ -5802,9 +5813,60 @@ void port_inject_bundle(GObj *fighter_gobj)
         return;
     }
     fread(magic, 1, 4, f);
+    if (magic[0] == 'O' && magic[1] == 'S' && magic[2] == 'B' && magic[3] == '6')
+    {
+        /* OSB6: one shared RGBA16 atlas followed by texture-less OSB5
+         * payloads keyed by fighter kind (pipeline/osb_merge.py). Pick the
+         * payload for the fighter being spawned; a file with no block for
+         * this fkind fails open exactly like a skeleton mismatch does. */
+        u32 twhn[3];
+        u8 *tex;
+        u32 t;
+        if (fread(twhn, 4, 3, f) != 3 || twhn[0] == 0 || twhn[1] == 0 ||
+            twhn[0] > 4096 || twhn[1] > 4096 || twhn[2] > 64)
+        {
+            port_log("OSB6: bad header in %s\n", path);
+            fclose(f);
+            return;
+        }
+        tex = (u8 *)malloc(twhn[0] * twhn[1] * 2);
+        if (fread(tex, 2, twhn[0] * twhn[1], f) != twhn[0] * twhn[1])
+        {
+            port_log("OSB6: truncated atlas in %s\n", path);
+            free(tex);
+            fclose(f);
+            return;
+        }
+        for (t = 0; t < twhn[2]; t++)
+        {
+            u32 blk[2];
+            char pm[4];
+            if (fread(blk, 4, 2, f) != 2) break;
+            if (blk[0] != (u32)fp->fkind)
+            {
+                fseek(f, (long)blk[1], SEEK_CUR);
+                continue;
+            }
+            if (fread(pm, 1, 4, f) != 4 || pm[0] != 'O' || pm[1] != 'S' || pm[2] != 'B' || pm[3] != '5')
+            {
+                port_log("OSB6: target %u payload is not OSB5\n", blk[0]);
+                break;
+            }
+            port_log("OSB6: %ux%u atlas, target fkind=%d (%u bytes)\n",
+                     twhn[0], twhn[1], (int)fp->fkind, blk[1]);
+            osb5_load(fp, f, tex, twhn[0], twhn[1]);
+            fclose(f);
+            return;
+        }
+        port_log("OSB6: no target for fkind=%d in %s; injection skipped (vanilla mesh kept)\n",
+                 (int)fp->fkind, path);
+        free(tex);
+        fclose(f);
+        return;
+    }
     if (magic[0] == 'O' && magic[1] == 'S' && magic[2] == 'B' && magic[3] == '5')
     {
-        osb5_load(fp, f);
+        osb5_load(fp, f, NULL, 0, 0);
         fclose(f);
         return;
     }
