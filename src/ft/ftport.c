@@ -1317,6 +1317,28 @@ s32 port_roster_opening_first_fkind(void)
     return (s32)fkind;
 }
 
+/* The trailer may also pin the other fighter used by the opening room.
+ * Reject the first fighter so both movie objects always stay distinct. */
+s32 port_roster_opening_second_fkind(s32 first_fkind)
+{
+    extern long strtol(const char *, char **, int);
+    const char *value = getenv("SSB64_OPENING_SECOND_FKIND");
+    char *end;
+    long fkind;
+
+    if (value == NULL || *value == '\0')
+    {
+        return -1;
+    }
+    fkind = strtol(value, &end, 10);
+    if (*end != '\0' || fkind < 0 || fkind >= OSB5_SLOTS ||
+        fkind == first_fkind || !port_roster_opening_has_injected((s32)fkind))
+    {
+        return -1;
+    }
+    return (s32)fkind;
+}
+
 /* Pure lookup for scene file setup; unlike the spawn helper below this does
  * not arm the one-shot movie mesh binding. */
 s32 port_roster_opening_resolve_fkind(s32 tile_fkind)

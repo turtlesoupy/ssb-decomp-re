@@ -1224,9 +1224,16 @@ s32 mvOpeningRoomGetDroppedFighterKind(void)
 #ifdef PORT
 	{
 		extern s32 port_roster_opening_has_injected(s32);
+		extern s32 port_roster_opening_second_fkind(s32);
 		s32 available[ARRAY_COUNT(fkinds)];
 		s32 count = 0;
 		s32 i;
+		s32 preferred = port_roster_opening_second_fkind(sMVOpeningRoomPulledFighterKind);
+
+		if (preferred >= 0)
+		{
+			return preferred;
+		}
 		for (i = 0; i < ARRAY_COUNT(fkinds); i++)
 		{
 			if (fkinds[i] != sMVOpeningRoomPulledFighterKind &&
