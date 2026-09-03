@@ -26,6 +26,7 @@
 #include <sys/audio.h>
 #include <sys/scheduler.h>
 extern char *getenv(const char *);
+extern int atoi(const char *);
 #include <string.h>
 #include <math.h>
 
@@ -568,6 +569,21 @@ static void scVSIntroFighterProcUpdate(GObj *fighter_gobj)
     }
     scVSIntroMeasure(s, fighter_gobj);
     scVSIntroFitCamera(s);
+    /* SSB64_VSINTRO_FREEZE_TIC=N: stop the pose animation N card tics in
+     * (og_sprite.py: global frame numbers drift with load time, so the
+     * shot frame is taken well after the freeze instead). */
+    {
+        static s32 sFreezeTic = -2;
+        if (sFreezeTic == -2)
+        {
+            const char *e = getenv("SSB64_VSINTRO_FREEZE_TIC");
+            sFreezeTic = (e != NULL) ? atoi(e) : -1;
+        }
+        if (sFreezeTic >= 0 && sSCVSIntroTotalTics >= sFreezeTic)
+        {
+            gcSetAnimSpeed(fighter_gobj, 0.0F);
+        }
+    }
     {
         /* SSB64_DUMP_FRAMES joint-frame dump (same hook battle uses) */
         extern void port_dump_frame(GObj *fighter_gobj);
