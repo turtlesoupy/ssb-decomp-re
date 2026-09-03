@@ -772,6 +772,13 @@ typedef struct OSB5State
      * poses turn 5-30% of that lever into tens of units and tear the
      * shirt/pants side open. Computed at inject from bind geometry. */
     u8 (*wdamp)[4];
+    /* shoulder lift (all scenes): elevation-driven rise of each arm-root
+     * slot so the shoulder cap / shirt follow a raised arm instead of the
+     * arm pivoting off a rigid torso. shprox = per vert, per arm-root
+     * slot: 0..255 proximity to that shoulder in the bind pose. */
+    s32 nsh;
+    s8 sh_slot[2];
+    u8 (*shprox)[2];
     Vtx *vtx;               /* live Vtx array the DL renders */
     /* Root-joint mesh DL, attached to fp->joints[0]->dl by the first skin
      * update whose joint frames validate — NOT at load time. A freshly
@@ -2733,10 +2740,62 @@ void port_osb5_skin_update(GObj *fighter_gobj)
     osb5_menu_unfreeze(fighter_gobj, 1);
 }
 
+
+/* ---- dual-quaternion skinning (opt-in, SSB64_DQS=1) -------------------
+ * Linear blend skinning collapses the sleeve cap into a narrow neck when a
+ * shoulder is rotated ~150deg against the chest (the raised-arm Win poses).
+ * DQS blends the joint RIGID transforms instead of the positions, so the
+ * blend region keeps its volume. Kavan et al. 2007, per-vertex 4 influences. */
+static void osb5_m3_to_quat(const f32 m[3][3], f32 q[4])
+{
+    f32 tr = m[0][0] + m[1][1] + m[2][2], s2;
+    if (tr > 0.0f)
+    {
+        s2 = sqrtf(tr + 1.0f) * 2.0f;
+        q[3] = 0.25f * s2; q[0] = (m[2][1] - m[1][2]) / s2;
+        q[1] = (m[0][2] - m[2][0]) / s2; q[2] = (m[1][0] - m[0][1]) / s2;
+    }
+    else if (m[0][0] > m[1][1] && m[0][0] > m[2][2])
+    {
+        s2 = sqrtf(1.0f + m[0][0] - m[1][1] - m[2][2]) * 2.0f;
+        q[3] = (m[2][1] - m[1][2]) / s2; q[0] = 0.25f * s2;
+        q[1] = (m[0][1] + m[1][0]) / s2; q[2] = (m[0][2] + m[2][0]) / s2;
+    }
+    else if (m[1][1] > m[2][2])
+    {
+        s2 = sqrtf(1.0f + m[1][1] - m[0][0] - m[2][2]) * 2.0f;
+        q[3] = (m[0][2] - m[2][0]) / s2; q[0] = (m[0][1] + m[1][0]) / s2;
+        q[1] = 0.25f * s2; q[2] = (m[1][2] + m[2][1]) / s2;
+    }
+    else
+    {
+        s2 = sqrtf(1.0f + m[2][2] - m[0][0] - m[1][1]) * 2.0f;
+        q[3] = (m[1][0] - m[0][1]) / s2; q[0] = (m[0][2] + m[2][0]) / s2;
+        q[1] = (m[1][2] + m[2][1]) / s2; q[2] = 0.25f * s2;
+    }
+}
+/* dual part: qd = 0.5 * (0,t) * qr */
+static void osb5_dq_from_rt(const f32 m[3][3], const f32 t[3], f32 qr[4], f32 qd[4])
+{
+    osb5_m3_to_quat(m, qr);
+    qd[3] = -0.5f * ( t[0]*qr[0] + t[1]*qr[1] + t[2]*qr[2]);
+    qd[0] =  0.5f * ( t[0]*qr[3] + t[1]*qr[2] - t[2]*qr[1]);
+    qd[1] =  0.5f * (-t[0]*qr[2] + t[1]*qr[3] + t[2]*qr[0]);
+    qd[2] =  0.5f * ( t[0]*qr[1] - t[1]*qr[0] + t[2]*qr[3]);
+}
+static s32 osb5_dqs_enabled(void)
+{
+    static s32 sDqs = -1;
+    if (sDqs < 0) { const char *e = getenv("SSB64_DQS"); sDqs = (e != NULL && e[0] != '0') ? 1 : 0; }
+    return sDqs;
+}
+static f32 sShLift[2][3];   /* world-space shoulder lift per arm-root slot this tick */
+
 static void osb5_skin_update_body(GObj *fighter_gobj)
 {
     FTStruct *fp;
     OSB5State *o;
+    memset(sShLift, 0, sizeof(sShLift));
     f32 jo[32][3], jm[32][3][3];
     f32 t0o[3], t0m[3][3], t0inv[3][3];
     s32 k, i, mesh_slot;
@@ -3361,6 +3420,68 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 d[2] = o->cbind_o[kk][2] - o->cbind_o[pp][2];
                 for (r = 0; r < 3; r++)
                     vjo[kk][r] = vjo[pp][r] + rd[pp][r][0]*d[0] + rd[pp][r][1]*d[1] + rd[pp][r][2]*d[2];
+                /* SHOULDER LIFT: an arm-root slot whose bone is raised
+                 * past ~60deg from hanging drags its origin up and in
+                 * (clavicle rise), by up to 0.28/0.10 bone lengths at
+                 * fully vertical. Children inherit through vjo; the
+                 * torso verts around the shoulder follow via shprox in
+                 * the vertex loop. SSB64_SHLIFT=<scale>, 0 disables. */
+                if (pp == 0 && o->nsh > 0)
+                {
+                    static f32 sLiftScale = -1.0f;
+                    s32 q, sidx = -1;
+                    if (sLiftScale < 0.0f)
+                    {
+                        extern double strtod(const char *, char **);
+                        const char *e = getenv("SSB64_SHLIFT");
+                        sLiftScale = (e != NULL) ? (f32)strtod(e, NULL) : 1.0f;
+                    }
+                    for (q = 0; q < o->nsh; q++) if ((s32)o->sh_slot[q] == kk) sidx = q;
+                    if (sidx >= 0 && sLiftScale > 0.0f)
+                    {
+                        s32 c, child = -1;
+                        for (c = 0; c < o->njoints; c++)
+                            if ((s32)o->can_parent[c] == kk) { child = c; break; }
+                        if (child >= 0)
+                        {
+                            f32 bd[3], bw[3], upw[3], inb[3], inw[3], L, dot, elev, sst, len;
+                            bd[0] = o->cbind_o[child][0] - o->cbind_o[kk][0];
+                            bd[1] = o->cbind_o[child][1] - o->cbind_o[kk][1];
+                            bd[2] = o->cbind_o[child][2] - o->cbind_o[kk][2];
+                            L = sqrtf(bd[0]*bd[0] + bd[1]*bd[1] + bd[2]*bd[2]);
+                            if (L > 1.0f)
+                            {
+                                for (r = 0; r < 3; r++)
+                                {
+                                    bw[r] = (rd[kk][r][0]*bd[0] + rd[kk][r][1]*bd[1] + rd[kk][r][2]*bd[2]) / L;
+                                    upw[r] = rd[0][r][1];
+                                }
+                                dot = -(bw[0]*upw[0] + bw[1]*upw[1] + bw[2]*upw[2]);
+                                if (dot > 1.0f) dot = 1.0f;
+                                if (dot < -1.0f) dot = -1.0f;
+                                { extern float acosf(float); elev = acosf(dot) * (180.0f / 3.14159265f); }
+                                sst = (elev - 60.0f) / 90.0f;
+                                if (sst > 0.0f)
+                                {
+                                    if (sst > 1.0f) sst = 1.0f;
+                                    sst = sst*sst*(3.0f - 2.0f*sst) * sLiftScale;
+                                    /* inward = toward the chest, horizontal in bind */
+                                    inb[0] = o->cbind_o[0][0] - o->cbind_o[kk][0];
+                                    inb[1] = 0.0f;
+                                    inb[2] = o->cbind_o[0][2] - o->cbind_o[kk][2];
+                                    len = sqrtf(inb[0]*inb[0] + inb[2]*inb[2]);
+                                    if (len > 1e-3f) { inb[0] /= len; inb[2] /= len; }
+                                    for (r = 0; r < 3; r++)
+                                    {
+                                        inw[r] = rd[0][r][0]*inb[0] + rd[0][r][1]*inb[1] + rd[0][r][2]*inb[2];
+                                        sShLift[sidx][r] = sst * L * (0.28f*upw[r] + 0.10f*inw[r]);
+                                        vjo[kk][r] += sShLift[sidx][r];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             memcpy(jo[kk], vjo[kk], sizeof(vjo[kk]));
         }
@@ -3763,8 +3884,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             f32 w = (f32)v->w[t] / 255.0f;
             f32 *bl, *bn;
             s32 kk = v->j[t];
-            if (o->wdamp != NULL && o->wdamp[i][t] != 255 && osb5_on_menu_scene() &&
-                getenv("SSB64_ARMLEAK") == NULL)
+            if (o->wdamp != NULL && o->wdamp[i][t] != 255 && getenv("SSB64_ARMLEAK") == NULL)
                 w *= (f32)o->wdamp[i][t] / 255.0f;
             /* Concentrate the broad source arm weights around their
              * dominant segment in the sharply bent CSS poses. Normalizing
@@ -3783,7 +3903,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 if (sArmSq < 0)
                 {
                     const char *e = getenv("SSB64_ARMSQ");
-                    sArmSq = (e == NULL) ? 2 : atoi(e);
+                    sArmSq = (e == NULL) ? 0 : atoi(e);   /* default OFF since the leak prune (2026-09-03): it fattened the bent free forearm ~35% */
                 }
                 if (sArmSq == 1)
                 {
@@ -3812,6 +3932,81 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         if (wsum > 0.0f)
         {
             acc[0] /= wsum; acc[1] /= wsum; acc[2] /= wsum;
+        }
+        if (osb5_dqs_enabled() && wsum > 0.0f)
+        {
+            /* re-skin this vert with blended dual quaternions. Each
+             * influence's rigid transform maps the vert's joint-local bind
+             * coords: p = jm*bl + jo. Blend (jm,jo) as dual quaternions
+             * (sign-aligned to the first), normalize, apply to a common
+             * local: we use influence 0's bind-local frame as the reference
+             * by expressing every influence as (jm_k * B_k) where B_k maps
+             * bl_0 -> bl_k is not available, so instead blend the world
+             * transforms applied to the SAME local point by choosing the
+             * local point in the FIRST influence's frame and folding the
+             * per-influence bind difference into the translation:
+             * T_k(x) = jm_k*(bl_k - bl_0) + jo_k + jm_k*x, with x = bl_0. */
+            f32 br[4] = {0,0,0,0}, bd[4] = {0,0,0,0}, q0[4], qr[4], qd[4];
+            f32 x0[3], n0[3], have0 = 0.0f, nrm, sgn;
+            s32 tt2;
+            for (tt2 = 0; tt2 < 4; tt2++)
+            {
+                f32 w = (f32)v->w[tt2] / 255.0f, tk[3], *blk, *bl0;
+                s32 kk2 = v->j[tt2], c2;
+                if (o->wdamp != NULL && o->wdamp[i][tt2] != 255 && getenv("SSB64_ARMLEAK") == NULL)
+                    w *= (f32)o->wdamp[i][tt2] / 255.0f;
+                if (w <= 0.0f) continue;
+                blk = o->bind_local[i][tt2];
+                if (have0 == 0.0f)
+                {
+                    bl0 = blk; x0[0] = blk[0]; x0[1] = blk[1]; x0[2] = blk[2];
+                    n0[0] = o->bind_nrm[i][tt2][0]; n0[1] = o->bind_nrm[i][tt2][1]; n0[2] = o->bind_nrm[i][tt2][2];
+                    have0 = 1.0f;
+                }
+                for (c2 = 0; c2 < 3; c2++)
+                    tk[c2] = jo[kk2][c2] + jm[kk2][c2][0]*(blk[0]-x0[0]) + jm[kk2][c2][1]*(blk[1]-x0[1]) + jm[kk2][c2][2]*(blk[2]-x0[2]);
+                osb5_dq_from_rt(jm[kk2], tk, qr, qd);
+                if (br[0] == 0.0f && br[1] == 0.0f && br[2] == 0.0f && br[3] == 0.0f)
+                { q0[0]=qr[0]; q0[1]=qr[1]; q0[2]=qr[2]; q0[3]=qr[3]; sgn = 1.0f; }
+                else
+                    sgn = (q0[0]*qr[0] + q0[1]*qr[1] + q0[2]*qr[2] + q0[3]*qr[3] < 0.0f) ? -1.0f : 1.0f;
+                for (c2 = 0; c2 < 4; c2++) { br[c2] += sgn*w*qr[c2]; bd[c2] += sgn*w*qd[c2]; }
+            }
+            nrm = sqrtf(br[0]*br[0] + br[1]*br[1] + br[2]*br[2] + br[3]*br[3]);
+            if (nrm > 1e-6f)
+            {
+                f32 R[3][3], T[3], qx, qy, qz, qw;
+                s32 c2;
+                for (c2 = 0; c2 < 4; c2++) { br[c2] /= nrm; bd[c2] /= nrm; }
+                qx = br[0]; qy = br[1]; qz = br[2]; qw = br[3];
+                R[0][0] = 1 - 2*(qy*qy + qz*qz); R[0][1] = 2*(qx*qy - qz*qw);     R[0][2] = 2*(qx*qz + qy*qw);
+                R[1][0] = 2*(qx*qy + qz*qw);     R[1][1] = 1 - 2*(qx*qx + qz*qz); R[1][2] = 2*(qy*qz - qx*qw);
+                R[2][0] = 2*(qx*qz - qy*qw);     R[2][1] = 2*(qy*qz + qx*qw);     R[2][2] = 1 - 2*(qx*qx + qy*qy);
+                /* t = 2 * qd * conj(qr) (vector part) */
+                T[0] = 2.0f*(-bd[3]*qx + bd[0]*qw - bd[1]*qz + bd[2]*qy);
+                T[1] = 2.0f*(-bd[3]*qy + bd[0]*qz + bd[1]*qw - bd[2]*qx);
+                T[2] = 2.0f*(-bd[3]*qz - bd[0]*qy + bd[1]*qx + bd[2]*qw);
+                for (c2 = 0; c2 < 3; c2++)
+                {
+                    acc[c2]  = R[c2][0]*x0[0] + R[c2][1]*x0[1] + R[c2][2]*x0[2] + T[c2];
+                    nacc[c2] = R[c2][0]*n0[0] + R[c2][1]*n0[1] + R[c2][2]*n0[2];
+                }
+            }
+        }
+        /* shoulder lift for the torso side: verts near a lifted shoulder
+         * follow it by (proximity x non-arm fraction); arm-weighted verts
+         * already carry their share through the slot origin. */
+        if (o->shprox != NULL)
+        {
+            s32 q, armw = 0;
+            for (t = 0; t < 4; t++)
+                if (osb5_canonical_slot_is_arm(o, (s32)v->j[t])) armw += (s32)v->w[t];
+            for (q = 0; q < o->nsh; q++)
+            {
+                f32 g = (f32)o->shprox[i][q] / 255.0f * (1.0f - (f32)armw / 255.0f);
+                if (g <= 0.0f) continue;
+                acc[0] += g * sShLift[q][0]; acc[1] += g * sShLift[q][1]; acc[2] += g * sShLift[q][2];
+            }
         }
         wl[0] = acc[0] - t0o[0]; wl[1] = acc[1] - t0o[1]; wl[2] = acc[2] - t0o[2];
         o->vtx[i].n.ob[0] = (short)(t0inv[0][0]*wl[0] + t0inv[0][1]*wl[1] + t0inv[0][2]*wl[2]);
@@ -4303,7 +4498,42 @@ static void osb5_load(FTStruct *fp, FILE *f, u8 *shared_tex, u32 shared_tw, u32 
                 nleak++;
             }
         }
-        port_log("OSB5: %d leaked arm influences damped for menu poses\n", nleak);
+        port_log("OSB5: %d leaked arm influences damped\n", nleak);
+    }
+    o->nsh = 0; o->sh_slot[0] = o->sh_slot[1] = -1; o->shprox = NULL;
+    if (o->canonical)
+    {
+        s32 k2;
+        for (k2 = 1; k2 < o->njoints && o->nsh < 2; k2++)
+            if ((s32)o->can_parent[k2] == 0 && osb5_canonical_slot_is_arm(o, k2))
+                o->sh_slot[o->nsh++] = (s8)k2;
+        if (o->nsh > 0)
+        {
+            o->shprox = malloc(sizeof(*o->shprox) * nverts);
+            memset(o->shprox, 0, sizeof(*o->shprox) * nverts);
+            for (i = 0; i < nverts; i++)
+            {
+                OSB5Vert *v = &o->src[i];
+                s32 q;
+                for (q = 0; q < o->nsh; q++)
+                {
+                    s32 sh = (s32)o->sh_slot[q], c, child = -1;
+                    f32 L, dx, dy, dz, dd, f;
+                    for (c = 0; c < o->njoints; c++)
+                        if ((s32)o->can_parent[c] == sh) { child = c; break; }
+                    if (child < 0) continue;
+                    dx = jo[child][0] - jo[sh][0]; dy = jo[child][1] - jo[sh][1]; dz = jo[child][2] - jo[sh][2];
+                    L = sqrtf(dx*dx + dy*dy + dz*dz);
+                    if (L < 1.0f) continue;
+                    dx = v->x - jo[sh][0]; dy = v->y - jo[sh][1]; dz = v->z - jo[sh][2];
+                    dd = sqrtf(dx*dx + dy*dy + dz*dz) / (1.2f * L);
+                    if (dd >= 1.0f) continue;
+                    f = 1.0f - dd*dd*(3.0f - 2.0f*dd);
+                    o->shprox[i][q] = (u8)(f * 255.0f);
+                }
+            }
+            port_log("OSB5: shoulder lift slots %d %d\n", (int)o->sh_slot[0], (int)o->sh_slot[1]);
+        }
     }
 
     if (o->canonical && o->have_tbnd)

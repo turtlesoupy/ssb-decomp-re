@@ -568,6 +568,13 @@ static void scVSIntroFighterProcUpdate(GObj *fighter_gobj)
     }
     scVSIntroMeasure(s, fighter_gobj);
     scVSIntroFitCamera(s);
+    {
+        /* SSB64_DUMP_FRAMES joint-frame dump (same hook battle uses) */
+        extern void port_dump_frame(GObj *fighter_gobj);
+        extern void ftParamsUpdateFighterPartsTransformAll(DObj *root_dobj);
+        if (fp->joints[0] != NULL) ftParamsUpdateFighterPartsTransformAll(fp->joints[0]);
+        port_dump_frame(fighter_gobj);
+    }
 
     /* slide in from the outside of the slice */
     step = s->half_w * 0.09F;
@@ -659,10 +666,14 @@ static void scVSIntroMakeFighter(SCVSIntroSlot *s, s32 idx)
     desc.player = s->player;
 
     fighter_gobj = ftManagerMakeFighter(&desc);
-    /* results-screen victory pose (Kirby only has two) */
+    /* The per-kind "selected" victory pose the character-select card
+     * uses (Samus/Fox Win4, Mario/Kirby Win3, ...). These are authored to
+     * HOLD; the generic Win1..3 results poses loop a 16-tic tail with a
+     * discontinuous restart (Samus's cannon snapped ~80 units every 16
+     * frames on the card — "arm glitching up and down", 2026-09-03). */
     {
-        static const s32 wins[3] = { nFTDemoStatusWin1, nFTDemoStatusWin2, nFTDemoStatusWin3 };
-        scSubsysFighterSetStatus(fighter_gobj, wins[syUtilsRandIntRange((s->fkind == nFTKindKirby) ? 2 : 3)]);
+        extern s32 mnPlayersVSGetStatusSelected(s32 fkind);
+        scSubsysFighterSetStatus(fighter_gobj, mnPlayersVSGetStatusSelected(((u32)s->fkind < 12) ? s->fkind : 0));
     }
 
     fp = ftGetStruct(fighter_gobj);
