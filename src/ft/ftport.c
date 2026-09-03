@@ -939,6 +939,21 @@ static s32 osb5_slot_index(OSB5State *o)
     return (o != NULL) ? (s32)(o - sOsb5Slots) : -1;
 }
 
+/* A spawn that ends up UNINJECTED (vanilla, or an injection that failed:
+ * missing file, bad magic, no OSB6 block for this kind, skeleton mismatch)
+ * must disown any mesh slot still pointing at its GObj. The GObj pool
+ * reuses addresses — the CSS preview is one pool-reused GObj — so a stale
+ * owner match (same gobj, same fkind) would keep skinning the PREVIOUS
+ * character's mesh onto this fighter. */
+static void osb5_disown_uninjected(FTStruct *fp)
+{
+    OSB5State *o = osb5_slot_for_fighter(fp);
+    if (o != NULL && o->owner == fp->fighter_gobj)
+    {
+        o->owner = NULL;
+    }
+}
+
 /* Registry index resolved by the in-flight port_inject_bundle() call, read
  * by osb5_load() when it claims the slot (-1 = vanilla / legacy inject). */
 static s32 sInjectCharIdx = -1;
@@ -3922,6 +3937,7 @@ static void osb5_load(FTStruct *fp, FILE *f, u8 *shared_tex, u32 shared_tw, u32 
         {
             port_log("OSB5: bundle/skeleton mismatch — joint id %u absent on fkind=%d; injection aborted (vanilla mesh kept)\n",
                      jid, (int)fp->fkind);
+            osb5_disown_uninjected(fp);
             return;
         }
     }
@@ -6108,15 +6124,9 @@ void port_inject_bundle(GObj *fighter_gobj)
     }
     if (path == NULL)
     {
-        /* uninjected spawn: disown any mesh slot still pointing at this
-         * GObj — the pool reuses addresses, and a stale owner match (same
-         * gobj, same fkind after re-picking vanilla on the injected
-         * character's home tile) would keep blanking the vanilla mesh */
-        OSB5State *o = osb5_slot_for_fighter(fp);
-        if (o != NULL && o->owner == fighter_gobj)
-        {
-            o->owner = NULL;
-        }
+        /* uninjected spawn (e.g. re-picking vanilla on the injected
+         * character's home tile): see osb5_disown_uninjected */
+        osb5_disown_uninjected(fp);
         return;
     }
     /* Optional per-player gate (single-target mode only): lets a vanilla
@@ -6193,6 +6203,7 @@ void port_inject_bundle(GObj *fighter_gobj)
     if (f == NULL)
     {
         port_log("OSB: cannot open %s\n", path);
+        osb5_disown_uninjected(fp);
         return;
     }
     fread(magic, 1, 4, f);
@@ -6210,6 +6221,7 @@ void port_inject_bundle(GObj *fighter_gobj)
         {
             port_log("OSB6: bad header in %s\n", path);
             fclose(f);
+            osb5_disown_uninjected(fp);
             return;
         }
         tex = (u8 *)malloc(twhn[0] * twhn[1] * 2);
@@ -6218,6 +6230,7 @@ void port_inject_bundle(GObj *fighter_gobj)
             port_log("OSB6: truncated atlas in %s\n", path);
             free(tex);
             fclose(f);
+            osb5_disown_uninjected(fp);
             return;
         }
         for (t = 0; t < twhn[2]; t++)
@@ -6245,6 +6258,7 @@ void port_inject_bundle(GObj *fighter_gobj)
                  (int)fp->fkind, path);
         free(tex);
         fclose(f);
+        osb5_disown_uninjected(fp);
         return;
     }
     if (magic[0] == 'O' && magic[1] == 'S' && magic[2] == 'B' && magic[3] == '5')
@@ -6258,6 +6272,7 @@ void port_inject_bundle(GObj *fighter_gobj)
     {
         port_log("OSB: bad magic in %s (want OSB2/OSB3/OSB4)\n", path);
         fclose(f);
+        osb5_disown_uninjected(fp);
         return;
     }
     fread(&nparts, 4, 1, f);

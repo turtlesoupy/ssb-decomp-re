@@ -5302,6 +5302,7 @@ static void mnPlayersVSPortMakeArrows(void)
  * own press chain (same convention as the TIME arrows: fingertip =
  * cursor pos + (20, 3)). */
 void mnPlayersVSPortApplyRosterPage(void);
+static void mnPlayersVSPortRefreshHeldPreviews(void);
 sb32 mnPlayersVSPortCheckPageArrowPress(GObj *gobj)
 {
 	SObj *sobj = SObjGetStruct(gobj);
@@ -5357,6 +5358,7 @@ sb32 mnPlayersVSPortCheckPageArrowPress(GObj *gobj)
 	}
 	port_roster_set_page(port_roster_page() + dir);
 	mnPlayersVSPortApplyRosterPage();
+	mnPlayersVSPortRefreshHeldPreviews();
 	func_800269C0_275C0(nSYAudioFGMMenuScroll2);
 	return TRUE;
 }
@@ -5404,6 +5406,34 @@ void mnPlayersVSPortApplyRosterPage(void)
 	mnPlayersVSPortMakeArrows();
 }
 
+/* Live page flip only (NOT scene entry — the slot fighters and figatree
+ * heaps do not exist yet there): held / hovering tokens keep their tile
+ * fkind across a flip, so the hover handler (which only reacts to an fkind
+ * CHANGE) never re-evaluates the preview — the card kept showing, and the
+ * player stayed BOUND to, the previous page's character on that tile while
+ * the portrait already showed the new one; dropping the token then entered
+ * the match as the stale pick. Re-run the preview update: its reuse gate
+ * compares the worn character against the tile binding and re-makes (and
+ * re-binds) when they differ. Placed tokens are deliberately left alone —
+ * the pick sticks (see mnPlayersVSPortApplyRosterPage). */
+static void mnPlayersVSPortRefreshHeldPreviews(void)
+{
+	s32 pl;
+	for (pl = 0; pl < GMCOMMON_PLAYERS_MAX; pl++)
+	{
+		if (sMNPlayersVSSlots[pl].is_selected != FALSE || sMNPlayersVSSlots[pl].fkind == nFTKindNull ||
+		    sMNPlayersVSSlots[pl].pkind == nFTPlayerKindNot || sMNPlayersVSSlots[pl].player == NULL)
+		{
+			continue;
+		}
+		mnPlayersVSUpdateFighter(pl);
+		/* the card name/emblem repaint is keyed on the tile fkind, which
+		 * did not change — force it */
+		sMNPlayersVSSlots[pl].name_emblem_fkind = nFTKindNull;
+		mnPlayersVSUpdateNameAndEmblem(pl);
+	}
+}
+
 static void mnPlayersVSPortPageInput(void)
 {
 	extern s32 port_roster_take_page_request(void);
@@ -5423,11 +5453,17 @@ static void mnPlayersVSPortPageInput(void)
 		if (gSYControllerDevices[i].button_tap & R_TRIG) dir = 1;
 		if (gSYControllerDevices[i].button_tap & L_TRIG) dir = -1;
 	}
+	if (dir != 0 && getenv("SSB64_CSS_DEBUG") != NULL)
+	{
+		extern void port_log(const char *fmt, ...);
+		port_log("PAGER: tap dir=%d cooldown=%d tic=%d\n", (int)dir, (int)sFlipCooldown, (int)sMNPlayersVSTotalTimeTics);
+	}
 	req = port_roster_take_page_request();
 	if (req >= 0 && req != port_roster_page())
 	{
 		port_roster_set_page(req);
 		mnPlayersVSPortApplyRosterPage();
+		mnPlayersVSPortRefreshHeldPreviews();
 		sFlipCooldown = 12;
 		return;
 	}
@@ -5435,6 +5471,7 @@ static void mnPlayersVSPortPageInput(void)
 	{
 		port_roster_set_page(port_roster_page() + dir);
 		mnPlayersVSPortApplyRosterPage();
+		mnPlayersVSPortRefreshHeldPreviews();
 		sFlipCooldown = 12;   /* one flip per press (taps can double-edge) */
 	}
 }
