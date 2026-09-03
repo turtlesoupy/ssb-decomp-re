@@ -765,6 +765,13 @@ typedef struct OSB5State
     OSB5Vert *src;          /* source verts, spawn-world space */
     f32 (*bind_local)[4][3];/* per vert, per influence: joint-local coords */
     f32 (*bind_nrm)[4][3];  /* per vert, per influence: joint-local normal */
+    /* per vert, per influence: 0..255 damp factor for LEAKED arm weights
+     * (menu scenes only). Auto-rigs bleed a few percent of shoulder weight
+     * down the torso to waist height (the arm hangs beside the body in the
+     * rest pose); harmless in battle swings, but the 150deg raised-arm Win
+     * poses turn 5-30% of that lever into tens of units and tear the
+     * shirt/pants side open. Computed at inject from bind geometry. */
+    u8 (*wdamp)[4];
     Vtx *vtx;               /* live Vtx array the DL renders */
     /* Root-joint mesh DL, attached to fp->joints[0]->dl by the first skin
      * update whose joint frames validate — NOT at load time. A freshly
@@ -2605,6 +2612,13 @@ static s32 osb5_on_menu_scene(void)
 {
     extern s32 port_current_scene(void);
     s32 sc = port_current_scene();
+    /* 16-20 = the character-select screens, 24 = VS results, 62 = the port's
+     * VS matchup card (nSCKindVSIntro). The card is a fork of the 1P intro:
+     * it re-makes fighters straight into a partial-hierarchy Win figatree
+     * exactly like the CSS/results screens, so it needs the same menu-pose
+     * treatment (root/arm/head aim, no leg dev-fit). SSB64_VSINTRO_BATTLE_SKIN
+     * puts the card back on the battle path for A/B. */
+    if (sc == 62 && getenv("SSB64_VSINTRO_BATTLE_SKIN") == NULL) return 1;
     return (sc == 16 || sc == 17 || sc == 18 || sc == 19 || sc == 20 || sc == 24);
 }
 
@@ -3749,11 +3763,41 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             f32 w = (f32)v->w[t] / 255.0f;
             f32 *bl, *bn;
             s32 kk = v->j[t];
+            if (o->wdamp != NULL && o->wdamp[i][t] != 255 && osb5_on_menu_scene() &&
+                getenv("SSB64_ARMLEAK") == NULL)
+                w *= (f32)o->wdamp[i][t] / 255.0f;
             /* Concentrate the broad source arm weights around their
              * dominant segment in the sharply bent CSS poses. Normalizing
              * below retains a small elbow blend without the rubber-hose
              * silhouette produced by the raw feathered weights. */
-            if (arm_weight >= 128) w = w*w;
+            /* CONTINUOUS ramp (2026-09-03): the original hard cutoff
+             * (square iff arm_weight >= 128) put a weight cliff along the
+             * 50% sleeve/torso contour; with the shoulder rotated ~150deg
+             * for the raised-arm Win poses, neighbouring verts either side
+             * of the contour landed tens of units apart -> jagged sleeve
+             * edge, armpit gap, visibly thinner arm on the VS card.
+             * Exponent now ramps 1 -> 2 across arm_weight 64..192.
+             * SSB64_ARMSQ=0 disables, =1 restores the hard cutoff. */
+            {
+                static s32 sArmSq = -1;
+                if (sArmSq < 0)
+                {
+                    const char *e = getenv("SSB64_ARMSQ");
+                    sArmSq = (e == NULL) ? 2 : atoi(e);
+                }
+                if (sArmSq == 1)
+                {
+                    if (arm_weight >= 128) w = w*w;
+                }
+                else if (sArmSq == 2 && arm_weight > 64)
+                {
+                    extern float powf(float, float);
+                    f32 sr = (f32)(arm_weight - 64) / 128.0f;
+                    if (sr > 1.0f) sr = 1.0f;
+                    sr = sr*sr*(3.0f - 2.0f*sr);
+                    if (w > 0.0f) w = powf(w, 1.0f + sr);
+                }
+            }
             if (w <= 0.0f) continue;
             bl = o->bind_local[i][t];
             bn = o->bind_nrm[i][t];
@@ -3787,6 +3831,37 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             o->vtx[i].n.n[0] = (s8)nl[0];
             o->vtx[i].n.n[1] = (s8)nl[1];
             o->vtx[i].n.n[2] = (s8)nl[2];
+        }
+        if (getenv("SSB64_SKIN_DUMP") != NULL && (s32)fp->player == 0)
+        {
+            /* SSB64_SKIN_DUMP=<scene>:<nth>: on the nth skin update of
+             * player 0 in that scene, log every slot frame and every
+             * skinned vert (world space) for offline torn-edge analysis */
+            static s32 sDumpN = 0, sDumpScene = -1, sDumpNth = -1, sDumpDone = 0;
+            if (sDumpScene < 0)
+            {
+                const char *e = getenv("SSB64_SKIN_DUMP");
+                sDumpScene = atoi(e);
+                sDumpNth = (strchr(e, ':') != NULL) ? atoi(strchr(e, ':') + 1) : 30;
+            }
+            extern s32 port_current_scene(void);
+            if (!sDumpDone && port_current_scene() == sDumpScene)
+            {
+                if (i == 0) sDumpN++;
+                if (sDumpN == sDumpNth)
+                {
+                    s32 q;
+                    if (i == 0)
+                        for (q = 0; q < o->njoints; q++)
+                            port_log("SKJ %d o=(%.2f,%.2f,%.2f) m=(%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f)\n",
+                                     q, jo[q][0], jo[q][1], jo[q][2],
+                                     jm[q][0][0], jm[q][0][1], jm[q][0][2],
+                                     jm[q][1][0], jm[q][1][1], jm[q][1][2],
+                                     jm[q][2][0], jm[q][2][1], jm[q][2][2]);
+                    port_log("SKV %d %.2f %.2f %.2f\n", i, acc[0], acc[1], acc[2]);
+                    if (i == o->nverts - 1) sDumpDone = 1;
+                }
+            }
         }
     }
 }
@@ -4166,6 +4241,69 @@ static void osb5_load(FTStruct *fp, FILE *f, u8 *shared_tex, u32 shared_tw, u32 
             o->bind_nrm[i][t][1] = jinv[kk][1][0]*n0 + jinv[kk][1][1]*n1 + jinv[kk][1][2]*n2;
             o->bind_nrm[i][t][2] = jinv[kk][2][0]*n0 + jinv[kk][2][1]*n1 + jinv[kk][2][2]*n2;
         }
+    }
+    o->wdamp = malloc(sizeof(*o->wdamp) * nverts);
+    memset(o->wdamp, 255, sizeof(*o->wdamp) * nverts);
+    if (o->canonical)
+    {
+        s32 nleak = 0;
+        for (i = 0; i < nverts; i++)
+        {
+            OSB5Vert *v = &o->src[i];
+            s32 t, armsum = 0;
+            for (t = 0; t < 4; t++)
+                if (osb5_canonical_slot_is_arm(o, (s32)v->j[t])) armsum += (s32)v->w[t];
+            if (armsum >= 128 || armsum == 0) continue;   /* sleeve verts keep everything */
+            for (t = 0; t < 4; t++)
+            {
+                s32 kk = (s32)v->j[t], c, child = -1, par;
+                f32 a[3], b[3], ab[3], ap[3], L2, tt, ratio, f;
+                if (v->w[t] == 0 || !osb5_canonical_slot_is_arm(o, kk)) continue;
+                for (c = 0; c < o->njoints; c++)
+                    if ((s32)o->can_parent[c] == kk) { child = c; break; }
+                par = (s32)o->can_parent[kk];
+                /* segment = this bone (slot -> first child); a terminal
+                 * slot (hand) extends its parent bone one length outward */
+                if (child >= 0)
+                {
+                    memcpy(a, jo[kk], sizeof(a)); memcpy(b, jo[child], sizeof(b));
+                }
+                else if (par >= 0)
+                {
+                    for (c = 0; c < 3; c++) { a[c] = jo[kk][c]; b[c] = 2.0f*jo[kk][c] - jo[par][c]; }
+                }
+                else continue;
+                for (c = 0; c < 3; c++) { ab[c] = b[c] - a[c]; }
+                ap[0] = v->x - a[0]; ap[1] = v->y - a[1]; ap[2] = v->z - a[2];
+                L2 = ab[0]*ab[0] + ab[1]*ab[1] + ab[2]*ab[2];
+                if (L2 < 1.0f) continue;
+                tt = (ap[0]*ab[0] + ap[1]*ab[1] + ap[2]*ab[2]) / L2;
+                {
+                    f32 tc = tt < 0.0f ? 0.0f : (tt > 1.0f ? 1.0f : tt);
+                    f32 fr, ft;
+                    for (c = 0; c < 3; c++) ap[c] -= tc * ab[c];
+                    ratio = sqrtf((ap[0]*ap[0] + ap[1]*ap[1] + ap[2]*ap[2]) / L2);
+                    /* a torso-dominant vert may keep arm influence only
+                     * at the ROOT end of the bone (the armpit/collar
+                     * blend): radial keep 1 within 0.35 bone lengths,
+                     * gone by 0.7; along-bone keep 1 up to t=0.35, gone
+                     * by t=0.8 (the sleeve verts themselves are exempt
+                     * via the armsum gate above). The measured leak sits
+                     * at t 0.8-1.5, r 0.4-1.0 — waist height. */
+                    fr = (ratio - 0.35f) / 0.35f;
+                    ft = (tt - 0.35f) / 0.45f;
+                    if (fr <= 0.0f && ft <= 0.0f) continue;
+                    if (fr < 0.0f) fr = 0.0f; if (fr > 1.0f) fr = 1.0f;
+                    if (ft < 0.0f) ft = 0.0f; if (ft > 1.0f) ft = 1.0f;
+                    fr = 1.0f - fr*fr*(3.0f - 2.0f*fr);
+                    ft = 1.0f - ft*ft*(3.0f - 2.0f*ft);
+                    f = fr * ft;
+                }
+                o->wdamp[i][t] = (u8)(f * 255.0f);
+                nleak++;
+            }
+        }
+        port_log("OSB5: %d leaked arm influences damped for menu poses\n", nleak);
     }
 
     if (o->canonical && o->have_tbnd)
