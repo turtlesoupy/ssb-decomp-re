@@ -673,7 +673,22 @@ static void scVSIntroMakeFighter(SCVSIntroSlot *s, s32 idx)
      * frames on the card — "arm glitching up and down", 2026-09-03). */
     {
         extern s32 mnPlayersVSGetStatusSelected(s32 fkind);
-        scSubsysFighterSetStatus(fighter_gobj, mnPlayersVSGetStatusSelected(((u32)s->fkind < 12) ? s->fkind : 0));
+        s32 status = mnPlayersVSGetStatusSelected(((u32)s->fkind < 12) ? s->fkind : 0);
+        /* SSB64_VSINTRO_WIN=1..4: force a results pose (og_sprite.py: the
+         * chibi Kirby/Purin "selected" poses bow into the camera and read as
+         * a squashed head on a social card). */
+        {
+            const char *e = getenv("SSB64_VSINTRO_WIN");
+            if (e != NULL && e[0] >= '1' && e[0] <= '4' && e[1] == '\0')
+            {
+                status = nFTDemoStatusWin1 + (e[0] - '1');
+            }
+            else if (e != NULL && e[0] == '0' && e[1] == '\0')
+            {
+                status = nFTCommonStatusWait; /* plain idle stance */
+            }
+        }
+        scSubsysFighterSetStatus(fighter_gobj, status);
     }
 
     fp = ftGetStruct(fighter_gobj);
