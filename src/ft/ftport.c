@@ -1571,6 +1571,29 @@ const char *port_roster_player_shortname(s32 player)
         buf[n] = '\0';
         if (n > 0) return buf;
     }
+    /* legacy single-target inject (?inject=&fkind=&player=&inject_short=/
+     * inject_name=): the site launches the HUMAN player this way (only the
+     * CPU slots go through the roster), so without this the results screen
+     * fell back to the base fighter's name ("FOX WINS!" for a Mao pick). */
+    {
+        const char *pl = getenv("SSB64_INJECT_PLAYER");
+        const char *src = getenv("SSB64_INJECT_SHORT");
+        if (src == NULL || src[0] == '\0') src = getenv("SSB64_INJECT_NAME");
+        if (src != NULL && src[0] != '\0' && getenv("SSB64_INJECT_BUNDLE") != NULL &&
+            (u32)player < 4 && sPlayerChar[player] < 0 &&
+            atoi((pl != NULL) ? pl : "0") == player)
+        {
+            s32 i, n = 0;
+            for (i = 0; src[i] != '\0' && n < 10; i++)
+            {
+                char ch = src[i];
+                if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 'a' + 'A');
+                if (ch >= 'A' && ch <= 'Z') buf[n++] = ch;
+            }
+            buf[n] = '\0';
+            if (n > 0) return buf;
+        }
+    }
     return NULL;
 }
 
