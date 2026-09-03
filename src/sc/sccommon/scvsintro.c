@@ -769,6 +769,12 @@ static void scVSIntroFuncRun(GObj *gobj)
         scVSIntroExit();
         return;
     }
+    /* SSB64_VSINTRO_HOLD=1: never auto-dismiss (og_sprite.py shoots late
+     * frames of a results pose; SSB64_MAX_FRAMES ends the process). */
+    if (getenv("SSB64_VSINTRO_HOLD") != NULL)
+    {
+        return;
+    }
     if (sSCVSIntroFinishTic >= 0 && sSCVSIntroTotalTics >= sSCVSIntroFinishTic)
     {
         scVSIntroExit();
