@@ -1868,6 +1868,58 @@ s32 port_pose_capture_active(void)
     return sMode;
 }
 
+/* SSB64_POSE_CAPTURE_FILL=RRGGBB: chroma clear color for matting captures
+ * (og_sprite.py shoots the same frame over two colors and differences them
+ * into alpha). Also switches the clear to once-per-frame; see objdisplay.c. */
+static s32 pose_capture_fill_parse(u32 *out)
+{
+    static s32 sState = -1; /* -1 unparsed, 0 unset, 1 set */
+    static u32 sColor = 0;
+    if (sState < 0)
+    {
+        const char *e = getenv("SSB64_POSE_CAPTURE_FILL");
+        sState = 0;
+        if (e != NULL && strlen(e) == 6)
+        {
+            u32 v = 0;
+            s32 i, ok = 1;
+            for (i = 0; i < 6; i++)
+            {
+                char c = e[i];
+                u32 d;
+                if (c >= '0' && c <= '9') d = c - '0';
+                else if (c >= 'a' && c <= 'f') d = 10 + c - 'a';
+                else if (c >= 'A' && c <= 'F') d = 10 + c - 'A';
+                else { ok = 0; break; }
+                v = (v << 4) | d;
+            }
+            if (ok)
+            {
+                sColor = GPACK_RGBA8888((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF, 255);
+                sState = 1;
+            }
+        }
+    }
+    *out = sColor;
+    return sState;
+}
+
+u32 port_pose_capture_fill_color(void)
+{
+    u32 c;
+    if (pose_capture_fill_parse(&c))
+    {
+        return c;
+    }
+    return GPACK_RGBA8888(255, 255, 255, 255);
+}
+
+s32 port_pose_capture_fill_once(void)
+{
+    u32 c;
+    return pose_capture_fill_parse(&c);
+}
+
 s32 port_pose_capture_filter(GObj *gobj)
 {
     FTStruct *fp;

@@ -3251,12 +3251,27 @@ void func_8001663C(Gfx **dls, CObj *cobj, s32 buffer_id)
      * eval contact sheets than the old neutral grey). */
     {
         extern s32 port_pose_capture_active(void);
+        extern u32 port_pose_capture_fill_color(void);
+        extern s32 port_pose_capture_fill_once(void);
         if (port_pose_capture_active() && !(cobj->flags & COBJ_FLAG_FILLCOLOR))
         {
-            gDPSetCycleType(dl++, G_CYC_FILL);
-            gDPSetRenderMode(dl++, G_RM_NOOP, G_RM_NOOP2);
-            gDPSetFillColor(dl++, syVideoGetFillColor(GPACK_RGBA8888(255, 255, 255, 255)));
-            gDPFillRectangle(dl++, ulx, uly, lrx, lry);
+            /* SSB64_POSE_CAPTURE_FILL=RRGGBB (og_sprite.py chroma matting):
+             * clear only Z-buffered 3D cameras (the fighter cameras), so a
+             * flat full-frame camera drawn AFTER them (the VS card's
+             * scissor-restore camera at prio 40) cannot wipe the fighter.
+             * Without the env: legacy per-camera white. */
+            s32 skip = 0;
+            if (port_pose_capture_fill_once())
+            {
+                skip = !(cobj->flags & COBJ_FLAG_ZBUFFER);
+            }
+            if (!skip)
+            {
+                gDPSetCycleType(dl++, G_CYC_FILL);
+                gDPSetRenderMode(dl++, G_RM_NOOP, G_RM_NOOP2);
+                gDPSetFillColor(dl++, syVideoGetFillColor(port_pose_capture_fill_color()));
+                gDPFillRectangle(dl++, ulx, uly, lrx, lry);
+            }
         }
     }
 #endif
