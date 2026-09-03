@@ -36,12 +36,15 @@ extern u32 sySchedulerGetTicCount();
 /* ftport.c */
 extern s32 port_voice_announce_player(s32 player, s32 fkind);
 extern const char *port_roster_player_display(s32 player);
+extern s32 port_osb5_mesh_bounds_local(void *fighter_gobj, f32 mn[3], f32 mx[3]);
 /* port/audio/voice_inject */
 extern void portVoiceInjectStop(void);
 /* n_env.c: drop fighter voice lines (victory poses) while the card runs */
 extern s32 gPortFighterVoiceMute;
 /* sc1pintro.c — per-fighter look-at heights of the 1P card cameras */
 extern CObjDesc* sc1PIntroGetFighterCObjDesc(CObjDesc *cobj_desc, s32 fkind, s32 cobj_id);
+/* gmcollision.c: DObj chain -> world position */
+extern void gmCollisionGetFighterPartsWorldPosition(DObj *dobj, Vec3f *pos);
 
 #define SCVSINTRO_MAX_FIGHTERS 4
 #define SCVSINTRO_VIEW_L 10
@@ -55,6 +58,8 @@ extern CObjDesc* sc1PIntroGetFighterCObjDesc(CObjDesc *cobj_desc, s32 fkind, s32
  * fighter's mid-height per kind); the 1P camera distances themselves are
  * unusable without their per-kind fovy animations, so the dolly is ours. */
 #define SCVSINTRO_DIST_PER_ATY 14.0F
+#define SCVSINTRO_TAN_HALF_FOVY 0.2679F /* tan(15 deg) */
+#define SCVSINTRO_LINGER_TICS 24        /* after the announcer chain ends */
 
 typedef struct SCVSIntroSlot
 {
@@ -65,6 +70,14 @@ typedef struct SCVSIntroSlot
     s32 pkind;
     s32 x0, x1;             /* viewport slice */
     f32 half_w;             /* world half-width visible at the fighter */
+    f32 aspect;
+    /* this frame's bounds of the posed fighter, and the largest size seen
+     * (the dolly never pushes back in: stable framing through the pose) */
+    sb32 bounds_have;
+    f32 bx0, bx1, by0, by1;
+    f32 wmax, hmax;
+    /* smoothed camera */
+    f32 cam_atx, cam_aty, cam_dist;
     GObj *fighter_gobj;
     GObj *camera_gobj;
 } SCVSIntroSlot;
@@ -296,71 +309,129 @@ static void scVSIntroMakeText(GObj *gobj, const char *str, f32 x, f32 y, f32 sca
     }
 }
 
-/* Up to two lines per fighter (split at the last space that balances the
- * halves), each scaled to fit its slice, centred on the bottom banner. */
+/* Greedy word-wrap of a name into at most SCVSINTRO_NAME_LINES lines at a
+ * given scale. Returns FALSE when a line (or a single word) will not fit. */
+#define SCVSINTRO_NAME_LINES 3
+static s32 scVSIntroStrCopy(char *dst, const char *src, s32 cap)
+{
+    s32 n = 0;
+    while (src[n] != '\0' && n < cap - 1) { dst[n] = src[n]; n++; }
+    dst[n] = '\0';
+    return n;
+}
+static sb32 scVSIntroWrapName(const char *name, f32 avail, f32 scale, char lines[SCVSINTRO_NAME_LINES][48], s32 *nlines)
+{
+    s32 n = 0, len = 0;
+    const char *p = name;
+
+    lines[0][0] = '\0';
+    while (*p == ' ') p++;
+    while (*p != '\0')
+    {
+        char word[48];
+        s32 wl = 0;
+        char probe[48];
+        while (*p != '\0' && *p != ' ' && wl < 47) word[wl++] = *p++;
+        word[wl] = '\0';
+        while (*p == ' ') p++;
+        if (n == 0 && len == 0) n = 1;
+        if (len == 0)
+        {
+            scVSIntroStrCopy(probe, word, 48);
+        }
+        else if (len + 1 + wl < 48)
+        {
+            s32 m = scVSIntroStrCopy(probe, lines[n - 1], 48);
+            probe[m++] = ' ';
+            scVSIntroStrCopy(&probe[m], word, 48 - m);
+        }
+        else
+        {
+            return FALSE;
+        }
+        if (scVSIntroTextWidth(probe) * scale <= avail)
+        {
+            len = scVSIntroStrCopy(lines[n - 1], probe, 48);
+        }
+        else if (len == 0 || n >= SCVSINTRO_NAME_LINES)
+        {
+            return FALSE;
+        }
+        else
+        {
+            scVSIntroStrCopy(lines[n], word, 48);
+            len = wl;
+            n++;
+        }
+    }
+    *nlines = (n > 0) ? n : 1;
+    return TRUE;
+}
+
+/* Every name shares one scale (the largest at which all of them fit their
+ * slice in at most three lines), centred on the bottom banner. */
 static void scVSIntroMakeNames(void)
 {
+    static const f32 scales[] = { 0.9F, 0.8F, 0.7F, 0.6F, 0.55F, 0.5F, 0.45F, 0.4F, 0.35F, 0.3F, 0.25F };
     GObj *gobj = gcMakeGObjSPAfter(0, NULL, 19, GOBJ_PRIORITY_DEFAULT);
-    s32 i;
+    const char *names[SCVSINTRO_MAX_FIGHTERS];
+    char lines[SCVSINTRO_MAX_FIGHTERS][SCVSINTRO_NAME_LINES][48];
+    s32 nlines[SCVSINTRO_MAX_FIGHTERS];
+    f32 scale = scales[ARRAY_COUNT(scales) - 1];
+    s32 i, si;
 
     gcAddGObjDisplay(gobj, lbCommonDrawSObjAttr, 27, GOBJ_PRIORITY_DEFAULT, ~0);
 
     for (i = 0; i < sSCVSIntroSlotsNum; i++)
     {
         SCVSIntroSlot *s = &sSCVSIntroSlots[i];
-        const char *name = port_roster_player_display(s->player);
-        char lines[2][48];
-        s32 nlines = 1, k, n;
-        f32 avail = (f32)(s->x1 - s->x0) - 8.0F;
-        f32 scale = 1.0F, w0, w1, wmax, y;
-
-        if (name[0] == '\0')
+        names[i] = port_roster_player_display(s->player);
+        if (names[i][0] == '\0')
         {
-            name = ((u32)s->fkind < 12) ? dSCVSIntroVanillaNames[s->fkind] : "";
+            names[i] = ((u32)s->fkind < 12) ? dSCVSIntroVanillaNames[s->fkind] : "";
         }
-        for (n = 0; name[n] != '\0' && n < (s32)sizeof lines[0] - 1; n++) lines[0][n] = name[n];
-        lines[0][n] = '\0';
-        lines[1][0] = '\0';
-
-        /* one line if it fits at a readable size, else split at a space */
-        if (scVSIntroTextWidth(lines[0]) * 0.55F > avail)
+    }
+    for (si = 0; si < (s32)ARRAY_COUNT(scales); si++)
+    {
+        sb32 ok = TRUE;
+        for (i = 0; i < sSCVSIntroSlotsNum && ok; i++)
         {
-            s32 best = -1;
-            f32 best_diff = 1e9F;
-            for (k = 1; k < n - 1; k++)
+            SCVSIntroSlot *s = &sSCVSIntroSlots[i];
+            f32 avail = (f32)(s->x1 - s->x0) - 6.0F;
+            ok = scVSIntroWrapName(names[i], avail, scales[si], lines[i], &nlines[i]);
+        }
+        if (ok)
+        {
+            scale = scales[si];
+            break;
+        }
+    }
+    if (si == (s32)ARRAY_COUNT(scales))
+    {
+        /* nothing fits even at the smallest scale: draw what wraps anyway */
+        for (i = 0; i < sSCVSIntroSlotsNum; i++)
+        {
+            SCVSIntroSlot *s = &sSCVSIntroSlots[i];
+            if (!scVSIntroWrapName(names[i], (f32)(s->x1 - s->x0) - 6.0F, scale, lines[i], &nlines[i]))
             {
-                if (lines[0][k] == ' ')
-                {
-                    f32 d;
-                    lines[0][k] = '\0';
-                    d = scVSIntroTextWidth(lines[0]) - scVSIntroTextWidth(&lines[0][k + 1]);
-                    lines[0][k] = ' ';
-                    if (d < 0.0F) d = -d;
-                    if (d < best_diff) { best_diff = d; best = k; }
-                }
-            }
-            if (best > 0)
-            {
-                for (k = 0; lines[0][best + 1 + k] != '\0'; k++) lines[1][k] = lines[0][best + 1 + k];
-                lines[1][k] = '\0';
-                lines[0][best] = '\0';
-                nlines = 2;
+                scVSIntroStrCopy(lines[i][0], names[i], 48);
+                nlines[i] = 1;
             }
         }
-        w0 = scVSIntroTextWidth(lines[0]);
-        w1 = scVSIntroTextWidth(lines[1]);
-        wmax = (w0 > w1) ? w0 : w1;
-        if (wmax > 0.0F && wmax * scale > avail) scale = avail / wmax;
-        if (nlines == 2 && scale > 0.7F) scale = 0.7F;
-        if (nlines == 1 && scale > 0.9F) scale = 0.9F;
-
-        y = (nlines == 1) ? 206.0F - SCVSINTRO_LETTER_H * scale / 2.0F
-                          : 206.0F - SCVSINTRO_LETTER_H * scale - 2.0F;
-        scVSIntroMakeText(gobj, lines[0], (f32)s->x0 + ((f32)(s->x1 - s->x0) - w0 * scale) / 2.0F, y, scale);
-        if (nlines == 2)
+    }
+    for (i = 0; i < sSCVSIntroSlotsNum; i++)
+    {
+        SCVSIntroSlot *s = &sSCVSIntroSlots[i];
+        f32 lh = SCVSINTRO_LETTER_H * scale;
+        f32 gap = 4.0F * scale;
+        f32 total = (f32)nlines[i] * lh + (f32)(nlines[i] - 1) * gap;
+        f32 y = 206.0F - total / 2.0F;
+        s32 k;
+        for (k = 0; k < nlines[i]; k++)
         {
-            scVSIntroMakeText(gobj, lines[1], (f32)s->x0 + ((f32)(s->x1 - s->x0) - w1 * scale) / 2.0F,
-                              y + SCVSINTRO_LETTER_H * scale + 4.0F, scale);
+            f32 w = scVSIntroTextWidth(lines[i][k]);
+            scVSIntroMakeText(gobj, lines[i][k], (f32)s->x0 + ((f32)(s->x1 - s->x0) - w * scale) / 2.0F, y, scale);
+            y += lh + gap;
         }
     }
 }
@@ -368,6 +439,120 @@ static void scVSIntroMakeNames(void)
 /* ------------------------------------------------------------------ */
 /*  Fighters + cameras                                                 */
 /* ------------------------------------------------------------------ */
+
+/* Bounds of the posed fighter in its own frame (the slide-in offset
+ * removed): every joint, plus the corners of the injected mesh's box when
+ * one is skinned (those meshes reach well past the vanilla joints). */
+static void scVSIntroMeasure(SCVSIntroSlot *s, GObj *fighter_gobj)
+{
+    FTStruct *fp = ftGetStruct(fighter_gobj);
+    DObj *root = DObjGetStruct(fighter_gobj);
+    f32 x0 = 1e9F, x1 = -1e9F, y0 = 1e9F, y1 = -1e9F;
+    f32 mn[3], mx[3];
+    s32 k, n = 0;
+
+    for (k = 0; k < FTPARTS_JOINT_NUM_MAX; k++)
+    {
+        Vec3f pos;
+        DObj *j = fp->joints[k];
+        if (j == NULL) continue;
+        pos.x = pos.y = pos.z = 0.0F;
+        gmCollisionGetFighterPartsWorldPosition(j, &pos);
+        pos.x -= root->translate.vec.f.x;
+        if (!(pos.x > -1e6F && pos.x < 1e6F && pos.y > -1e6F && pos.y < 1e6F)) continue;
+        if (pos.x < x0) x0 = pos.x;
+        if (pos.x > x1) x1 = pos.x;
+        if (pos.y < y0) y0 = pos.y;
+        if (pos.y > y1) y1 = pos.y;
+        n++;
+    }
+    if (fp->joints[0] != NULL && port_osb5_mesh_bounds_local(fighter_gobj, mn, mx))
+    {
+        for (k = 0; k < 8; k++)
+        {
+            Vec3f pos;
+            pos.x = (k & 1) ? mx[0] : mn[0];
+            pos.y = (k & 2) ? mx[1] : mn[1];
+            pos.z = (k & 4) ? mx[2] : mn[2];
+            gmCollisionGetFighterPartsWorldPosition(fp->joints[0], &pos);
+            pos.x -= root->translate.vec.f.x;
+            if (!(pos.x > -1e6F && pos.x < 1e6F && pos.y > -1e6F && pos.y < 1e6F)) continue;
+            if (pos.x < x0) x0 = pos.x;
+            if (pos.x > x1) x1 = pos.x;
+            if (pos.y < y0) y0 = pos.y;
+            if (pos.y > y1) y1 = pos.y;
+            n++;
+        }
+    }
+    else if (fp->attr != NULL)
+    {
+        /* vanilla mesh: the joints sit inside the body (Jigglypuff's
+         * balloon, Kirby); grow the box by the collision diamond */
+        f32 half_w = fp->attr->map_coll.width / 2.0F;
+        f32 body_h = fp->attr->map_coll.top - fp->attr->map_coll.bottom;
+        f32 sc = root->scale.vec.f.y;
+        if (sc <= 0.0F) sc = 1.0F;
+        x0 -= half_w * sc;
+        x1 += half_w * sc;
+        if (n > 0 && y1 - y0 < body_h * sc)
+        {
+            f32 grow = (body_h * sc - (y1 - y0)) / 2.0F;
+            y0 -= grow;
+            y1 += grow;
+        }
+    }
+    if (n < 2 || y1 - y0 < 1.0F) return;
+    s->bx0 = x0; s->bx1 = x1; s->by0 = y0; s->by1 = y1;
+    if (!s->bounds_have)
+    {
+        s->wmax = x1 - x0;
+        s->hmax = y1 - y0;
+        s->bounds_have = TRUE;
+    }
+    else
+    {
+        if (x1 - x0 > s->wmax) s->wmax = x1 - x0;
+        if (y1 - y0 > s->hmax) s->hmax = y1 - y0;
+    }
+}
+
+/* Dolly/pan the slot camera so the running bounds (plus a margin for the
+ * mesh volume around the joints) fill the slice, whatever the pose does. */
+static void scVSIntroFitCamera(SCVSIntroSlot *s)
+{
+    CObj *cobj;
+    f32 h, w, pad, dist_v, dist_h, dist, atx, aty, k;
+
+    if (!s->bounds_have || s->camera_gobj == NULL) return;
+    cobj = CObjGetStruct(s->camera_gobj);
+    h = s->hmax;
+    w = s->wmax;
+    pad = h * 0.12F + 20.0F;
+    dist_v = (h / 2.0F + pad) / SCVSINTRO_TAN_HALF_FOVY;
+    dist_h = (w / 2.0F + pad) / (SCVSINTRO_TAN_HALF_FOVY * s->aspect);
+    dist = (dist_v > dist_h) ? dist_v : dist_h;
+    if (dist < 400.0F) dist = 400.0F;
+    atx = (s->bx0 + s->bx1) / 2.0F;
+    aty = (s->by0 + s->by1) / 2.0F;
+
+    if (s->cam_dist <= 0.0F)
+    {
+        s->cam_atx = atx; s->cam_aty = aty; s->cam_dist = dist;
+    }
+    /* pan follows the pose gently; the dolly only ever pulls back */
+    k = 0.15F;
+    s->cam_atx += (atx - s->cam_atx) * k;
+    s->cam_aty += (aty - s->cam_aty) * k;
+    if (dist > s->cam_dist) s->cam_dist += (dist - s->cam_dist) * 0.3F;
+
+    cobj->vec.at.x = s->cam_atx;
+    cobj->vec.at.y = s->cam_aty;
+    cobj->vec.at.z = 0.0F;
+    cobj->vec.eye.x = s->cam_atx;
+    cobj->vec.eye.y = s->cam_aty + s->cam_dist * 0.05F;
+    cobj->vec.eye.z = s->cam_dist;
+    s->half_w = s->cam_dist * SCVSINTRO_TAN_HALF_FOVY * s->aspect;
+}
 
 static void scVSIntroFighterProcUpdate(GObj *fighter_gobj)
 {
@@ -381,6 +566,9 @@ static void scVSIntroFighterProcUpdate(GObj *fighter_gobj)
     {
         return;
     }
+    scVSIntroMeasure(s, fighter_gobj);
+    scVSIntroFitCamera(s);
+
     /* slide in from the outside of the slice */
     step = s->half_w * 0.09F;
     if (dobj->translate.vec.f.x < 0.0F)
@@ -446,8 +634,12 @@ static void scVSIntroMakeFighterCamera(SCVSIntroSlot *s, s32 idx)
     cobj->projection.persp.far = 16384.0F;
     cobj->flags |= COBJ_FLAG_ZBUFFER;
 
-    /* world half-width visible at the fighter's depth */
-    s->half_w = dist * 0.2679F * aspect;   /* tan(15 deg) */
+    /* world half-width visible at the fighter's depth (initial guess; the
+     * fighter proc refits the camera to the posed joints every frame) */
+    s->aspect = aspect;
+    s->half_w = dist * SCVSINTRO_TAN_HALF_FOVY * aspect;
+    s->bounds_have = FALSE;
+    s->cam_dist = 0.0F;
     s->camera_gobj = gobj;
 }
 
@@ -507,7 +699,7 @@ static void scVSIntroUpdateAnnounce(void)
     if (sSCVSIntroAnnounceStep == last)
     {
         /* sequence done: linger, then start the match */
-        sSCVSIntroFinishTic = sSCVSIntroTotalTics + 70;
+        sSCVSIntroFinishTic = sSCVSIntroTotalTics + SCVSINTRO_LINGER_TICS;
     }
     else if (sSCVSIntroAnnounceStep == 1)
     {

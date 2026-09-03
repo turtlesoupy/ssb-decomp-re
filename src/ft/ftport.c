@@ -1719,6 +1719,33 @@ s32 port_osb5_fighter_is_canonical(void *fighter_gobj)
             (s32)fp->fkind == o->owner_fkind && o->canonical);
 }
 
+/* Joint-0-local bounding box of the live skinned mesh (the space the DL
+ * renders in). 0 when this fighter has no injected mesh filled yet. Used
+ * by the VS card camera: injected meshes reach well past the joints. */
+s32 port_osb5_mesh_bounds_local(void *fighter_gobj, f32 mn[3], f32 mx[3])
+{
+    FTStruct *fp = ftGetStruct((GObj *)fighter_gobj);
+    OSB5State *o;
+    s32 i, n = 0;
+    if (fp == NULL) return 0;
+    o = osb5_slot_for_fighter(fp);
+    if (o == NULL || o->vtx == NULL || o->owner != fighter_gobj ||
+        (s32)fp->fkind != o->owner_fkind || o->fills < 1)
+        return 0;
+    mn[0] = mn[1] = mn[2] = 1e9f;
+    mx[0] = mx[1] = mx[2] = -1e9f;
+    for (i = 0; i < o->nverts; i++)
+    {
+        f32 x = (f32)o->vtx[i].n.ob[0], y = (f32)o->vtx[i].n.ob[1], z = (f32)o->vtx[i].n.ob[2];
+        if (x == 0.0f && y == 0.0f && z == 0.0f) continue;
+        if (x < mn[0]) mn[0] = x; if (x > mx[0]) mx[0] = x;
+        if (y < mn[1]) mn[1] = y; if (y > mx[1]) mx[1] = y;
+        if (z < mn[2]) mn[2] = z; if (z > mx[2]) mx[2] = z;
+        n++;
+    }
+    return n > 8;
+}
+
 s32 port_osb5_joint_replaced(void *fighter_gobj, s32 joint_id)
 {
     s32 k;
