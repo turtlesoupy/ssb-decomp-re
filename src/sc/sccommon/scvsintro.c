@@ -360,6 +360,9 @@ static sb32 scVSIntroWrapName(const char *name, f32 avail, f32 scale, char lines
         }
         else
         {
+            /* The word starts a new line: it has to fit on its own too,
+             * or a long surname ("AMODEI") spills into the next slice. */
+            if (scVSIntroTextWidth(word) * scale > avail) return FALSE;
             scVSIntroStrCopy(lines[n], word, 48);
             len = wl;
             n++;
@@ -428,6 +431,9 @@ static void scVSIntroMakeNames(void)
         f32 total = (f32)nlines[i] * lh + (f32)(nlines[i] - 1) * gap;
         f32 y = 206.0F - total / 2.0F;
         s32 k;
+        /* Three-line blocks would run past the bottom overscan: keep the
+         * last baseline inside the frame instead of centring blindly. */
+        if (y + total > 228.0F) y = 228.0F - total;
         for (k = 0; k < nlines[i]; k++)
         {
             f32 w = scVSIntroTextWidth(lines[i][k]);
@@ -490,16 +496,21 @@ static void scVSIntroMeasure(SCVSIntroSlot *s, GObj *fighter_gobj)
         /* vanilla mesh: the joints sit inside the body (Jigglypuff's
          * balloon, Kirby); grow the box by the collision diamond */
         f32 half_w = fp->attr->map_coll.width / 2.0F;
-        f32 body_h = fp->attr->map_coll.top - fp->attr->map_coll.bottom;
         f32 sc = root->scale.vec.f.y;
+        f32 ry = root->translate.vec.f.y;
+        f32 cb, ct;
         if (sc <= 0.0F) sc = 1.0F;
         x0 -= half_w * sc;
         x1 += half_w * sc;
-        if (n > 0 && y1 - y0 < body_h * sc)
+        /* Joints understate the body: the head joint sits below the cap and
+         * the ankles above the soles, so a joints-only box centres Mario
+         * high. Union with the collision box anchored at the ground point. */
+        cb = ry + fp->attr->map_coll.bottom * sc;
+        ct = ry + fp->attr->map_coll.top * sc;
+        if (n > 0)
         {
-            f32 grow = (body_h * sc - (y1 - y0)) / 2.0F;
-            y0 -= grow;
-            y1 += grow;
+            if (cb < y0) y0 = cb;
+            if (ct > y1) y1 = ct;
         }
     }
     if (n < 2 || y1 - y0 < 1.0F) return;

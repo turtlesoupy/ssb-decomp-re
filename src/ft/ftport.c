@@ -5691,6 +5691,8 @@ static const u8 *port_ui_snap_texels(Sprite *spr);
  * idempotent), and linear bytes are written, so re-running on a later
  * reselect stays correct — writing the DRAM-swizzled state here corrupts on
  * the second pass because the one-time draw fixup will not run again. */
+static u32 port_ui_sprite_bytes(Sprite *spr, Bitmap *bms, s32 b);
+
 static void port_ui_write_canvas_fit(Sprite *spr, const u8 *canvas, s32 cw,
                                      s32 ch, const char *what)
 {
@@ -5857,6 +5859,14 @@ static void port_ui_write_canvas_fit(Sprite *spr, const u8 *canvas, s32 cw,
             }
         }
         yy += bms[b].actualHeight;
+    }
+    {
+        extern void portTextureCacheDeleteRange(const void *base, size_t size);
+        for (b = 0; b < spr->nbitmaps; b++)
+        {
+            u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+            if (buf != NULL) portTextureCacheDeleteRange(buf, port_ui_sprite_bytes(spr, bms, b));
+        }
     }
     port_log("OSBUI: injected %s (canvas %dx%d -> %dx%d at %d,%d; vanilla ink "
              "%dx%d at %d,%d in %dx%d)\n",
@@ -6298,7 +6308,17 @@ static void port_ui_write_sprite(Sprite *spr, FILE *f, const char *what)
         }
         memcpy(buf, tmp, nbytes);
     }
-    port_log("OSBUI: injected %s (%d bitmaps)\n", what, (int)spr->nbitmaps);
+        /* Fast3D caches decoded textures by texel+palette address: drop any
+     * entry for these buffers so the new pixels are what gets drawn. */
+    {
+        extern void portTextureCacheDeleteRange(const void *base, size_t size);
+        for (b = 0; b < spr->nbitmaps; b++)
+        {
+            u8 *buf = (u8 *)PORT_RESOLVE(bms[b].buf);
+            if (buf != NULL) portTextureCacheDeleteRange(buf, port_ui_sprite_bytes(spr, bms, b));
+        }
+    }
+port_log("OSBUI: injected %s (%d bitmaps)\n", what, (int)spr->nbitmaps);
 }
 
 void port_ui_css_hook(Sprite *portrait, Sprite *name_text, Sprite *fire_bg, s32 fkind)
@@ -6637,12 +6657,39 @@ void port_inject_bundle(GObj *fighter_gobj)
                         if (m[3] == 'V') fseek(uf, OSBV_STOCK_OFF, SEEK_SET);
                         else fseek(uf, -(80 + 32), SEEK_END);
                         port_ui_write_sprite(st, uf, "stock_icon");
+                        /* the palette follows the 16x10 icon in the file;
+                         * seek to it explicitly so a target sprite with a
+                         * different bitmap size cannot misalign the read */
+                        if (m[3] == 'V') fseek(uf, OSBV_PAL_OFF, SEEK_SET);
+                        else fseek(uf, -32, SEEK_END);
                         {
                             u32 *_luts = (u32 *)PORT_RESOLVE(_spr->stock_luts);
                             u8 *lut0 = (_luts != NULL) ? (u8 *)PORT_RESOLVE(_luts[0]) : NULL;
                             if (lut0 != NULL && fread(lut0, 1, 32, uf) == 32)
                             {
+                                extern void portTextureCacheDeleteRange(const void *base, size_t size);
                                 port_log("OSBUI: injected stock palette (costume 0)\n");
+                                /* The file stores the palette in the reloc-blob byte
+                                 * order (pass-1 BSWAP32 state), which the runtime
+                                 * LOADTLUT fixup restores ONLY for addresses inside a
+                                 * reloc file. The per-player HUD clone lives on the
+                                 * heap, so restore the BE u16 order here ourselves. */
+                                {
+                                    extern int portRelocFindContainingFile(const void *addr, uintptr_t *base, size_t *size);
+                                    uintptr_t fb = 0; size_t fs = 0;
+                                    if (!portRelocFindContainingFile(lut0, &fb, &fs))
+                                    {
+                                        s32 w;
+                                        for (w = 0; w < 32; w += 4)
+                                        {
+                                            u8 t0 = lut0[w], t1 = lut0[w + 1];
+                                            lut0[w] = lut0[w + 3]; lut0[w + 1] = lut0[w + 2];
+                                            lut0[w + 2] = t1; lut0[w + 3] = t0;
+                                        }
+                                        port_log("OSBUI: stock palette on heap — byte order restored\n");
+                                    }
+                                }
+                                portTextureCacheDeleteRange(lut0, 32);
                             }
                         }
                     }
