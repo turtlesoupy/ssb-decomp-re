@@ -5358,15 +5358,25 @@ s32 port_ui_opening_name_hook(GObj *gobj, void *announce_file, s32 fkind)
     }
     total += (n - 1) * 3;
     {
-        f32 x = 160.0F - total * 0.5F;
+        /* Long names (the shell allows ten letters) shrink to the 300 px
+         * title camera; MARIO-length names keep the vanilla 1:1 glyphs. */
+        const f32 max_w = 280.0F;
+        f32 scale = ((f32)total > max_w) ? max_w / (f32)total : 1.0F;
+        f32 x = 160.0F - (f32)total * scale * 0.5F;
         for (i = 0; i < n; i++)
         {
+            if (scale != 1.0F)
+            {
+                made[i]->sprite.attr |= SP_SCALE;
+                made[i]->sprite.scalex = scale;
+                made[i]->sprite.scaley = scale;
+            }
             made[i]->pos.x = x;
-            made[i]->pos.y = 100.0F;
-            x += made[i]->sprite.width + 3.0F;
+            made[i]->pos.y = 100.0F + (f32)made[i]->sprite.height * (1.0F - scale) * 0.5F;
+            x += ((f32)made[i]->sprite.width + 3.0F) * scale;
         }
     }
-    port_log("OSBUI: opening title fk%d -> %s\n", (int)fkind, src);
+    port_log("OSBUI: opening title fk%d -> %s (%d px)\n", (int)fkind, src, (int)total);
     return TRUE;
 }
 
