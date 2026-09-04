@@ -486,6 +486,7 @@ void port_dump_frame(GObj *fighter_gobj)
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
+#include <time.h>
 
 extern void *malloc(size_t);
 extern void free(void *);
@@ -2732,7 +2733,36 @@ static void osb5_menu_unfreeze(GObj *fighter_gobj, s32 keep_seated)
     }
 }
 
+/* SSB64_FRAME_PROFILE=1 accumulators (reported by port.cpp every 60 frames) */
+u64 gPortProfSkinNs = 0; u32 gPortProfSkinCalls = 0;
+static u64 osb5_prof_now_ns(void)
+{
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
+}
+static void osb5_skin_update_inner(GObj *fighter_gobj);
+/* Set for the ftMainProcParams-time call: re-seat joints/accessories but
+ * skip the per-vertex loop. The display-time call (ftDisplayMainProcDisplay)
+ * re-skins every vertex right before the draw anyway, so the params-time
+ * vertex pass was pure overwrite work (2x skinning per fighter per frame).
+ * SSB64_SKIN_PARAMS=1 restores the full double pass. */
+static s32 sOsb5SkinFramesOnly = 0;
 void port_osb5_skin_update(GObj *fighter_gobj)
+{
+    u64 t0 = osb5_prof_now_ns();
+    osb5_skin_update_inner(fighter_gobj);
+    gPortProfSkinNs += osb5_prof_now_ns() - t0;
+    gPortProfSkinCalls++;
+}
+void port_osb5_skin_update_params(GObj *fighter_gobj)
+{
+    static s32 sFull = -1;
+    if (sFull < 0) { const char *e = getenv("SSB64_SKIN_PARAMS"); sFull = (e != NULL && e[0] == '1') ? 1 : 0; }
+    sOsb5SkinFramesOnly = !sFull;
+    port_osb5_skin_update(fighter_gobj);
+    sOsb5SkinFramesOnly = 0;
+}
+static void osb5_skin_update_inner(GObj *fighter_gobj)
 {
     if (getenv("SSB64_CSS_DEBUG") != NULL)
     {
@@ -3940,7 +3970,13 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         }
     }
 
-    if (getenv("SSB64_SKIN_FRAMES_ONLY") != NULL) return;
+    if (sOsb5SkinFramesOnly || getenv("SSB64_SKIN_FRAMES_ONLY") != NULL) return;
+    {
+        static s32 sArmLeak = -1, sSkinDump = -1;
+        s32 on_menu;
+        if (sArmLeak < 0) sArmLeak = (getenv("SSB64_ARMLEAK") != NULL) ? 1 : 0;
+        if (sSkinDump < 0) sSkinDump = (getenv("SSB64_SKIN_DUMP") != NULL) ? 1 : 0;
+        on_menu = osb5_on_menu_scene();
     for (i = 0; i < o->nverts; i++)
     {
         OSB5Vert *v = &o->src[i];
@@ -3948,7 +3984,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
         f32 nacc[3] = {0.0f, 0.0f, 0.0f};
         f32 wl[3], nw[3], nl[3], nlen, wsum = 0.0f;
         s32 t, arm_weight = 0;
-        if (o->canonical && osb5_on_menu_scene())
+        if (o->canonical && on_menu)
         {
             for (t = 0; t < 4; t++)
                 if (osb5_canonical_slot_is_arm(o, (s32)v->j[t]))
@@ -3959,7 +3995,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             f32 w = (f32)v->w[t] / 255.0f;
             f32 *bl, *bn;
             s32 kk = v->j[t];
-            if (o->wdamp != NULL && o->wdamp[i][t] != 255 && getenv("SSB64_ARMLEAK") == NULL)
+            if (o->wdamp != NULL && o->wdamp[i][t] != 255 && !sArmLeak)
                 w *= (f32)o->wdamp[i][t] / 255.0f;
             /* Concentrate the broad source arm weights around their
              * dominant segment in the sharply bent CSS poses. Normalizing
@@ -4028,7 +4064,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             {
                 f32 w = (f32)v->w[tt2] / 255.0f, tk[3], *blk, *bl0;
                 s32 kk2 = v->j[tt2], c2;
-                if (o->wdamp != NULL && o->wdamp[i][tt2] != 255 && getenv("SSB64_ARMLEAK") == NULL)
+                if (o->wdamp != NULL && o->wdamp[i][tt2] != 255 && !sArmLeak)
                     w *= (f32)o->wdamp[i][tt2] / 255.0f;
                 if (w <= 0.0f) continue;
                 blk = o->bind_local[i][tt2];
@@ -4102,7 +4138,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
             o->vtx[i].n.n[1] = (s8)nl[1];
             o->vtx[i].n.n[2] = (s8)nl[2];
         }
-        if (getenv("SSB64_SKIN_DUMP") != NULL && (s32)fp->player == 0)
+        if (sSkinDump && (s32)fp->player == 0)
         {
             /* SSB64_SKIN_DUMP=<scene>:<nth>: on the nth skin update of
              * player 0 in that scene, log every slot frame and every
@@ -4133,6 +4169,7 @@ static void osb5_skin_update_body(GObj *fighter_gobj)
                 }
             }
         }
+    }
     }
 }
 

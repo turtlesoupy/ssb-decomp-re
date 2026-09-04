@@ -3955,8 +3955,12 @@ void ftMainProcParams(GObj *fighter_gobj)
         extern void port_osb5_seat_probe(GObj *g, const char *site);
         port_osb5_seat_probe(fighter_gobj, "params-top");
     }
-    /* OSB5 CPU skinning: recompute the injected mesh every fighter tick */
-    port_osb5_skin_update(fighter_gobj);
+    /* OSB5: re-seat joints/accessories every fighter tick; the vertex
+     * pass runs at display time (ftDisplayMainProcDisplay) instead. */
+    {
+        extern void port_osb5_skin_update_params(GObj *fighter_gobj);
+        port_osb5_skin_update_params(fighter_gobj);
+    }
     port_osb5_copy_windows();
 #endif
     s32 damage;
