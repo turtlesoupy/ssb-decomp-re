@@ -26,6 +26,7 @@
 #include <reloc_data.h>
 
 #include "fighter_registry.h"
+#include "port_log.h"      /* port_now_ns */
 
 #include "staged_file.h"   /* roster files fetched on demand on the web */
 /* Per-character status descs (used as the ft_data row's special_descs). */
@@ -2737,8 +2738,7 @@ static void osb5_menu_unfreeze(GObj *fighter_gobj, s32 keep_seated)
 u64 gPortProfSkinNs = 0; u32 gPortProfSkinCalls = 0;
 static u64 osb5_prof_now_ns(void)
 {
-    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
+    return (u64)port_now_ns();
 }
 static void osb5_skin_update_inner(GObj *fighter_gobj);
 /* Set for the ftMainProcParams-time call: re-seat joints/accessories but
